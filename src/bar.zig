@@ -46,6 +46,8 @@ pub const Bar = struct {
     n_hits: usize = 0,
     hover_idx: ?usize = null,
     first: bool = true,
+    title_changed_ms: u64 = 0,
+    width_snap: bool = false,
 
     pub fn create(app: *App, out: *Output) !*Bar {
         const self = try app.alloc.create(Bar);
@@ -125,6 +127,20 @@ pub const Bar = struct {
     }
 
     pub fn titleChanged(self: *Bar) void {
+        // スピナーや進捗表示でタイトルが頻繁に変わるウィンドウ(ターミナル等)で、毎回
+        // クロスフェードを始めると延々とアニメーションが続き CPU を使い続ける。
+        // 直前の変化から 1 秒以内なら文字だけ差し替え、描画も 1 フレームで済ませる。
+        const now = @import("platform/loop.zig").nowMs();
+        const rapid = now - self.title_changed_ms < 1000;
+        self.title_changed_ms = now;
+        if (rapid) {
+            self.setCur(self.app.focused_title.get());
+            self.title_t.snap(1);
+            self.prev_title_len = 0;
+            self.width_snap = true; // 幅のスプリングも追従させず即座に合わせる
+            self.surf.schedule();
+            return;
+        }
         // 旧タイトルを退避してクロスフェード
         self.prev_title_len = self.cur_title_len;
         @memcpy(self.prev_title[0..self.prev_title_len], self.cur_title[0..self.cur_title_len]);
@@ -331,7 +347,8 @@ pub const Bar = struct {
         const tw_prev = @min(cv.measure(prev, fs, false), max_title);
         const t = self.title_t.x;
         const cw_target = if (title.len == 0) 0 else tw_cur + 32;
-        if (self.first) self.width_c.snap(cw_target) else self.width_c.set(cw_target);
+        if (self.first or self.width_snap) self.width_c.snap(cw_target) else self.width_c.set(cw_target);
+        self.width_snap = false;
         const cw_ = @max(self.width_c.x, @max(0, (tw_prev + 32) * (1 - t)));
         if (cw_ > 4 and max_title > 40) {
             const cx = W / 2 - cw_ / 2;

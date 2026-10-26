@@ -35,3 +35,8 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 1. `doas sh session/install-session.sh` で実際に導入し、SDDM から Safe Mode → 通常の順にログインして確認
 2. 私有メモリの増加を heaptrack で切り分け
 3. ランチャーの text-input-v3(日本語入力)
+
+## 2026-10-26(追記)実セッションへの適用
+- 既存の River 設定に組み込み: `~/.config/ame-shell/river.sh` を `~/.config/river/init` の末尾から読み込む。waybar / swaync / awww・swaybg の起動行は `# [ame] ` でコメントアウト(バックアップ `init.pre-ame-*`)。
+- 実画面で発見: ターミナルのタイトルがスピナーで頻繁に変わると、バーのタイトルのクロスフェードが毎回始まって 60fps で描き続けていた(CPU 4%)。1 秒以内の連続変化は文字だけ差し替えるよう修正 → 約 13fps(バッテリー時の壁紙 12fps 分)・CPU 1%。
+- 未解明: ビルド直後の `ame-ctl restart` で 1 度だけ ame-shell が正常終了扱いで消えた。再現せず(2 回目以降は exec で同じ pid のまま再起動)。
