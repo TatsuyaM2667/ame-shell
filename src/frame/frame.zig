@@ -269,6 +269,8 @@ pub const Frame = struct {
 
     pub fn toggleDashboard(self: *Frame) void {
         self.dash.toggle();
+        // 大きなドロワー同士(ダッシュボードとランチャー)は重ならないよう、片方を開いたらもう片方を閉じる
+        if (self.dash.open and self.app.launcher.is_open) self.app.launcher.close();
         self.afterOpenChange();
     }
     pub fn toggleSession(self: *Frame) void {
@@ -286,7 +288,10 @@ pub const Frame = struct {
         self.afterOpenChange();
     }
     pub fn launcherChanged(self: *Frame) void {
-        if (self.app.launcher.is_open) self.launch.show(true) else self.launch.hide();
+        if (self.app.launcher.is_open) {
+            self.launch.show(true);
+            self.dash.hide();
+        } else self.launch.hide();
         self.afterOpenChange();
     }
     pub fn showOsd(self: *Frame) void {
@@ -611,7 +616,7 @@ pub const Frame = struct {
         sh.hole = .{ BW_, T_, W - BW_ - T_, H - 2 * T_ };
         sh.hole_r = R_;
         const g = theme.glass(app);
-        sh.tint = Color.hex(app.cfg.tint);
+        sh.tint = theme.tint(app);
         sh.tint.a = app.cfg.frame_opacity;
         sh.rim = g.rim;
         sh.sheen = g.sheen;

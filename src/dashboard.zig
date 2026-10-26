@@ -213,8 +213,8 @@ pub const Dashboard = struct {
         st.has_art = @intFromBool(m.art_tex != 0);
         const acc = theme.accent(app);
         st.accent = rgb(acc);
-        st.text = app.cfg.text;
-        st.subtext = app.cfg.subtext;
+        st.text = rgb(theme.text(app));
+        st.subtext = rgb(theme.subtext(app));
         st.title_len = @intCast(m.title_len);
         @memcpy(st.title[0..m.title_len], m.title[0..m.title_len]);
         st.artist_len = @intCast(m.artist_len);

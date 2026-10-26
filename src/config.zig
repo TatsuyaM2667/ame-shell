@@ -30,6 +30,7 @@ pub const Config = struct {
     sparkle: f32 = 0.7,
     anim_speed: f32 = 1.0,
     media_accent: bool = true, // 再生中のアルバムアートの色をアクセントにする
+    auto_color: bool = true, // 壁紙から配色(アクセント・ガラス・文字色)を自動で作る
     // shell: caelestia = 枠 + 縦バー + 縁から生えるドロワー / classic = 浮いた横バー
     layout: Layout = .caelestia,
     frame_thickness: f32 = 10,
@@ -242,6 +243,8 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             if (num(val)) |n| cfg.refraction = std.math.clamp(n, 0, 40) else ok = false;
         } else if (eq(u8, key, "sparkle")) {
             if (num(val)) |n| cfg.sparkle = std.math.clamp(n, 0, 2) else ok = false;
+        } else if (eq(u8, key, "auto-color")) {
+            cfg.auto_color = boolean(val) orelse true;
         } else if (eq(u8, key, "media-accent")) {
             cfg.media_accent = boolean(val) orelse true;
         } else if (eq(u8, key, "anim-speed")) {

@@ -12,6 +12,7 @@ const anim = @import("anim.zig");
 const Color = anim.Color;
 const Spring = anim.Spring;
 const gfx = @import("gfx.zig");
+const theme = @import("theme.zig");
 const appmod = @import("app.zig");
 const App = appmod.App;
 const Output = appmod.Output;
@@ -149,7 +150,7 @@ pub const Wallpaper = struct {
         self.img = .{};
         self.prev_mode = self.mode;
         self.mode = mode;
-        if (mode == .image) self.loadImage(image_path);
+        if (mode == .image) self.loadImage(image_path) else theme.setWallScheme(self.app, null);
         self.trans.snap(0);
         self.trans.set(1);
         self.last_ms = 0;
@@ -177,6 +178,8 @@ pub const Wallpaper = struct {
         defer c.stbi_image_free(px);
         self.app.gpu.makeCurrent(self.surf.egl_surf);
         self.img = .{ .tex = gfx.uploadImage(px, w, h), .w = @floatFromInt(w), .h = @floatFromInt(h) };
+        // 壁紙の色から配色を作る(アクセント・ガラス・文字色が壁紙に合わせて滑らかに変わる)
+        theme.setWallScheme(self.app, theme.schemeFromPixels(px, w, h));
     }
 
     fn onTimer(ctx: *anyopaque, _: c_int, _: u32) void {
