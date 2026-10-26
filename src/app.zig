@@ -22,6 +22,7 @@ const Notifs = @import("notify.zig").Notifs;
 const Lock = @import("lock.zig").Lock;
 const Media = @import("media.zig").Media;
 const ipc = @import("ipc.zig");
+const SuperTap = @import("platform/supertap.zig").SuperTap;
 
 const log = std.log.scoped(.app);
 
@@ -165,6 +166,7 @@ pub const App = struct {
     lock: *Lock = undefined,
     media: *Media = undefined,
     ipc_server: ipc.Server = undefined,
+    supertap: SuperTap = undefined,
     initialized: bool = false,
     /// 描画中にサーフェスを消せないので、消したいものはループの最後にまとめて片付ける
     reap_pending: bool = false,
@@ -238,6 +240,8 @@ pub const App = struct {
         app.media = try Media.create(app);
         app.ipc_server = try ipc.Server.init(app);
         app.ipc_server.register();
+        app.supertap = .{ .loop = &app.loop, .ctx = app, .on_tap = onSuperTap, .enabled = app.cfg.super_launcher };
+        app.supertap.start();
 
         for (app.outputs.items) |o| app.setupOutput(o);
         app.initialized = true;
@@ -429,7 +433,16 @@ pub const App = struct {
             for (self.outputs.items) |o| if (o.wall) |w| w.configChanged(&old);
             self.redrawBars();
             self.armClock();
+            if (self.initialized) self.supertap.enabled = cfg.super_launcher;
         }
+    }
+
+    /// Super キー単体のタップ → ランチャーの開閉(ロック中は何もしない)
+    fn onSuperTap(ctx: *anyopaque) void {
+        const self: *App = @ptrCast(@alignCast(ctx));
+        if (self.lock.locked) return;
+        self.launcher.toggle();
+        _ = c.wl_display_flush(self.display);
     }
 
     fn resolveShareDir(self: *App) void {

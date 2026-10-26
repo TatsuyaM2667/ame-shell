@@ -22,6 +22,7 @@ pub usingnamespace @cImport({
     @cInclude("sys/stat.h");
     @cInclude("sys/resource.h");
     @cInclude("sys/statvfs.h");
+    @cInclude("sys/ioctl.h");
     @cInclude("locale.h");
     // Wayland
     @cInclude("wayland-client.h");
