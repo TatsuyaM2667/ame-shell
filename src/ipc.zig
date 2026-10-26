@@ -78,12 +78,20 @@ const help =
     \\  close-all
     \\  network | bluetooth     (Wi-Fi / Bluetooth の設定パネル)
     \\  wallpaper-picker        (全画面の壁紙ピッカー)
+    \\  workspace <1-9>        (ワークスペース切替)
+    \\  window close|fullscreen|float|focus-next|focus-prev|swap-next|swap-prev
     \\  lock
     \\  reload                 (設定の再読込)
     \\  widgets reload
     \\  stats                  (性能統計)
     \\  restart | quit
 ;
+
+/// ame-shell 内部(WM のキーバインド等)から ame-ctl のコマンドを実行する
+pub fn runCommand(app: *App, line: []const u8) void {
+    var buf: [512]u8 = undefined;
+    _ = handle(app, line, &buf);
+}
 
 fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
     var it = std.mem.tokenizeScalar(u8, line, ' ');
@@ -112,6 +120,18 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
     } else if (eq(u8, cmd, "network") or eq(u8, cmd, "bluetooth")) {
         const f = app.activeFrame() orelse return "error: caelestia レイアウトでのみ使えます";
         f.toggleNet(if (eq(u8, cmd, "network")) 0 else 1);
+    } else if (eq(u8, cmd, "workspace") or eq(u8, cmd, "window")) {
+        // workspace <1-9>(River 0.3/0.5 両方)/ window close|fullscreen|float|focus-next|focus-prev|swap-next|swap-prev
+        if (eq(u8, cmd, "workspace")) {
+            const n = std.fmt.parseInt(u5, arg, 10) catch return "error: workspace 1-9";
+            if (n < 1 or n > 9) return "error: workspace 1-9";
+            app.focusTags(@as(u32, 1) << (n - 1)); // River 0.5 は内蔵 WM、0.3 は river-control へ
+        } else {
+            const w = app.wm orelse return "error: window は River 0.5 セッション(内蔵ウィンドウマネージャ)でのみ使えます";
+            const WmAction = @import("wm/wm.zig").Action;
+            const a: WmAction = if (eq(u8, arg, "close")) .close else if (eq(u8, arg, "fullscreen")) .fullscreen else if (eq(u8, arg, "float")) .float else if (eq(u8, arg, "focus-next")) .focus_next else if (eq(u8, arg, "focus-prev")) .focus_prev else if (eq(u8, arg, "swap-next")) .swap_next else if (eq(u8, arg, "swap-prev")) .swap_prev else return "error: window close|fullscreen|float|focus-next|focus-prev|swap-next|swap-prev";
+            w.push(a);
+        }
     } else if (eq(u8, cmd, "close-all")) {
         if (app.activeFrame()) |f| f.closeAll();
         app.launcher.close();

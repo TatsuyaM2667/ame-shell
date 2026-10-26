@@ -24,6 +24,7 @@ const Media = @import("media.zig").Media;
 const WallPick = @import("wallpick.zig").WallPick;
 const ipc = @import("ipc.zig");
 const SuperTap = @import("platform/supertap.zig").SuperTap;
+const Wm = @import("wm/wm.zig").Wm;
 
 const log = std.log.scoped(.app);
 
@@ -110,6 +111,10 @@ pub const App = struct {
     lock_mgr: ?*c.struct_ext_session_lock_manager_v1 = null,
     cursor_mgr: ?*c.struct_wp_cursor_shape_manager_v1 = null,
     idle_mgr: ?*c.struct_zwp_idle_inhibit_manager_v1 = null,
+    /// River 0.5 以降: ame-shell 自身がウィンドウマネージャ(src/wm)
+    wm: ?*Wm = null,
+    wm_xkb: ?*c.struct_river_xkb_bindings_v1 = null,
+    wm_lsh: ?*c.struct_river_layer_shell_v1 = null,
     seat: ?*c.struct_wl_seat = null,
     seat_status: ?*c.struct_zriver_seat_status_v1 = null,
     pointer: ?*c.struct_wl_pointer = null,
@@ -630,6 +635,16 @@ pub const App = struct {
     // ---------------------------------------------------------------------
 
     pub fn riverCommand(self: *App, args: []const [:0]const u8) void {
+        if (self.wm) |w| {
+            // River 0.5: riverctl の代わりに内蔵 WM へ
+            const eq = std.mem.eql;
+            if (args.len >= 1 and eq(u8, args[0], "exit")) w.push(.exit);
+            if (args.len >= 2 and eq(u8, args[0], "toggle-focused-tags")) {
+                const m = std.fmt.parseInt(u32, args[1], 10) catch return;
+                w.push(.{ .toggle_tags = m });
+            }
+            return;
+        }
         const ctl = self.river_control orelse return;
         const seat = self.seat orelse return;
         for (args) |a| c.zriver_control_v1_add_argument(ctl, a.ptr);
@@ -638,6 +653,7 @@ pub const App = struct {
     }
 
     pub fn focusTags(self: *App, mask: u32) void {
+        if (self.wm) |w| return w.push(.{ .set_tags_on = .{ .out = null, .mask = mask } });
         var buf: [16]u8 = undefined;
         const s = std.fmt.bufPrintZ(&buf, "{d}", .{mask}) catch return;
         self.riverCommand(&.{ "set-focused-tags", s });
@@ -683,6 +699,19 @@ fn onGlobal(data: ?*anyopaque, reg: ?*c.struct_wl_registry, name: u32, interface
             _ = c.zriver_output_status_v1_add_listener(o.river, &river_output_listener, o);
         };
         if (app.seat != null and app.seat_status == null) bindSeatStatus(app);
+    } else if (iface(interface, &c.river_window_manager_v1_interface)) {
+        const mgr: *c.struct_river_window_manager_v1 = @ptrCast(bind(reg, name, &c.river_window_manager_v1_interface, ver, 6) orelse return);
+        app.wm = Wm.create(app, mgr) catch null;
+        if (app.wm) |w| {
+            if (app.wm_xkb) |x| w.setXkb(x);
+            if (app.wm_lsh) |l| w.setLayerShell(l);
+        }
+    } else if (iface(interface, &c.river_xkb_bindings_v1_interface)) {
+        app.wm_xkb = @ptrCast(bind(reg, name, &c.river_xkb_bindings_v1_interface, ver, 3));
+        if (app.wm) |w| w.setXkb(app.wm_xkb.?);
+    } else if (iface(interface, &c.river_layer_shell_v1_interface)) {
+        app.wm_lsh = @ptrCast(bind(reg, name, &c.river_layer_shell_v1_interface, ver, 1));
+        if (app.wm) |w| w.setLayerShell(app.wm_lsh.?);
     } else if (iface(interface, &c.zriver_control_v1_interface)) {
         app.river_control = @ptrCast(bind(reg, name, &c.zriver_control_v1_interface, ver, 1));
     } else if (iface(interface, &c.ext_session_lock_manager_v1_interface)) {
@@ -850,6 +879,20 @@ fn seatCaps(data: ?*anyopaque, seat: ?*c.struct_wl_seat, caps: u32) callconv(.C)
         app.keyboard = c.wl_seat_get_keyboard(seat);
         _ = c.wl_keyboard_add_listener(app.keyboard, &keyboard_listener, app);
     }
+    // キーボード・マウスが一度無くなってから再び現れた(抜き差し等)ときは作り直す。古いオブジェクトは何も届かない
+    if (caps & c.WL_SEAT_CAPABILITY_KEYBOARD == 0) if (app.keyboard) |k| {
+        c.wl_keyboard_release(k);
+        app.keyboard = null;
+        app.kb_surface = null;
+        app.repeat_timer.disarm();
+    };
+    if (caps & c.WL_SEAT_CAPABILITY_POINTER == 0) if (app.pointer) |p| {
+        if (app.cursor_dev) |d| c.wp_cursor_shape_device_v1_destroy(d);
+        app.cursor_dev = null;
+        c.wl_pointer_release(p);
+        app.pointer = null;
+        app.ptr_surface = null;
+    };
 }
 fn seatName(_: ?*anyopaque, _: ?*c.struct_wl_seat, _: [*c]const u8) callconv(.C) void {}
 const seat_listener = c.struct_wl_seat_listener{ .capabilities = seatCaps, .name = seatName };

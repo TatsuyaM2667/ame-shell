@@ -70,7 +70,7 @@ fi
 # ---------------------------------------------------------------------------
 # 事前確認
 # ---------------------------------------------------------------------------
-for f in "$OUT/bin/ame-shell" "$OUT/bin/ame-ctl" "$OUT/share/ame-shell/config.ame" "$HERE/ame-session" "$HERE/ame-river-init"; do
+for f in "$OUT/bin/ame-shell" "$OUT/bin/ame-ctl" "$OUT/share/ame-shell/config.ame" "$HERE/ame-session" "$HERE/ame-river-init" "$HERE/ame-river5-init"; do
     if [ ! -f "$f" ]; then
         echo "ERROR: $f がありません。先に 'zig build -Doptimize=ReleaseFast' を実行してください。" >&2
         exit 1
@@ -149,6 +149,7 @@ install_file "$OUT/bin/ame-shell" "$PREFIX/bin/ame-shell" 755
 install_file "$OUT/bin/ame-ctl" "$PREFIX/bin/ame-ctl" 755
 install_file "$HERE/ame-session" "$PREFIX/bin/ame-session" 755
 install_file "$HERE/ame-river-init" "$PREFIX/share/ame-shell/ame-river-init" 755
+install_file "$HERE/ame-river5-init" "$PREFIX/share/ame-shell/ame-river5-init" 755
 install_file "$OUT/share/ame-shell/config.ame" "$PREFIX/share/ame-shell/config.ame" 644
 for w in "$OUT"/share/ame-shell/widgets/*.wasm; do
     [ -f "$w" ] || continue
@@ -156,7 +157,7 @@ for w in "$OUT"/share/ame-shell/widgets/*.wasm; do
 done
 
 # .desktop: @PREFIX@ を実際のパスに置換(sed -i は使わない: BSD/GNU で書式が違うため)
-for d in ame-shell ame-shell-safe; do
+for d in ame-shell ame-shell-safe ame-shell-river5; do
     tmp=$(mktemp "${TMPDIR:-/tmp}/ame-desktop.XXXXXX") || exit 1
     sed "s|@PREFIX@|$PREFIX|g" "$HERE/$d.desktop" > "$tmp"
     install_file "$tmp" "$SESS_DIR/$d.desktop" 644
@@ -202,6 +203,7 @@ chk river "doas apk add river"
 chk sddm "doas apk add sddm"
 chk foot "doas apk add foot"
 chk rivertile "river に同梱"
+if [ -x "$(eval echo ~$U)/.local/opt/river-0.5/bin/river" ]; then say "  [ok] River 0.5 (~/.local/opt/river-0.5)"; else warn "River 0.5 が ~/.local/opt/river-0.5 にありません(「Ame Shell (River 0.5)」は River 0.3 で起動します)"; fi
 chk dbus-run-session "doas apk add dbus"
 chk wpctl "音量表示に必要: doas apk add wireplumber"
 chk playerctl "メディア表示に必要: doas apk add playerctl"

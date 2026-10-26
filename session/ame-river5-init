@@ -1,0 +1,58 @@
+#!/bin/sh
+# ame-river5-init: River 0.5 用の初期化スクリプト(POSIX sh)。
+# River 0.5 ではウィンドウの配置・キー操作・アニメーションを ame-shell(内蔵 WM)が担当する。
+# River 0.3 用の設定コマンドやレイアウト生成器は使わない(River 0.5 はその文字列を含む init を拒否する)。ユーザーの ~/.config/river/init は読まず、触りもしない。
+# 追加の自動起動は ~/.config/ame-shell/river5-extra.sh があれば読み込む。
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ame-shell"
+LOG="$STATE_DIR/session.log"
+log() { printf '%s [river5-init] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
+
+log "WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-?}"
+
+if [ "${AME_SESSION_NESTED:-0}" != "1" ]; then
+    # ---- D-Bus に Wayland の環境を伝える(ポータル・通知・fcitx5 用) ----
+    if command -v dbus-update-activation-environment >/dev/null 2>&1; then
+        dbus-update-activation-environment DBUS_SESSION_BUS_ADDRESS WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE >/dev/null 2>&1
+    fi
+
+    # ---- ポータル(画面共有・ファイル選択) ----
+    find_bin() {
+        for d in /usr/libexec /usr/lib/xdg-desktop-portal /usr/lib /usr/bin; do
+            [ -x "$d/$1" ] && { echo "$d/$1"; return 0; }
+        done
+        return 1
+    }
+    p=$(find_bin xdg-desktop-portal-wlr) && "$p" >/dev/null 2>&1 &
+    p=$(find_bin xdg-desktop-portal) && "$p" >/dev/null 2>&1 &
+
+    # ---- 日本語入力 ----
+    command -v fcitx5 >/dev/null 2>&1 && fcitx5 -d >/dev/null 2>&1
+
+    [ -f "$HOME/.config/ame-shell/river5-extra.sh" ] && . "$HOME/.config/ame-shell/river5-extra.sh"
+fi
+
+# ---- ame-shell(シェル + ウィンドウマネージャ)の監督 ----
+# River 0.5 は WM がいないと窓を表示できない。落ちたら再起動し(窓はそのまま残る)、
+# 30 秒以内に 3 回落ちたらセッションを終了して SDDM に戻す(操作不能な画面に閉じ込めないため)。
+crashes=""
+while :; do
+    start=$(date +%s)
+    ame-shell >> "$LOG" 2>&1
+    rc=$?
+    now=$(date +%s)
+    if [ "$rc" -eq 0 ]; then
+        log "ame-shell exited normally"
+        break
+    fi
+    log "ame-shell crashed rc=$rc after $((now - start))s"
+    kept=""
+    for t in $crashes; do [ $((now - t)) -lt 30 ] && kept="$kept $t"; done
+    crashes="$kept $now"
+    set -- $crashes
+    if [ "$#" -ge 3 ]; then
+        log "30 秒以内に 3 回落ちたためセッションを終了します"
+        exit 1
+    fi
+    sleep 1
+done

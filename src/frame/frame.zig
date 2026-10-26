@@ -892,6 +892,8 @@ pub fn predictWindowRect(f: *Frame) [4]f32 {
 }
 
 pub fn startLaunch(f: *Frame, from: [4]f32, icon: c.GLuint, name: []const u8) void {
+    // River 0.5 では WM 自身が本物のウィンドウを開くアニメーションをするので重ねない
+    if (f.app.wm != null) return;
     const fx = &f.launchfx;
     fx.active = true;
     fx.leaving = false;

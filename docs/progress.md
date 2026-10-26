@@ -65,3 +65,16 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - Wi-Fi / Bluetooth 設定パネル(バーのネット/Bluetooth アイコン、ame-ctl network|bluetooth): 一覧・接続・切断・パスワード入力・スキャン・電源。nmcli / bluetoothctl を非同期キューで実行。不具合修正: 画面より背の高いパネルで clamp の上下限が逆転して落ちていた。
 - アプリ起動: river の default-attach-mode below(Hyprland と同じく、フォーカス中の窓の次に入る)。起動演出: ランチャーのアイコンから、ウィンドウが現れる位置(rivertile の配置から推定)へガラス板が広がり、新しい窓にフォーカスが移ると拡大しながら消える。
 - 未対応: ウィンドウそのものの開閉・移動アニメーション。River 0.3 ではウィンドウを外から動かす手段が無い。River 0.4 以降(river-window-management-v1)なら、WM として毎フレーム位置とクリップを指定できるので実装可能(要: wlroots0.20-devel の導入、Zig 0.16、WM の自作)。
+
+## 2026-10-27(追記 3)River 0.5 と内蔵ウィンドウマネージャ
+- River 0.5.0(+xwayland)を Zig 0.16 で `~/.local/opt/river-0.5` にビルド(依存: wlroots0.20-devel)。既存の River 0.3 環境はそのまま。
+- `src/wm/`: ame-shell が river-window-management-v1 の WM を兼ねる(同じプロセス・同じイベントループ)。
+  - 配置: Hyprland の dwindle(残りの領域を長い辺で分割、最初の分割は比率 Super+H/L)。新しい窓はフォーカス中の窓の次。隙間 10 / 外側 14 / 枠線 3px(今の rivertile と River 設定と同じ)。枠線の色はテーマのアクセント(壁紙の配色の遷移に合わせて変わる)。
+  - アニメーション(スプリング): 開く=提案した大きさで描かれるまで隠し、中心から clip box を広げる / 位置の変化=滑らかに移動 / ワークスペース切替=横スライド / Super+Q=中心へ縮めてから close(閉じなかったら元に戻す)。動いている間だけ manage_dirty を毎フレーム送る(止まっていれば通信 0)。
+  - キー: 今の ~/.config/river/init と同じ割り当て(src/wm/binds.zig、92 個)。Super+ドラッグで移動・大きさ変更(浮かせる)、Super+中クリックで浮かせる。フォーカスはマウスに追従(窓の方がカーソルの下に来ただけでは移さない)、ワークスペースに戻ると最後に使っていた窓へ。
+  - 層シェル: river-layer-shell-v1 を使い、ランチャー等がキーボードを持っている間は窓へフォーカスを返さない。
+- セッション: `ame-session --river5` / `ame-river5-init` / `ame-shell-river5.desktop`(「Ame Shell (River 0.5)」)。キーボード配列は ~/.config/river/init の keyboard-layout を読んで XKB_DEFAULT_LAYOUT に渡す。ame-shell が 30 秒以内に 3 回落ちたらセッションを終えて SDDM に戻す(WM 無しでは操作できないため)。
+- 注意: River 0.5 は "riverctl" という文字列を含む init を起動拒否する(コメントでも)。
+- 試験: 仮想キーボード `tools/vkbd.zig` を追加。ヘッドレスの River 0.5 で ame-session --river5 を丸ごと起動し、キー操作(起動・ワークスペース・フォーカス・入れ替え・閉じる・終了)、ランチャーの入力、開く/切替/閉じるの途中フレームをスクリーンショットで確認。
+- 直した不具合: 枠線の色の変換で f32 の精度により整数変換が範囲外(f64 で計算)。キーボード/マウスの capability が一度消えて戻ると古い wl_keyboard を使い続けてキー入力が届かなかった(作り直す)。
+- `ame-ctl workspace <1-9>`(River 0.3 / 0.5 両方)、`ame-ctl window close|fullscreen|float|focus-next|…`(0.5 のみ)。

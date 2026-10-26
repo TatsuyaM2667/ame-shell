@@ -7,7 +7,7 @@
 - sudo/doas・/usr・/etc への書き込みはしない(導入は `session/install-session.sh` を人が root で実行)。`~/.config` の既存設定は読むだけ。実セッションの River(pid は `pgrep -x river` で最初のもの)や waybar/swaync に触れない。
 
 ## 環境
-Chimera Linux / musl / dinit / Ryzen 7 7735HS / Radeon 680M (radeonsi) / River 0.3.5 / Zig 0.13 / Odin dev-2026-08。詳細 `docs/decisions.md`。
+Chimera Linux / musl / dinit / Ryzen 7 7735HS / Radeon 680M (radeonsi) / River 0.3.5(+ River 0.5.0 を ~/.local/opt/river-0.5、Zig 0.16 でビルド)/ Zig 0.13 / Odin dev-2026-08。詳細 `docs/decisions.md`。
 
 ## 性能バジェット(docs/perf.md)
 待機 CPU < 0.5%(壁紙静止)/ < 2%(ライブ壁紙)、PSS < 80MB・私有 < 60MB、起動 → バー < 300ms、描画 < 16.6ms。
@@ -25,4 +25,4 @@ WAYLAND_DISPLAY=wayland-N grim shot.png; WAYLAND_DISPLAY=wayland-N zig-out/bin/a
 注意: `pkill -f` は自分のシェルのコマンドラインにも一致するので使わない(pid ファイルで管理)。
 
 ## セッション
-`session/`: ame-session / ame-river-init / *.desktop / install-session.sh。検証は `sh -n`、`--destdir` で疑似 root、`AME_SESSION_NESTED=1`。全部合格したときだけ `session/.ready`。
+`session/`: ame-session / ame-river-init / *.desktop / install-session.sh。River 0.5 用は `ame-session --river5` + `ame-river5-init`(ame-shell が WM を兼ねる、`src/wm/`)。River 0.5 は "riverctl" の文字列を含む init を拒否する。キー操作の試験は `zig build tools` の vkbd。検証は `sh -n`、`--destdir` で疑似 root、`AME_SESSION_NESTED=1`。全部合格したときだけ `session/.ready`。

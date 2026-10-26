@@ -3,12 +3,15 @@
 #
 #   ame-session          通常(River + ame-shell)
 #   ame-session --safe   セーフモード(River + foot + rivertile のみ)
+#   ame-session --river5 River 0.5(ame-shell がウィンドウマネージャを兼ねる。窓のアニメーション付き)
 #   AME_SESSION_NESTED=1 ame-session   既存の Wayland セッション内でネスト試験
 #
 # ログ: ${XDG_STATE_HOME:-$HOME/.local/state}/ame-shell/session.log
 
 SAFE=0
+RIVER5=0
 [ "${1:-}" = "--safe" ] && SAFE=1
+[ "${1:-}" = "--river5" ] && RIVER5=1
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ame-shell"
 mkdir -p "$STATE_DIR" 2>/dev/null
@@ -30,9 +33,11 @@ esac
 PREFIX_DIR=$(dirname "$SELF_DIR")
 INIT="$PREFIX_DIR/share/ame-shell/ame-river-init"
 [ -x "$INIT" ] || INIT="$SELF_DIR/ame-river-init"
+INIT5="$PREFIX_DIR/share/ame-shell/ame-river5-init"
+[ -x "$INIT5" ] || INIT5="$SELF_DIR/ame-river5-init"
 export PATH="$SELF_DIR:$PATH"
 
-log "=== start (safe=$SAFE nested=${AME_SESSION_NESTED:-0} pid=$$) ==="
+log "=== start (river5=$RIVER5 safe=$SAFE nested=${AME_SESSION_NESTED:-0} pid=$$) ==="
 
 # ---- 環境変数 ----
 export XDG_SESSION_TYPE=wayland
@@ -112,16 +117,46 @@ if [ "${AME_SESSION_NESTED:-0}" != "1" ] && command -v dbus-update-activation-en
     dbus-update-activation-environment XDG_SESSION_TYPE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS PATH >/dev/null 2>&1
 fi
 
-if ! command -v river >/dev/null 2>&1; then
+RIVER=river
+if [ "$RIVER5" = "1" ]; then
+    # River 0.5 の場所: $AME_RIVER5 → ~/.local/opt/river-0.5 → PATH の river(0.4 以降なら)
+    RIVER=""
+    for r in "${AME_RIVER5:-}" "$HOME/.local/opt/river-0.5/bin/river" "$PREFIX_DIR/opt/river-0.5/bin/river"; do
+        [ -n "$r" ] && [ -x "$r" ] && { RIVER="$r"; break; }
+    done
+    if [ -z "$RIVER" ] && command -v river >/dev/null 2>&1; then
+        case "$(river -version 2>&1)" in 0.[4-9]*|[1-9]*) RIVER=river ;; esac
+    fi
+    if [ -z "$RIVER" ] || [ ! -x "$INIT5" ]; then
+        log "ERROR: River 0.5 または ame-river5-init が見つかりません。通常の Ame Shell(River 0.3)で起動します"
+        RIVER5=0
+        RIVER=river
+    elif [ "$SAFE" = "1" ]; then
+        log "セーフモード指定のため River 0.3 のセーフモードで起動します"
+        RIVER5=0
+        RIVER=river
+    else
+        INIT="$INIT5"
+        # River 0.5 には riverctl keyboard-layout が無いので xkbcommon の環境変数で渡す。
+        # 未設定なら今の ~/.config/river/init の keyboard-layout を読んで合わせる(読むだけ)
+        if [ -z "${XKB_DEFAULT_LAYOUT:-}" ] && [ -f "$HOME/.config/river/init" ]; then
+            kl=$(awk '$1=="riverctl" && $2=="keyboard-layout" {print $NF}' "$HOME/.config/river/init" | tail -n 1 | tr -d '"'"'")
+            [ -n "$kl" ] && export XKB_DEFAULT_LAYOUT="$kl"
+        fi
+        log "keyboard layout: ${XKB_DEFAULT_LAYOUT:-(既定)}"
+    fi
+fi
+
+if ! command -v "$RIVER" >/dev/null 2>&1; then
     log "ERROR: river が見つかりません"
     exit 1
 fi
-log "river $(river -version 2>&1) / init=$INIT / safe=$SAFE"
+log "river $("$RIVER" -version 2>&1) ($RIVER) / init=$INIT / safe=$SAFE"
 
-# River 0.3 は -c <コマンド> で init を差し替えられる。~/.config/river/init は読まない。
+# River は -c <コマンド> で init を差し替えられる。~/.config/river/init は読まない。
 started=$(date +%s)
 # shellcheck disable=SC2086  # SEAT_WRAP は意図的に単語分割する
-$SEAT_WRAP river -c "$INIT" >> "$LOG" 2>&1
+$SEAT_WRAP "$RIVER" -c "$INIT" >> "$LOG" 2>&1
 rc=$?
 dur=$(( $(date +%s) - started ))
 log "river exited rc=$rc after ${dur}s"

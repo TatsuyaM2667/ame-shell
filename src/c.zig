@@ -34,6 +34,9 @@ pub usingnamespace @cImport({
     @cInclude("ext-session-lock-v1-client-protocol.h");
     @cInclude("cursor-shape-v1-client-protocol.h");
     @cInclude("idle-inhibit-unstable-v1-client-protocol.h");
+    @cInclude("river-window-management-v1-client-protocol.h");
+    @cInclude("river-xkb-bindings-v1-client-protocol.h");
+    @cInclude("river-layer-shell-v1-client-protocol.h");
     @cInclude("xkbcommon/xkbcommon.h");
     // GPU
     @cInclude("EGL/egl.h");

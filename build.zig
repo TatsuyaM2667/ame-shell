@@ -18,6 +18,10 @@ const protocols = [_][]const u8{
     "protocol/tablet-unstable-v2.xml",
     "protocol/idle-inhibit-unstable-v1.xml",
     "protocol/wlr-virtual-pointer-unstable-v1.xml",
+    "protocol/virtual-keyboard-unstable-v1.xml",
+    "protocol/river-window-management-v1.xml",
+    "protocol/river-xkb-bindings-v1.xml",
+    "protocol/river-layer-shell-v1.xml",
 };
 
 pub fn build(b: *std.Build) void {
@@ -103,7 +107,15 @@ pub fn build(b: *std.Build) void {
     vptr.addIncludePath(gen.getDirectory());
     for (proto_c.items) |c_file| vptr.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
     vptr.linkSystemLibrary("wayland-client");
-    b.step("tools", "試験用ツール").dependOn(&b.addInstallArtifact(vptr, .{}).step);
+    const vkbd = b.addExecutable(.{ .name = "vkbd", .root_source_file = b.path("tools/vkbd.zig"), .target = target, .optimize = optimize });
+    vkbd.linkLibC();
+    vkbd.addIncludePath(gen.getDirectory());
+    for (proto_c.items) |c_file| vkbd.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
+    vkbd.linkSystemLibrary("wayland-client");
+    vkbd.linkSystemLibrary("xkbcommon");
+    const tools = b.step("tools", "試験用ツール");
+    tools.dependOn(&b.addInstallArtifact(vptr, .{}).step);
+    tools.dependOn(&b.addInstallArtifact(vkbd, .{}).step);
 
     // --- 制御CLI(libc のみ。軽量に保つ) ---
     const ctl = b.addExecutable(.{

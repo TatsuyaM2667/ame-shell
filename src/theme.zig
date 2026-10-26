@@ -63,6 +63,7 @@ pub fn setWallScheme(app: *App, s: ?Scheme) void {
     scheme_to = s;
     scheme_t0 = loop.nowMs();
     app.redrawAll();
+    if (app.wm) |w| w.themeChanged();
 }
 
 /// アクセント色をアルバムアートの色で上書きする(null で上書きをやめる)
@@ -71,6 +72,7 @@ pub fn setAccent(app: *App, col: ?Color) void {
     media_fading_out = col == null;
     if (col) |cc| media_to = cc;
     media_t0 = loop.nowMs();
+    if (app.wm) |w| w.themeChanged();
 }
 
 pub fn accent(app: *App) Color {

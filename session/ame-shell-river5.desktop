@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Ame Shell (River 0.5)
+Name[ja]=Ame Shell(River 0.5・ウィンドウアニメーション)
+Comment=River 0.5 + ame-shell as window manager (dwindle tiling, window animations)
+Comment[ja]=ame-shell がウィンドウマネージャを兼ねる River 0.5 セッション(Hyprland 風の配置とアニメーション)
+Exec=@PREFIX@/bin/ame-session --river5
+TryExec=@PREFIX@/bin/ame-session
+DesktopNames=river
