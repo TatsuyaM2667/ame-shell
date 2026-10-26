@@ -510,6 +510,12 @@ pub const Launcher = struct {
                 else
                     std.fmt.bufPrintZ(&buf, "{s}", .{cmd}) catch return;
                 self.app.spawn(z);
+                // caelestia: 行のアイコンからウィンドウの場所へ広がる起動演出
+                if (self.app.activeFrame()) |f| {
+                    const row: f32 = @floatFromInt(i -| self.scroll);
+                    const from = [4]f32{ f.launch.ox + 16, f.launch.oy + 12 + row * ROW_H + (ROW_H - 38) / 2, 38, 38 };
+                    @import("frame/frame.zig").startLaunch(f, from, e.icon_tex, e.display());
+                }
                 e.uses += 1;
                 e.last_used = std.time.timestamp();
                 self.saveHistory();

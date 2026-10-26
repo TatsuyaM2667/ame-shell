@@ -43,6 +43,9 @@ pub const Output = struct {
     river: ?*c.struct_zriver_output_status_v1 = null,
     focused_tags: u32 = 1,
     view_tags: u32 = 0,
+    /// 各ビュー(ウィンドウ)のタグ(river-status の view_tags をそのまま)。今のタグの窓の数を数えるため
+    view_list: [64]u32 = undefined,
+    n_views: usize = 0,
     urgent_tags: u32 = 0,
     layout: cfgmod.Str = .{},
     backdrop: gfx.Backdrop = .{},
@@ -771,7 +774,11 @@ fn rViewTags(data: ?*anyopaque, _: ?*c.struct_zriver_output_status_v1, arr: [*c]
     var mask: u32 = 0;
     const n = arr.*.size / 4;
     const items: [*]const u32 = @ptrCast(@alignCast(arr.*.data));
-    for (0..n) |i| mask |= items[i];
+    o.n_views = @min(n, o.view_list.len);
+    for (0..n) |i| {
+        mask |= items[i];
+        if (i < o.view_list.len) o.view_list[i] = items[i];
+    }
     o.view_tags = mask;
     if (o.bar) |b| b.tagsChanged();
     if (o.frame) |f| f.bar.tagsChanged(f);

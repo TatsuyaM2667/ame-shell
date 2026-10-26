@@ -76,6 +76,7 @@ const help =
     \\  notifications toggle|clear
     \\  session | sidebar | utilities   (caelestia: 各ドロワーの開閉)
     \\  close-all
+    \\  network | bluetooth     (Wi-Fi / Bluetooth の設定パネル)
     \\  wallpaper-picker        (全画面の壁紙ピッカー)
     \\  lock
     \\  reload                 (設定の再読込)
@@ -108,6 +109,9 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
         app.media.debugFake(rest);
     } else if (eq(u8, cmd, "wallpaper-picker")) {
         app.wallpick.toggle();
+    } else if (eq(u8, cmd, "network") or eq(u8, cmd, "bluetooth")) {
+        const f = app.activeFrame() orelse return "error: caelestia レイアウトでのみ使えます";
+        f.toggleNet(if (eq(u8, cmd, "network")) 0 else 1);
     } else if (eq(u8, cmd, "close-all")) {
         if (app.activeFrame()) |f| f.closeAll();
         app.launcher.close();

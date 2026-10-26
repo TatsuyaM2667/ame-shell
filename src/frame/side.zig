@@ -14,7 +14,7 @@ const data = @import("data.zig");
 const vbar = @import("vbar.zig");
 const Frame = @import("frame.zig").Frame;
 
-pub const Which = enum { dashboard, launcher, notifs, utilities, sidebar, session, osd, popout };
+pub const Which = enum { dashboard, launcher, notifs, utilities, sidebar, session, osd, popout, net };
 
 pub const SessionAction = enum { lock, logout, sleep, reboot, poweroff };
 
@@ -349,7 +349,6 @@ fn osdSet(f: *Frame, i: i32, ly: f32) void {
 // ---------------------------------------------------------------------------
 
 pub fn draw(f: *Frame, which: Which, cv: *gfx.Canvas, w: f32, h: f32, dt: f32) bool {
-    _ = dt;
     return switch (which) {
         .notifs => drawNotifs(f, cv, w),
         .utilities => drawUtil(f, cv, w),
@@ -357,6 +356,7 @@ pub fn draw(f: *Frame, which: Which, cv: *gfx.Canvas, w: f32, h: f32, dt: f32) b
         .session => drawSession(f, cv, w),
         .osd => drawOsd(f, cv, w, h),
         .popout => vbar.drawPopout(f, cv, w, h),
+        .net => @import("netpanel.zig").draw(f, cv, w, h, dt),
         else => false,
     };
 }
@@ -416,7 +416,9 @@ pub fn pointer(f: *Frame, which: Which, ev: surface.PointerEvent, lx: f32, ly: f
             },
             .popout => switch (f.pop_kind) {
                 .clock => f.toggleDashboard(),
-                .network, .battery, .bluetooth => f.toggleUtilities(),
+                .network => f.toggleNet(0),
+                .bluetooth => f.toggleNet(1),
+                .battery => f.toggleUtilities(),
                 .volume => {
                     sys.toggleMute();
                     app.sys.volume = sys.volume();

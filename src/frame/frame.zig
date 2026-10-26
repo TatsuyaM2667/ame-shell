@@ -29,6 +29,7 @@ const data = @import("data.zig");
 const vbar = @import("vbar.zig");
 const dash = @import("dash.zig");
 const side = @import("side.zig");
+const netpanel = @import("netpanel.zig");
 
 /// 1 つのドロワーの状態。t は開き具合(0..1、少し行き過ぎてから戻る)、w/h は中身の大きさ。
 pub const Drawer = struct {
@@ -100,6 +101,9 @@ pub const Frame = struct {
     util: Drawer = .{},
     notif: Drawer = .{},
     pop: Drawer = .{},
+    /// Wi-Fi / Bluetooth の設定(バーの横から生える)
+    net: Drawer = .{},
+    netv: netpanel.State = .{},
 
     bar: vbar.Bar = .{},
     dashv: dash.View = .{},
@@ -123,6 +127,7 @@ pub const Frame = struct {
     cava: data.Cava,
     inhibitor: ?*c.struct_zwp_idle_inhibitor_v1 = null,
     hw: data.HwInfo = .{},
+    launchfx: LaunchFx = .{},
     util_queried: bool = false,
 
     pub fn create(app: *App, out: *Output) !*Frame {
@@ -283,6 +288,23 @@ pub const Frame = struct {
         self.app.notifs.unread = 0;
         self.afterOpenChange();
     }
+    /// ネットワーク設定を開く(tab: 0=Wi-Fi 1=Bluetooth)。同じタブで開いていれば閉じる
+    pub fn toggleNet(self: *Frame, tab: u8) void {
+        if (self.net.open and self.netv.tab == tab) {
+            self.net.hide();
+        } else {
+            self.netv.tab = tab;
+            self.net.show(true);
+            self.pop.hide();
+            netpanel.onOpen(self);
+        }
+        self.afterOpenChange();
+    }
+
+    pub fn updateKeyboardPub(self: *Frame) void {
+        self.updateKeyboard();
+    }
+
     pub fn toggleUtilities(self: *Frame) void {
         self.util.toggle();
         self.afterOpenChange();
@@ -318,7 +340,7 @@ pub const Frame = struct {
 
     /// ランチャーとセッションはキーボードを奪う(Esc や入力のため)。それ以外は奪わない。
     fn updateKeyboard(self: *Frame) void {
-        const want: u32 = if (self.launch.open or (self.session.open and self.session.by_key))
+        const want: u32 = if (self.launch.open or self.net.open or (self.session.open and self.session.by_key))
             c.ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE
         else
             c.ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
@@ -365,7 +387,7 @@ pub const Frame = struct {
     }
 
     pub fn closeAll(self: *Frame) void {
-        inline for (.{ &self.dash, &self.osd, &self.session, &self.side, &self.util, &self.pop }) |d| d.hide();
+        inline for (.{ &self.dash, &self.osd, &self.session, &self.side, &self.util, &self.pop, &self.net }) |d| d.hide();
         self.app.launcher.close();
         self.pop_kind = .none;
         self.afterOpenChange();
@@ -539,6 +561,7 @@ pub const Frame = struct {
             .{ .d = &self.side, .which = .sidebar },
             .{ .d = &self.util, .which = .utilities },
             .{ .d = &self.pop, .which = .popout },
+            .{ .d = &self.net, .which = .net },
         };
         for (list) |it| {
             if (!it.d.contains(x, y, 0)) continue;
@@ -547,6 +570,7 @@ pub const Frame = struct {
             return switch (it.which) {
                 .dashboard => dash.pointer(self, ev, lx, ly),
                 .launcher => self.app.launcher.panelPointer(ev, lx, ly, it.d.w.x, it.d.h.x),
+                .net => netpanel.pointer(self, ev, lx, ly),
                 else => side.pointer(self, it.which, ev, lx, ly),
             };
         }
@@ -557,6 +581,10 @@ pub const Frame = struct {
         const self: *Frame = @ptrCast(@alignCast(ctx));
         if (self.launch.open) {
             self.app.launcher.frameKey(s, ev);
+            return;
+        }
+        if (self.net.open and netpanel.key(self, ev)) {
+            s.schedule();
             return;
         }
         if (ev.sym == c.XKB_KEY_Escape) self.closeAll();
@@ -599,6 +627,8 @@ pub const Frame = struct {
         self.notif.setSize(notif_w, @max(nh, 1));
         self.util.setSize(360, 206);
         self.side.setSize(400, self.side.h.x);
+        const nsz = netpanel.size(self);
+        self.net.setSize(nsz[0], nsz[1]);
         const psz = vbar.popSize(self, self.pop_kind);
         self.pop.setSize(psz[0], psz[1]);
         if (!self.pop.open and self.pop.t.x < 0.01 and self.pop_kind != .none) {
@@ -606,7 +636,7 @@ pub const Frame = struct {
             self.updateTick();
         }
 
-        inline for (.{ &self.dash, &self.launch, &self.osd, &self.session, &self.side, &self.util, &self.notif, &self.pop }) |d| {
+        inline for (.{ &self.dash, &self.launch, &self.osd, &self.session, &self.side, &self.util, &self.notif, &self.pop, &self.net }) |d| {
             if (d.step(dt)) animating = true;
         }
         if (self.pop_cy.step(dt)) animating = true;
@@ -724,7 +754,19 @@ pub const Frame = struct {
             const d = &self.pop;
             const h = d.h.x;
             const vw = d.w.x * @max(d.t.x, 0);
-            const cy = std.math.clamp(self.pop_cy.x, T_ + h / 2 + 4, H - T_ - h / 2 - 4);
+            const cy = safeClamp(self.pop_cy.x, T_ + h / 2 + 4, H - T_ - h / 2 - 4);
+            d.vis = .{ BW_, cy - h / 2, vw, h };
+            d.ox = BW_ + vw - d.w.x;
+            d.oy = cy - h / 2;
+            sh.add(-R_, cy - h / 2, BW_ + R_ + vw, h, R_, kf(K_, vw));
+        }
+
+        // ネットワーク設定(左、縦中央)
+        {
+            const d = &self.net;
+            const h = d.h.x;
+            const vw = d.w.x * @max(d.t.x, 0);
+            const cy = safeClamp(H / 2, T_ + h / 2 + 8, H - T_ - h / 2 - 8);
             d.vis = .{ BW_, cy - h / 2, vw, h };
             d.ox = BW_ + vw - d.w.x;
             d.oy = cy - h / 2;
@@ -764,6 +806,7 @@ pub const Frame = struct {
             .{ .d = &self.session, .which = .session },
             .{ .d = &self.osd, .which = .osd },
             .{ .d = &self.pop, .which = .popout },
+            .{ .d = &self.net, .which = .net },
         };
         for (panels) |p| {
             if (!p.d.visible() or p.d.vis[2] < 1 or p.d.vis[3] < 1) continue;
@@ -774,6 +817,8 @@ pub const Frame = struct {
             cv.restore();
             cv.setClip(0, 0, 0, 0);
         }
+        // アプリ起動の演出(ウィンドウの上に重ねる)
+        if (drawLaunch(self, cv, dt)) animating = true;
         // 通知カードのスプリングは通知ドロワーが閉じていても進める(片付けのため)
         if (side.stepNotifs(self, dt)) animating = true;
 
@@ -789,7 +834,7 @@ pub const Frame = struct {
         n += 1;
         rects[n] = .{ 0, H - T_, W, T_ };
         n += 1;
-        inline for (.{ &self.dash, &self.launch, &self.notif, &self.util, &self.side, &self.session, &self.osd, &self.pop }) |d| {
+        inline for (.{ &self.dash, &self.launch, &self.notif, &self.util, &self.side, &self.session, &self.osd, &self.pop, &self.net }) |d| {
             if (d.visible() and n < rects.len) {
                 rects[n] = d.vis;
                 n += 1;
@@ -802,3 +847,129 @@ pub const Frame = struct {
         return animating;
     }
 };
+
+// ---------------------------------------------------------------------------
+// アプリ起動の演出(Hyprland の popin の雰囲気を River 0.3 で再現)
+//
+// River 0.3 ではウィンドウそのものを動かせないので、枠のサーフェス上に「ウィンドウの代わりの
+// ガラス板」を描く: ランチャーのアイコンの位置から、ウィンドウが現れるはずの場所へスプリングで
+// 伸びて広がり、River の状態でフォーカスが新しいウィンドウに移ったら、少し拡大しながら消えて
+// 本物のウィンドウを見せる。出現位置は rivertile(main 左・attach below)の配置から推定する。
+// ---------------------------------------------------------------------------
+
+pub const LaunchFx = struct {
+    active: bool = false,
+    from: [4]f32 = .{ 0, 0, 0, 0 },
+    to: [4]f32 = .{ 0, 0, 0, 0 },
+    grow: Spring = Spring.init(0, 0.42, 0.74),
+    fade: Spring = Spring.init(0, 0.22, 1.0),
+    icon: c.GLuint = 0,
+    name: [96]u8 = undefined,
+    name_len: usize = 0,
+    serial: u32 = 0,
+    t0: u64 = 0,
+    leaving: bool = false,
+};
+
+/// 今のタグに新しいウィンドウが来たときの位置を推定(仮想座標)
+pub fn predictWindowRect(f: *Frame) [4]f32 {
+    const T_ = f.T();
+    const pad: f32 = 14; // rivertile の outer-padding 程度
+    const x0 = f.BW() + pad;
+    const y0 = T_ + pad;
+    const w = f.W - f.BW() - T_ - pad * 2;
+    const h = f.H - T_ * 2 - pad * 2;
+    var n: usize = 0;
+    for (f.out.view_list[0..f.out.n_views]) |tags| {
+        if (tags & f.out.focused_tags != 0) n += 1;
+    }
+    if (n == 0) return .{ x0, y0, w, h };
+    // 既存の窓がある: 右側のスタック列の一番下に入る(main 比 0.5)
+    const sx = x0 + w * 0.5 + 5;
+    const sw = w * 0.5 - 5;
+    const sh = h / @as(f32, @floatFromInt(n));
+    return .{ sx, y0 + h - sh, sw, sh };
+}
+
+pub fn startLaunch(f: *Frame, from: [4]f32, icon: c.GLuint, name: []const u8) void {
+    const fx = &f.launchfx;
+    fx.active = true;
+    fx.leaving = false;
+    fx.from = from;
+    fx.to = predictWindowRect(f);
+    fx.grow.snap(0);
+    fx.grow.set(1);
+    fx.fade.snap(1);
+    fx.icon = icon;
+    fx.name_len = @min(name.len, fx.name.len);
+    @memcpy(fx.name[0..fx.name_len], name[0..fx.name_len]);
+    fx.serial = f.app.title_serial;
+    fx.t0 = loop.nowMs();
+    f.schedule();
+}
+
+/// 描画(仮想座標)。動いている間 true
+pub fn drawLaunch(f: *Frame, cv: *gfx.Canvas, dt: f32) bool {
+    const fx = &f.launchfx;
+    if (!fx.active) return false;
+    const app = f.app;
+    // 新しいウィンドウにフォーカスが移った(タイトルが変わった)か、時間切れなら消える
+    if (!fx.leaving and fx.grow.x > 0.6 and (app.title_serial != fx.serial or loop.nowMs() - fx.t0 > 2500)) {
+        fx.leaving = true;
+        fx.fade.set(0);
+    }
+    const a = fx.grow.step(dt);
+    const b = fx.fade.step(dt);
+    if (fx.leaving and fx.fade.x < 0.01 and !fx.fade.moving()) {
+        fx.active = false;
+        return false;
+    }
+    const g = fx.grow.x;
+    const lerp = struct {
+        fn l(p: f32, q: f32, t: f32) f32 {
+            return p + (q - p) * t;
+        }
+    }.l;
+    var r = [4]f32{ lerp(fx.from[0], fx.to[0], g), lerp(fx.from[1], fx.to[1], g), lerp(fx.from[2], fx.to[2], g), lerp(fx.from[3], fx.to[3], g) };
+    // 消えるときは少し大きくなりながら(popin の逆)
+    if (fx.leaving) {
+        const k = (1 - fx.fade.x) * 0.04;
+        r = .{ r[0] - r[2] * k / 2, r[1] - r[3] * k / 2, r[2] * (1 + k), r[3] * (1 + k) };
+    }
+    const acc = theme.accent(app);
+    const rad = lerp(12, 14, g);
+    cv.save();
+    cv.opacity(fx.fade.x);
+    cv.shadow(r[0], r[1] + 10, r[2], r[3], rad, 30, theme.shadow().alpha(1.2));
+    cv.glass(r[0], r[1], r[2], r[3], rad, theme.glassStrong(app));
+    cv.rectBorder(r[0], r[1], r[2], r[3], rad, .{ .a = 0 }, acc.lighten(0.3).alpha(0.7), 1.5);
+    // 中央のアイコンとアプリ名、読み込み中のくるくる
+    const cx = r[0] + r[2] / 2;
+    const cy = r[1] + r[3] / 2;
+    const isz = lerp(r[3] * 0.8, 72, g);
+    if (fx.icon != 0) cv.image(fx.icon, cx - isz / 2, cy - isz / 2 - 18 * g, isz, isz, isz * 0.22);
+    if (g > 0.5) {
+        cv.save();
+        cv.opacity((g - 0.5) * 2);
+        _ = cv.text(cx, cy + 50, 16, theme.text(app), fx.name[0..fx.name_len], .{ .bold = true, .alignment = .center, .max_w = r[2] - 40 });
+        // 読み込み中: 3 つの点が順に脈打つ
+        const ph = @as(f32, @floatFromInt((loop.nowMs() - fx.t0) % 900)) / 900;
+        for (0..3) |i| {
+            const fi: f32 = @floatFromInt(i);
+            const p = @max(0, @sin((ph - fi * 0.18) * std.math.tau));
+            const rr = 3 + 2 * p;
+            cv.rect(cx - 16 + fi * 16 - rr, cy + 80 - rr, rr * 2, rr * 2, rr, acc.alpha(0.4 + 0.6 * p));
+        }
+        cv.restore();
+    }
+    cv.restore();
+    _ = a;
+    _ = b;
+    return true;
+}
+
+/// 上下限が逆転していても落ちない clamp(画面より大きいものは中央に置く)
+fn safeClamp(v: f32, lo: f32, hi: f32) f32 {
+    if (lo > hi) return (lo + hi) / 2;
+    return std.math.clamp(v, lo, hi);
+}

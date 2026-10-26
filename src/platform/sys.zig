@@ -302,3 +302,26 @@ pub fn spawnReader(argv: []const ?[*:0]const u8, out_pid: *c_int) ?c_int {
     out_pid.* = pid;
     return fds[0];
 }
+
+/// spawnReader と同じだが、標準エラーも同じ pipe に流す(nmcli 等のエラーメッセージを表示するため)
+pub fn spawnReaderAll(argv: []const ?[*:0]const u8, out_pid: *c_int) ?c_int {
+    var fds: [2]c_int = undefined;
+    if (c.pipe2(&fds, c.O_CLOEXEC) != 0) return null;
+    var args: [24:null]?[*:0]const u8 = .{null} ** 24;
+    for (argv, 0..) |a, i| args[i] = a;
+    const pid = c.fork();
+    if (pid < 0) return null;
+    if (pid == 0) {
+        _ = c.dup2(fds[1], 1);
+        _ = c.dup2(fds[1], 2);
+        // 対話的な確認を求めるコマンドが止まらないように標準入力は空に
+        const devnull = c.open("/dev/null", c.O_RDONLY);
+        if (devnull >= 0) _ = c.dup2(devnull, 0);
+        _ = c.execvp(args[0].?, @ptrCast(&args));
+        c._exit(127);
+    }
+    _ = c.close(fds[1]);
+    _ = c.fcntl(fds[0], c.F_SETFL, c.O_NONBLOCK);
+    out_pid.* = pid;
+    return fds[0];
+}

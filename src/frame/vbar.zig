@@ -286,7 +286,9 @@ pub const Bar = struct {
                         app.sys.volume = sys.volume();
                         f.showOsd();
                     },
-                    .network, .battery, .bluetooth => f.toggleUtilities(),
+                    .network => f.toggleNet(0),
+                    .bluetooth => f.toggleNet(1),
+                    .battery => f.toggleUtilities(),
                     .power => f.toggleSession(),
                     .window => {},
                 }
