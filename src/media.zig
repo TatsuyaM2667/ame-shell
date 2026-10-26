@@ -11,6 +11,7 @@ const theme = @import("theme.zig");
 const App = @import("app.zig").App;
 const sys = @import("platform/sys.zig");
 const loop = @import("platform/loop.zig");
+const Lyrics = @import("lyrics.zig").Lyrics;
 
 pub const Status = enum(u32) { none = 0, playing = 1, paused = 2 };
 
@@ -38,10 +39,22 @@ pub const Media = struct {
     curl_path: [512]u8 = undefined,
     curl_path_len: usize = 0,
     restart_timer: loop.Timer,
+    lyrics: *Lyrics = undefined,
+    shuffle: bool = false,
+    loop_mode: u8 = 0, // 0=なし 1=プレイリスト 2=1 曲
+    last_resync_ms: u64 = 0,
 
     pub fn create(app: *App) !*Media {
         const self = try app.alloc.create(Media);
         self.* = .{ .app = app, .restart_timer = try loop.Timer.init() };
+        self.lyrics = try Lyrics.create(app);
+        self.lyrics.ctx = app;
+        self.lyrics.on_change = struct {
+            fn f(ctx: *anyopaque) void {
+                const a: *App = @ptrCast(@alignCast(ctx));
+                a.dashboard.dataChanged();
+            }
+        }.f;
         try app.loop.add(self.restart_timer.fd, c.EPOLLIN, self, onRestart);
         self.start();
         return self;
@@ -119,6 +132,8 @@ pub const Media = struct {
             set(&self.art_url, &self.art_len, art);
             self.loadArt();
         }
+        // 曲が変わったら歌詞を取りに行く(同じ曲なら何もしない)
+        if (self.status != .none) self.lyrics.request(self.artist[0..self.artist_len], self.title[0..self.title_len], self.length_s);
         if (self.status == .none and prev_status != .none) {
             self.dropArt();
             if (self.app.cfg.media_accent) theme.setAccent(self.app, null);
@@ -220,6 +235,11 @@ pub const Media = struct {
         _ = self;
         sys.spawnDetached("playerctl previous");
     }
+    pub const resyncPosition = resync;
+    pub const debugFake = debugFakeImpl;
+    pub const queryModesPub = queryModes;
+    pub const toggleShufflePub = toggleShuffle;
+    pub const cycleLoopPub = cycleLoop;
 };
 
 /// 暗すぎ・彩度が低すぎる色は UI のアクセントに使いにくいので明るさを持ち上げる
@@ -231,4 +251,62 @@ fn usable(col: Color) Color {
         out = .{ .r = @min(col.r * k, 1), .g = @min(col.g * k, 1), .b = @min(col.b * k, 1), .a = 1 };
     }
     return Color.mix(out, Color.hex(0xffffff), 0.12);
+}
+
+// ---- 歌詞表示のための補助(Media のメソッドとして使う) ----
+
+/// playerctl --follow は再生位置の変化(シーク)を通知しないので、歌詞を表示している間だけ
+/// 3 秒おきに実際の位置を聞き直してずれを補正する。
+pub fn resync(self: *Media) void {
+    if (self.status != .playing) return;
+    if (loop.nowMs() -| self.last_resync_ms < 3000) return;
+    self.last_resync_ms = loop.nowMs();
+    var out: [64]u8 = undefined;
+    const s = sys.run(&.{ "playerctl", "position" }, &out) orelse return;
+    const p = std.fmt.parseFloat(f32, s) catch return;
+    self.pos_s = p;
+    self.pos_at_ms = loop.nowMs();
+}
+
+/// シャッフル・リピートの状態を問い合わせる(メディア画面を開いたとき)
+pub fn queryModes(self: *Media) void {
+    var out: [64]u8 = undefined;
+    if (sys.run(&.{ "playerctl", "shuffle" }, &out)) |s| self.shuffle = std.mem.eql(u8, s, "On");
+    if (sys.run(&.{ "playerctl", "loop" }, &out)) |s| self.loop_mode = if (std.mem.eql(u8, s, "Playlist")) 1 else if (std.mem.eql(u8, s, "Track")) 2 else 0;
+}
+
+pub fn toggleShuffle(self: *Media) void {
+    var out: [8]u8 = undefined;
+    _ = sys.run(&.{ "playerctl", "shuffle", "toggle" }, &out);
+    queryModes(self);
+}
+
+pub fn cycleLoop(self: *Media) void {
+    const next: [*:0]const u8 = switch (self.loop_mode) {
+        0 => "Playlist",
+        1 => "Track",
+        else => "None",
+    };
+    var out: [8]u8 = undefined;
+    _ = sys.run(&.{ "playerctl", "loop", next }, &out);
+    queryModes(self);
+}
+
+/// 試験用: 実際のプレイヤー無しで「再生中」の状態を作る(ipc の debug-media から。AME_DEBUG 時のみ)
+pub fn debugFakeImpl(self: *Media, spec: []const u8) void {
+    var it = std.mem.splitScalar(u8, spec, '|');
+    const artist = it.next() orelse return;
+    const title = it.next() orelse return;
+    const len = std.fmt.parseFloat(f32, it.next() orelse "0") catch 0;
+    const pos = std.fmt.parseFloat(f32, it.next() orelse "0") catch 0;
+    self.status = .playing;
+    Media.set(&self.artist, &self.artist_len, artist);
+    Media.set(&self.title, &self.title_len, title);
+    Media.set(&self.player, &self.player_len, "debug");
+    self.length_s = len;
+    self.pos_s = pos;
+    self.pos_at_ms = loop.nowMs();
+    self.last_resync_ms = loop.nowMs() + 3_600_000; // 本物の playerctl で上書きしない
+    self.lyrics.request(artist, title, len);
+    self.app.dashboard.dataChanged();
 }

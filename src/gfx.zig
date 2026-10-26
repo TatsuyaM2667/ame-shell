@@ -166,9 +166,14 @@ const ui_fs =
     \\  } else {                      // 画像(角丸マスク)
     \\    float d = sdBox(v_p, v_half, r);
     \\    float a = clamp(0.5 - d / px, 0.0, 1.0);
-    \\    vec2 uv = mix(v_p1.xy, v_p1.zw, v_l01);
-    \\    vec4 t = texture(u_img, uv);
-    \\    o = vec4(t.rgb, 1.0) * t.a * a * v_c0.a;
+    \\    vec2 l = v_l01;
+    \\    if (v_c1.r != 0.0) {           // 回転(レコード風に回るジャケット)
+    \\      float cs = cos(v_c1.r), sn = sin(v_c1.r);
+    \\      l = mat2(cs, -sn, sn, cs) * (l - 0.5) + 0.5;
+    \\    }
+    \\    vec2 uv = mix(v_p1.xy, v_p1.zw, l);
+    \\    vec4 t = texture(u_img, uv, v_p0.z);   // p0.z = LOD バイアス(大きいほどぼける。ミップマップ利用)
+    \\    o = vec4(t.rgb * v_c0.rgb, 1.0) * t.a * a * v_c0.a;
     \\  }
     \\}
 ;
@@ -1014,7 +1019,19 @@ pub const Canvas = struct {
         if (self.cur_img != 0 and self.cur_img != tex) self.flush();
         self.cur_img = tex;
         const white = Color{ .r = 1, .g = 1, .b = 1, .a = 1 };
-        self.push(x, y, w, h, white, white, white, .{ r, 5, 0, 0 }, .{ 0, 0, 1, 1 });
+        const norot = Color{ .r = 0, .g = 0, .b = 0, .a = 1 };
+        self.push(x, y, w, h, white, norot, white, .{ r, 5, 0, 0 }, .{ 0, 0, 1, 1 });
+    }
+
+    /// 画像の拡張版: uv(見せる範囲)、bias(ぼかし。ミップマップの段)、angle(回転、ラジアン)、
+    /// bright(明るさ)、alpha。アルバムアートを背景にぼかして敷く・レコードのように回すのに使う。
+    pub fn imageEx(self: *Canvas, tex: c.GLuint, x: f32, y: f32, w: f32, h: f32, r: f32, uv: [4]f32, bias: f32, angle: f32, bright: f32, alpha: f32) void {
+        if (tex == 0) return;
+        if (self.cur_img != 0 and self.cur_img != tex) self.flush();
+        self.cur_img = tex;
+        const c0 = Color{ .r = bright, .g = bright, .b = bright, .a = alpha };
+        const c1 = Color{ .r = angle, .g = 0, .b = 0, .a = 1 };
+        self.push(x, y, w, h, c0, c1, c0, .{ r, 5, bias, 0 }, uv);
     }
 
     pub fn textWrap(self: *Canvas, x: f32, y: f32, size: f32, col: Color, str: []const u8, max_w: f32, max_lines: usize, line_h: f32) void {

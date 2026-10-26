@@ -102,6 +102,10 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
     } else if (eq(u8, cmd, "session") or eq(u8, cmd, "sidebar") or eq(u8, cmd, "utilities")) {
         const f = app.activeFrame() orelse return "error: caelestia レイアウト(shell { layout caelestia })でのみ使えます";
         if (eq(u8, cmd, "session")) f.toggleSession() else if (eq(u8, cmd, "sidebar")) f.toggleSidebar() else f.toggleUtilities();
+    } else if (eq(u8, cmd, "debug-media")) {
+        // 試験用(AME_DEBUG が設定されているときだけ): 「アーティスト|曲名|長さ秒|位置秒」で再生中のふりをする
+        if (std.posix.getenv("AME_DEBUG") == null) return "error: AME_DEBUG が必要です";
+        app.media.debugFake(rest);
     } else if (eq(u8, cmd, "wallpaper-picker")) {
         app.wallpick.toggle();
     } else if (eq(u8, cmd, "close-all")) {

@@ -87,6 +87,8 @@ PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session
 | Super+A | ダッシュボード |
 | Super+Escape | セッション(ロック/ログアウト/スリープ/再起動/電源オフ。危険な操作は 2 回押し)|
 | Super+U | ユーティリティ |
+| Super(単独で押して離す)| ランチャー(evdev で判定。`shell { super-launcher off }` で無効)|
+| Super+Shift+W | 壁紙ピッカー(斜めのカード。決定するとカードの位置から円・斜めワイプ・短冊のいずれかで切り替え)|
 | Super+N | 通知センター |
 | Super+Q | ウィンドウを閉じる |
 | Super+L | ロック |

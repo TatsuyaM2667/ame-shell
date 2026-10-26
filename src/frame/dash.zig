@@ -25,7 +25,7 @@ const tabs = [_]struct { icon: []const u8, label: []const u8 }{
     .{ .icon = "\u{F0570}", .label = "ワークスペース" },
 };
 
-const Btn = enum(u8) { none, tab0, tab1, tab2, tab3, prev, play, next, big_prev, big_play, big_next, ws0 };
+const Btn = enum(u8) { none, tab0, tab1, tab2, tab3, prev, play, next, big_prev, big_play, big_next, ws0, shuffle, loop };
 
 pub const View = struct {
     tab: usize = 0,
@@ -37,6 +37,9 @@ pub const View = struct {
     hl: [16]Spring = [_]Spring{Spring.init(0, 0.2, 1.0)} ** 16,
     perf_v: [3]Spring = [_]Spring{Spring.init(0, 0.6, 0.9)} ** 3,
     res_v: [3]Spring = [_]Spring{Spring.init(0, 0.6, 0.9)} ** 3,
+    vinyl_angle: f32 = 0,
+    arm: Spring = Spring.init(0, 0.6, 0.85),
+    lyr_scroll: Spring = Spring.init(0, 0.45, 0.9),
     // カレンダー(WASM)の配置(入力の転送用)
     cal_rect: [4]f32 = .{ 0, 0, 0, 0 },
     btn_rects: [16][4]f32 = undefined,
@@ -47,7 +50,8 @@ pub const View = struct {
 pub fn size(f: *Frame) [2]f32 {
     return switch (f.dashv.tab) {
         0 => .{ 900, TAB_H + 100 + GAP + 250 + PAD },
-        1 => .{ 780, TAB_H + 300 + PAD },
+        // メディアは横に広いので、画面に収まる幅に抑える(中身は幅に合わせて配置する)
+        1 => .{ @min(1180, f.W - f.BW() - f.T() - 2 * f.R() - 30), TAB_H + 380 + PAD },
         2 => .{ 780, TAB_H + 296 + PAD },
         else => .{ 620, TAB_H + 3 * 64 + 2 * 8 + PAD * 2 },
     };
@@ -260,7 +264,11 @@ fn drawMediaSmall(f: *Frame, cv: *gfx.Canvas, x: f32, y: f32, w: f32, h: f32) bo
     }
     _ = cv.text(cx, y + 222, 15, txt, m.title[0..m.title_len], .{ .bold = true, .alignment = .center, .max_w = w - 30 });
     _ = cv.text(cx, y + 244, 12.5, sub, m.artist[0..m.artist_len], .{ .alignment = .center, .max_w = w - 30 });
-    _ = cv.text(cx, y + 262, 11, acc, m.player[0..m.player_len], .{ .alignment = .center, .max_w = w - 30 });
+    // 同期歌詞があれば、プレイヤー名の代わりに今の一節を出す
+    const cur = m.lyrics.current(m.position());
+    if (cur.idx) |li| {
+        _ = cv.text(cx, y + 264, 12, acc.lighten(0.3), m.lyrics.lines.items[li].text, .{ .alignment = .center, .max_w = w - 30, .glow = 3, .glow_color = acc.alpha(0.4) });
+    } else _ = cv.text(cx, y + 262, 11, acc, m.player[0..m.player_len], .{ .alignment = .center, .max_w = w - 30 });
     // 操作ボタン
     const icons = [3][]const u8{ "\u{F04AE}", if (m.status == .playing) "\u{F03E4}" else "\u{F040A}", "\u{F04AD}" };
     const kinds = [3]Btn{ .prev, .play, .next };
@@ -284,67 +292,179 @@ fn drawMediaSmall(f: *Frame, cv: *gfx.Canvas, x: f32, y: f32, w: f32, h: f32) bo
 // ---------------------------------------------------------------------------
 
 fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
-    _ = dt;
     const app = f.app;
     const v = &f.dashv;
     const m = app.media;
     const acc = theme.accent(app);
     const txt = theme.text(app);
     const sub = theme.subtext(app);
+    const H: f32 = 380;
+    var animating = false;
     var buf: [32]u8 = undefined;
     var buf2: [32]u8 = undefined;
-    const cx: f32 = 170;
-    const cy: f32 = 150;
-    const cs: f32 = 170;
-    // スペクトラム(48 本の線を円周上に)
-    const n = data.BARS;
-    for (0..n) |i| {
-        const a = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(n)) * std.math.tau - std.math.pi / 2.0;
-        const val = if (f.cava.running()) f.cava.values[i] else 0.04;
-        const r0 = cs / 2 + 12;
-        const r1 = r0 + 6 + val * 46;
-        const ca = @cos(a);
-        const sa = @sin(a);
-        const col = Color.mix(acc, acc.lighten(0.5), val);
-        cv.line(cx + ca * r0, cy + sa * r0, cx + ca * r1, cy + sa * r1, 4, col.alpha(0.55 + 0.45 * val));
-    }
+    const playing = m.status == .playing;
+
+    // ---- 背景: ジャケットを大きくぼかして敷き、下へ向かって暗く ----
     if (m.art_tex != 0) {
-        cv.image(m.art_tex, cx - cs / 2, cy - cs / 2, cs, cs, cs / 2);
+        const box_aspect = (w - 24) / H;
+        const span = 1 / box_aspect; // 正方形の画像を横長の枠に cover で
+        cv.imageEx(m.art_tex, 12, 4, w - 24, H, 18, .{ 0, 0.5 - span / 2, 1, 0.5 + span / 2 }, 6.5, 0, 0.55, 0.9);
+        cv.rectGrad(12, 4, w - 24, H, 18, Color.hex(0x05070f).alpha(0.25), Color.hex(0x05070f).alpha(0.75));
     } else {
-        cv.rectGrad(cx - cs / 2, cy - cs / 2, cs, cs, cs / 2, acc.lighten(0.3).alpha(0.6), acc.alpha(0.4));
-        _ = cv.text(cx, cy + 20, 56, Color.hex(0xffffff).alpha(0.8), "\u{F075A}", .{ .alignment = .center });
+        cv.rectGrad(12, 4, w - 24, H, 18, acc.alpha(0.12), Color.hex(0x05070f).alpha(0.5));
     }
-    const tx: f32 = 360;
-    const tw = w - tx - PAD * 2;
     if (m.status == .none) {
-        _ = cv.text(tx, cy, 18, sub, "再生中のメディアはありません", .{});
+        _ = cv.text(w / 2, H / 2 - 10, 54, sub.alpha(0.5), "\u{F075A}", .{ .alignment = .center });
+        _ = cv.text(w / 2, H / 2 + 40, 17, sub, "再生中のメディアはありません", .{ .alignment = .center });
         return false;
     }
-    _ = cv.text(tx, 64, 13, acc, m.player[0..m.player_len], .{ .bold = true, .max_w = tw });
-    _ = cv.text(tx, 100, 26, txt, m.title[0..m.title_len], .{ .bold = true, .max_w = tw });
-    _ = cv.text(tx, 130, 16, sub, m.artist[0..m.artist_len], .{ .max_w = tw });
-    const p = if (m.length_s > 0) std.math.clamp(m.position() / m.length_s, 0, 1) else 0;
-    cv.rect(tx, 168, tw, 6, 3, Color.hex(0xffffff).alpha(0.1));
-    cv.rectGrad(tx, 168, @max(tw * p, 6), 6, 3, acc.lighten(0.3), acc);
-    cv.rect(tx + tw * p - 7, 164, 14, 14, 7, Color.hex(0xffffff));
-    if (m.length_s > 0) _ = cv.text(tx, 198, 12, sub, mmss(&buf, m.position()), .{});
-    if (m.length_s > 0) _ = cv.text(tx + tw, 198, 12, sub, mmss(&buf2, m.length_s), .{ .alignment = .right });
-    const icons = [3][]const u8{ "\u{F04AE}", if (m.status == .playing) "\u{F03E4}" else "\u{F040A}", "\u{F04AD}" };
-    const kinds = [3]Btn{ .big_prev, .big_play, .big_next };
-    const bcx = tx + tw / 2;
-    for (0..3) |i| {
-        const bx = bcx + (@as(f32, @floatFromInt(i)) - 1) * 70;
-        const big = i == 1;
-        const rr: f32 = if (big) 28 else 21;
-        const by: f32 = 250;
+
+    // ---- 左: レコード ----
+    const cx: f32 = 200;
+    const cy: f32 = H / 2 + 4;
+    const R: f32 = 128;
+    if (playing) {
+        // 33⅓ 回転のつもりで 1 周約 6 秒
+        v.vinyl_angle += dt * std.math.tau / 6.0;
+        if (v.vinyl_angle > std.math.tau) v.vinyl_angle -= std.math.tau;
+        animating = true;
+    }
+    // スペクトラム(cava)をレコードの外周に放射状に
+    const n = data.BARS;
+    for (0..n) |i| {
+        const a = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(n)) * std.math.tau - std.math.pi / 2.0 + v.vinyl_angle * 0.15;
+        const val = if (f.cava.running()) f.cava.values[i] else 0.05;
+        const r0 = R + 10;
+        const r1 = r0 + 4 + val * 44;
+        const ca = @cos(a);
+        const sa = @sin(a);
+        cv.line(cx + ca * r0, cy + sa * r0, cx + ca * r1, cy + sa * r1, 4, Color.mix(acc, acc.lighten(0.6), val).alpha(0.5 + 0.5 * val));
+    }
+    cv.shadow(cx - R, cy - R + 10, R * 2, R * 2, R, 24, Color.hex(0x000000).alpha(0.6));
+    cv.rect(cx - R, cy - R, R * 2, R * 2, R, Color.hex(0x0b0b10));
+    // 溝(細い同心円)と、光の当たり具合
+    var gr: f32 = R - 6;
+    while (gr > 76) : (gr -= 7) cv.arc(cx, cy, gr, 1, 1, Color.hex(0xffffff).alpha(0.045), .{ .a = 0 });
+    cv.rectGrad(cx - R, cy - R, R * 2, R * 2, R, Color.hex(0xffffff).alpha(0.07), Color.hex(0xffffff).alpha(0.0));
+    // 中央のラベル = 回るジャケット
+    const lr: f32 = 70;
+    if (m.art_tex != 0) {
+        cv.imageEx(m.art_tex, cx - lr, cy - lr, lr * 2, lr * 2, lr, .{ 0, 0, 1, 1 }, 0, v.vinyl_angle, 1, 1);
+    } else cv.rectGrad(cx - lr, cy - lr, lr * 2, lr * 2, lr, acc.lighten(0.3), acc);
+    cv.rect(cx - 6, cy - 6, 12, 12, 6, Color.hex(0x0b0b10));
+    // トーンアーム: 再生中はレコードに乗り、止めると持ち上がって外へ
+    v.arm.set(if (playing) 1 else 0);
+    if (v.arm.step(dt)) animating = true;
+    {
+        const px = cx + R + 26;
+        const py = cy - R + 6;
+        const ang = std.math.pi * (0.62 + 0.13 * v.arm.x); // 外 → 盤面へ
+        const len: f32 = R * 1.25;
+        const ex = px + @cos(ang) * len;
+        const ey = py + @sin(ang) * len;
+        cv.line(px, py, ex, ey, 6, Color.hex(0xc8ccd6));
+        cv.line(ex, ey, ex - 10, ey + 14, 10, Color.hex(0x9aa0ad));
+        cv.rect(px - 13, py - 13, 26, 26, 13, Color.hex(0x2a2e38));
+        cv.rect(px - 6, py - 6, 12, 12, 6, Color.hex(0xc8ccd6));
+    }
+
+    // 右の歌詞欄の幅を先に決め、中央の曲情報はその残りに収める
+    const lw = std.math.clamp(w * 0.32, 240, 420);
+    const lx = w - 28 - lw;
+    // ---- 中央: 曲情報と操作 ----
+    const tx: f32 = 390;
+    const tw: f32 = @max(200, lx - 40 - tx);
+    cv.rect(tx, 40, cv.measure(m.player[0..m.player_len], 11.5, true) + 20, 22, 11, acc.alpha(0.25));
+    _ = cv.text(tx + 10, 56, 11.5, acc.lighten(0.3), m.player[0..m.player_len], .{ .bold = true });
+    cv.textWrap(tx, 100, 25, txt, m.title[0..m.title_len], tw, 2, 31);
+    _ = cv.text(tx, 166, 16, sub, m.artist[0..m.artist_len], .{ .max_w = tw });
+    if (m.length_s > 0) {
+        const p = std.math.clamp(m.position() / m.length_s, 0, 1);
+        cv.rect(tx, 200, tw, 6, 3, Color.hex(0xffffff).alpha(0.12));
+        cv.shadow(tx, 200, tw * p, 6, 3, 8, acc.alpha(0.5));
+        cv.rectGrad(tx, 200, @max(tw * p, 6), 6, 3, acc.lighten(0.3), acc);
+        cv.rect(tx + tw * p - 7, 196, 14, 14, 7, Color.hex(0xffffff));
+        _ = cv.text(tx, 230, 12, sub, mmss(&buf, m.position()), .{});
+        _ = cv.text(tx + tw, 230, 12, sub, mmss(&buf2, m.length_s), .{ .alignment = .right });
+    } else {
+        _ = cv.text(tx, 220, 12, sub, "ライブ / 長さ不明", .{});
+    }
+    const icons = [5][]const u8{ "\u{F049D}", "\u{F04AE}", if (playing) "\u{F03E4}" else "\u{F040A}", "\u{F04AD}", if (m.loop_mode == 2) "\u{F0458}" else "\u{F0456}" };
+    const kinds = [5]Btn{ .shuffle, .big_prev, .big_play, .big_next, .loop };
+    const on = [5]bool{ m.shuffle, false, false, false, m.loop_mode != 0 };
+    for (0..5) |i| {
+        const bx = tx + tw / 2 + (@as(f32, @floatFromInt(i)) - 2) * 62;
+        const big = i == 2;
+        const rr: f32 = if (big) 30 else if (i == 0 or i == 4) 17 else 22;
+        const by: f32 = 300;
         const hv = addBtn(v, kinds[i], bx - rr, by - rr + TAB_H, rr * 2, rr * 2);
         if (big) {
-            cv.shadow(bx - rr, by - rr, rr * 2, rr * 2, rr, 12, acc.alpha(0.5));
-            cv.rectGrad(bx - rr, by - rr, rr * 2, rr * 2, rr, acc.lighten(0.35 + 0.2 * hv), acc);
-        } else cv.rect(bx - rr, by - rr, rr * 2, rr * 2, rr, Color.hex(0xffffff).alpha(0.05 + 0.12 * hv));
-        _ = cv.text(bx, by + (if (big) @as(f32, 10) else 8), if (big) 28 else 21, if (big) Color.hex(0x08101e) else txt, icons[i], .{ .alignment = .center });
+            cv.shadow(bx - rr, by - rr + 4, rr * 2, rr * 2, rr, 16, acc.alpha(0.6));
+            cv.rectGrad(bx - rr, by - rr, rr * 2, rr * 2, rr, acc.lighten(0.4 + 0.2 * hv), acc);
+        } else {
+            cv.rect(bx - rr, by - rr, rr * 2, rr * 2, rr, (if (on[i]) acc else Color.hex(0xffffff)).alpha(if (on[i]) 0.35 else 0.06 + 0.12 * hv));
+        }
+        const fg = if (big) Color.hex(0x08101e) else if (on[i]) acc.lighten(0.4) else txt;
+        _ = cv.text(bx, by + rr * 0.36, rr * 0.95, fg, icons[i], .{ .alignment = .center });
     }
-    return false;
+
+    // ---- 右: 歌詞 ----
+    cv.rect(lx, 18, lw, H - 28, 16, Color.hex(0x000000).alpha(0.22));
+    const ly = &m.lyrics.*;
+    const pos = m.position();
+    const center_y: f32 = 18 + (H - 28) / 2;
+    cv.setClip(lx, 20, lw, H - 32);
+    switch (ly.state) {
+        .idle, .fetching => {
+            _ = cv.text(lx + lw / 2, center_y, 14, sub, "歌詞を検索中…", .{ .alignment = .center });
+        },
+        .none => {
+            _ = cv.text(lx + lw / 2, center_y - 6, 30, sub.alpha(0.5), "\u{F075A}", .{ .alignment = .center });
+            _ = cv.text(lx + lw / 2, center_y + 26, 13, sub, "歌詞が見つかりません", .{ .alignment = .center });
+        },
+        .plain => {
+            // 同期情報なし: 曲の進み具合に合わせてゆっくり送る
+            const frac = if (m.length_s > 0) std.math.clamp(pos / m.length_s, 0, 1) else 0;
+            const total = @as(f32, @floatFromInt(ly.lines.items.len)) * 28;
+            const off = frac * @max(0, total - (H - 80));
+            for (ly.lines.items, 0..) |l, i| {
+                const yy = 52 + @as(f32, @floatFromInt(i)) * 28 - off;
+                if (yy < 0 or yy > H) continue;
+                _ = cv.text(lx + 20, yy, 14, txt.alpha(0.8), l.text, .{ .max_w = lw - 40 });
+            }
+        },
+        .synced => {
+            const cur = ly.current(pos);
+            const target: f32 = if (cur.idx) |i| @floatFromInt(i) else -1;
+            if (v.lyr_scroll.target != target) v.lyr_scroll.set(target);
+            if (v.lyr_scroll.step(dt)) animating = true;
+            const LH: f32 = 40;
+            for (ly.lines.items, 0..) |l, i| {
+                const fi: f32 = @floatFromInt(i);
+                const yy = center_y + (fi - v.lyr_scroll.x) * LH;
+                if (yy < -LH or yy > H + LH) continue;
+                const dist = @abs(fi - v.lyr_scroll.x);
+                const is_cur = cur.idx != null and cur.idx.? == i;
+                const fsz: f32 = if (is_cur) 21 else 15.5 - @min(dist, 3) * 0.6;
+                const alpha = std.math.clamp(1 - dist * 0.3, 0.12, 1);
+                const text_ = if (l.text.len > 0) l.text else "♪";
+                if (is_cur) {
+                    // カラオケ風: 行の時間の進みに合わせて左から明るく塗る
+                    const tw2 = @min(cv.measure(text_, fsz, true), lw - 40);
+                    const x0 = lx + lw / 2 - tw2 / 2;
+                    _ = cv.text(lx + lw / 2, yy + 7, fsz, sub.alpha(0.55), text_, .{ .bold = true, .alignment = .center, .max_w = lw - 40 });
+                    cv.setClip(x0 - 4, yy - 30, tw2 * cur.frac + 4, 50);
+                    _ = cv.text(lx + lw / 2, yy + 7, fsz, Color.mix(txt, acc.lighten(0.5), 0.35), text_, .{ .bold = true, .alignment = .center, .max_w = lw - 40, .glow = 2.5, .glow_color = acc.lighten(0.3).alpha(0.5) });
+                    cv.setClip(lx, 20, lw, H - 32);
+                } else {
+                    _ = cv.text(lx + lw / 2, yy + 6, fsz, txt.alpha(alpha * 0.7), text_, .{ .alignment = .center, .max_w = lw - 40 });
+                }
+            }
+            if (playing) animating = true; // カラオケの塗りを滑らかに
+        },
+    }
+    cv.setClip(0, 0, 0, 0);
+    return animating;
 }
 
 // ---------------------------------------------------------------------------
@@ -513,11 +633,14 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
                     v.fade.snap(0);
                     v.fade.set(1);
                     if (t == 2) f.perf.sample();
+                    if (t == 1) app.media.queryModesPub();
                 }
             },
             .prev, .big_prev => app.media.prev(),
             .play, .big_play => app.media.toggle(),
             .next, .big_next => app.media.next(),
+            .shuffle => app.media.toggleShufflePub(),
+            .loop => app.media.cycleLoopPub(),
             else => {},
         }
         redraw = true;

@@ -327,6 +327,8 @@ pub const Frame = struct {
         self.tick_timer.ack();
         self.app.sampleCpu();
         if (self.dash.open) self.perf.sample();
+        // 歌詞を見ている間は再生位置のずれを補正する
+        if (self.dash.open and self.dashv.tab <= 1) self.app.media.resyncPosition();
         self.surf.schedule();
     }
 
