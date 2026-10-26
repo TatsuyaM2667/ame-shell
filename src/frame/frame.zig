@@ -122,6 +122,7 @@ pub const Frame = struct {
     weather: data.Weather,
     cava: data.Cava,
     inhibitor: ?*c.struct_zwp_idle_inhibitor_v1 = null,
+    hw: data.HwInfo = .{},
     util_queried: bool = false,
 
     pub fn create(app: *App, out: *Output) !*Frame {
@@ -158,6 +159,10 @@ pub const Frame = struct {
         });
         self.surf.output = out;
         self.makeExclusions();
+        // GPU 名は GL から(共有コンテキストを current にして読む)
+        _ = c.eglMakeCurrent(app.gpu.dpy, c.EGL_NO_SURFACE, c.EGL_NO_SURFACE, app.gpu.ctx);
+        const r = c.glGetString(c.GL_RENDERER);
+        self.hw.load(if (r != null) std.mem.sliceTo(r, 0) else "");
         self.bar.enter.snap(0);
         self.bar.enter.set(1);
         return self;

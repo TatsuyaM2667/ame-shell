@@ -296,3 +296,79 @@ pub fn setPowerProfile(p: Profile) void {
     var out: [64]u8 = undefined;
     _ = sys.run(&.{ "powerprofilesctl", "set", name }, &out);
 }
+
+// ---------------------------------------------------------------------------
+// ハードウェア名(起動時に 1 回だけ読む)
+// ---------------------------------------------------------------------------
+
+pub const HwInfo = struct {
+    cpu: [96]u8 = undefined,
+    cpu_len: usize = 0,
+    gpu: [96]u8 = undefined,
+    gpu_len: usize = 0,
+    model: [96]u8 = undefined,
+    model_len: usize = 0,
+    disk: [96]u8 = undefined,
+    disk_len: usize = 0,
+    cores: u32 = 0,
+
+    fn put(dst: []u8, len: *usize, s: []const u8) void {
+        const t = std.mem.trim(u8, s, " \t\n");
+        len.* = @min(t.len, dst.len);
+        @memcpy(dst[0..len.*], t[0..len.*]);
+    }
+
+    pub fn cpuName(self: *const HwInfo) []const u8 {
+        return self.cpu[0..self.cpu_len];
+    }
+    pub fn gpuName(self: *const HwInfo) []const u8 {
+        return self.gpu[0..self.gpu_len];
+    }
+    pub fn modelName(self: *const HwInfo) []const u8 {
+        return self.model[0..self.model_len];
+    }
+    pub fn diskName(self: *const HwInfo) []const u8 {
+        return self.disk[0..self.disk_len];
+    }
+
+    /// gl_renderer: glGetString(GL_RENDERER)("AMD Radeon 680M (radeonsi, …)" の括弧の前を GPU 名にする)
+    pub fn load(self: *HwInfo, gl_renderer: []const u8) void {
+        // CPU: /proc/cpuinfo の model name("… with Radeon Graphics" の飾りは除く)
+        var b: [8192]u8 = undefined;
+        if (sys.readFile("/proc/cpuinfo", &b)) |s| {
+            var lines = std.mem.splitScalar(u8, s, '\n');
+            while (lines.next()) |l| {
+                if (self.cpu_len == 0 and std.mem.startsWith(u8, l, "model name")) {
+                    const colon = std.mem.indexOfScalar(u8, l, ':') orelse continue;
+                    var v = std.mem.trim(u8, l[colon + 1 ..], " ");
+                    if (std.mem.indexOf(u8, v, " with ")) |i| v = v[0..i];
+                    if (std.mem.indexOf(u8, v, " w/ ")) |i| v = v[0..i];
+                    put(&self.cpu, &self.cpu_len, v);
+                }
+            }
+        }
+        // /proc/cpuinfo は全スレッド分あって大きいので、論理 CPU 数は OS に聞く
+        self.cores = @intCast(std.Thread.getCpuCount() catch 0);
+        var g = gl_renderer;
+        if (std.mem.indexOf(u8, g, " (")) |i| g = g[0..i];
+        put(&self.gpu, &self.gpu_len, g);
+        // 機種: DMI のメーカー + 型番(product_version に愛称、product_name に型式が入る機種が多い)
+        var vb: [96]u8 = undefined;
+        var pb: [96]u8 = undefined;
+        const vendor = sys.readFile("/sys/class/dmi/id/sys_vendor", &vb) orelse "";
+        var product = sys.readFile("/sys/class/dmi/id/product_version", &pb) orelse "";
+        if (product.len == 0 or std.mem.indexOf(u8, product, "Default") != null or std.mem.eql(u8, product, "None")) {
+            product = sys.readFile("/sys/class/dmi/id/product_name", &pb) orelse "";
+        }
+        var mb: [192]u8 = undefined;
+        put(&self.model, &self.model_len, std.fmt.bufPrint(&mb, "{s} {s}", .{ vendor, product }) catch product);
+        // ディスク: 最初の nvme / sd の型番
+        for ([_][:0]const u8{ "/sys/block/nvme0n1/device/model", "/sys/block/sda/device/model", "/sys/block/vda/device/model" }) |p| {
+            var db: [96]u8 = undefined;
+            if (sys.readFile(p, &db)) |s| {
+                put(&self.disk, &self.disk_len, s);
+                break;
+            }
+        }
+    }
+};

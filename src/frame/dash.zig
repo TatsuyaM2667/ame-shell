@@ -35,7 +35,7 @@ pub const View = struct {
     hover: Btn = .none,
     hover_ws: i32 = -1,
     hl: [16]Spring = [_]Spring{Spring.init(0, 0.2, 1.0)} ** 16,
-    perf_v: [3]Spring = [_]Spring{Spring.init(0, 0.6, 0.9)} ** 3,
+    perf_v: [4]Spring = [_]Spring{Spring.init(0, 0.6, 0.9)} ** 4,
     res_v: [3]Spring = [_]Spring{Spring.init(0, 0.6, 0.9)} ** 3,
     vinyl_angle: f32 = 0,
     arm: Spring = Spring.init(0, 0.6, 0.85),
@@ -52,7 +52,7 @@ pub fn size(f: *Frame) [2]f32 {
         0 => .{ 900, TAB_H + 100 + GAP + 250 + PAD },
         // メディアは横に広いので、画面に収まる幅に抑える(中身は幅に合わせて配置する)
         1 => .{ @min(1180, f.W - f.BW() - f.T() - 2 * f.R() - 30), TAB_H + 380 + PAD },
-        2 => .{ 780, TAB_H + 296 + PAD },
+        2 => .{ @min(1040, f.W - f.BW() - f.T() - 2 * f.R() - 30), TAB_H + 330 + PAD },
         else => .{ 620, TAB_H + 3 * 64 + 2 * 8 + PAD * 2 },
     };
 }
@@ -171,12 +171,19 @@ fn drawDash(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         _ = cv.text(ux + 48, y0 + 61, 28, Color.hex(0x08101e), ini[0..n], .{ .bold = true, .alignment = .center });
         var ob: [64]u8 = undefined;
         var ub: [64]u8 = undefined;
-        _ = cv.text(ux + 96, y0 + 34, 13, txt, "\u{F0E17}", .{}); // OS
-        _ = cv.text(ux + 118, y0 + 34, 13, txt, data.osName(&ob), .{ .max_w = uw - 130 });
-        _ = cv.text(ux + 96, y0 + 58, 13, txt, "\u{F05B6}", .{});
-        _ = cv.text(ux + 118, y0 + 58, 13, txt, std.fmt.bufPrint(&buf, "River / {s}", .{user}) catch "", .{ .max_w = uw - 130 });
-        _ = cv.text(ux + 96, y0 + 82, 13, sub, "\u{F0954}", .{});
-        _ = cv.text(ux + 118, y0 + 82, 13, sub, data.uptime(&ub), .{ .max_w = uw - 130 });
+        // OS・機種・CPU・GPU(+ 起動からの時間)
+        const hw = &f.hw;
+        const rows = [_]struct { icon: []const u8, text: []const u8, col: Color }{
+            .{ .icon = "\u{F0E17}", .text = std.fmt.bufPrint(&buf, "{s}  ・  {s}", .{ data.osName(&ob), data.uptime(&ub) }) catch "", .col = txt },
+            .{ .icon = "\u{F0322}", .text = hw.modelName(), .col = txt },
+            .{ .icon = "\u{F0EE0}", .text = hw.cpuName(), .col = sub },
+            .{ .icon = "\u{F0379}", .text = hw.gpuName(), .col = sub },
+        };
+        for (rows, 0..) |row, ri| {
+            const ry = y0 + 26 + @as(f32, @floatFromInt(ri)) * 21;
+            _ = cv.text(ux + 98, ry, 12.5, acc.lighten(0.2), row.icon, .{ .alignment = .center });
+            _ = cv.text(ux + 114, ry, 12.5, row.col, row.text, .{ .max_w = uw - 126 });
+        }
     }
 
     // 日時(縦: 時 / ・・・ / 分 / 曜日と日)
@@ -475,46 +482,56 @@ fn drawPerf(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
     const app = f.app;
     const v = &f.dashv;
     const pf = &f.perf;
+    const hw = &f.hw;
     const acc = theme.accent(app);
     const txt = theme.text(app);
     const sub = theme.subtext(app);
     var animating = false;
+    var hb: [160]u8 = undefined;
+
+    // 見出し: 機種名と構成
+    _ = cv.text(PAD + 8, 34, 16, txt, hw.modelName(), .{ .bold = true, .max_w = w * 0.55 });
+    const mem_total = if (pf.mem_total > 0) pf.mem_total else 0;
+    _ = cv.text(w - PAD - 8, 34, 12.5, sub, std.fmt.bufPrint(&hb, "{d} スレッド ・ メモリ {d:.1} GiB ・ ストレージ {d:.0} GiB", .{ hw.cores, mem_total, pf.disk_total }) catch "", .{ .alignment = .right });
+
+    const Ring = struct { val: f32, big: []const u8, label: []const u8, name: []const u8, extra: []const u8, temp: ?f32, icon: []const u8 };
+    var b0: [32]u8 = undefined;
     var b1: [32]u8 = undefined;
     var b2: [32]u8 = undefined;
-    const items = [3]struct { val: f32, big: []const u8, label: []const u8, side: []const u8, side_label: []const u8, r: f32 }{
-        .{ .val = (pf.gpu_temp orelse 0) / 100, .big = if (pf.gpu_temp) |t| std.fmt.bufPrint(&b1, "{d}°C", .{@as(u32, @intFromFloat(t))}) catch "" else "--", .label = "GPU 温度", .side = std.fmt.bufPrint(&b2, "{d}%", .{@as(u32, @intFromFloat((pf.gpu_busy orelse 0) * 100))}) catch "", .side_label = "使用率", .r = 92 },
-        .{ .val = (pf.cpu_temp orelse 0) / 100, .big = "", .label = "CPU 温度", .side = "", .side_label = "使用率", .r = 108 },
-        .{ .val = if (pf.mem_total > 0) pf.mem_used / pf.mem_total else 0, .big = "", .label = "メモリ", .side = "", .side_label = "ストレージ", .r = 92 },
+    var b3: [32]u8 = undefined;
+    var e2: [48]u8 = undefined;
+    var e3: [48]u8 = undefined;
+    const mem_frac = if (pf.mem_total > 0) pf.mem_used / pf.mem_total else 0;
+    const disk_frac = if (pf.disk_total > 0) pf.disk_used / pf.disk_total else 0;
+    const rings = [4]Ring{
+        .{ .val = app.sys.cpu, .big = std.fmt.bufPrint(&b0, "{d}%", .{@as(u32, @intFromFloat(app.sys.cpu * 100 + 0.5))}) catch "", .label = "CPU", .name = hw.cpuName(), .extra = "", .temp = pf.cpu_temp, .icon = "\u{F0EE0}" },
+        .{ .val = pf.gpu_busy orelse 0, .big = if (pf.gpu_busy) |g| std.fmt.bufPrint(&b1, "{d}%", .{@as(u32, @intFromFloat(g * 100 + 0.5))}) catch "" else "--", .label = "GPU", .name = hw.gpuName(), .extra = "", .temp = pf.gpu_temp, .icon = "\u{F0379}" },
+        .{ .val = mem_frac, .big = std.fmt.bufPrint(&b2, "{d}%", .{@as(u32, @intFromFloat(mem_frac * 100 + 0.5))}) catch "", .label = "メモリ", .name = std.fmt.bufPrint(&e2, "{d:.1} / {d:.1} GiB", .{ pf.mem_used, pf.mem_total }) catch "", .extra = "", .temp = null, .icon = "\u{F035B}" },
+        .{ .val = disk_frac, .big = std.fmt.bufPrint(&b3, "{d}%", .{@as(u32, @intFromFloat(disk_frac * 100 + 0.5))}) catch "", .label = "ストレージ", .name = std.fmt.bufPrint(&e3, "{d:.0} / {d:.0} GiB", .{ pf.disk_used, pf.disk_total }) catch "", .extra = hw.diskName(), .temp = null, .icon = "\u{F02CA}" },
     };
-    var bufs: [4][32]u8 = undefined;
-    const cpu_big = if (pf.cpu_temp) |t| std.fmt.bufPrint(&bufs[0], "{d}°C", .{@as(u32, @intFromFloat(t))}) catch "" else "--";
-    const cpu_side = std.fmt.bufPrint(&bufs[1], "{d}%", .{@as(u32, @intFromFloat(app.sys.cpu * 100))}) catch "";
-    const mem_big = std.fmt.bufPrint(&bufs[2], "{d:.1}GiB", .{pf.mem_used}) catch "";
-    const disk_side = std.fmt.bufPrint(&bufs[3], "{d:.0}GiB", .{pf.disk_used}) catch "";
-    const cw = w / 3;
-    for (items, 0..) |it, i| {
-        v.perf_v[i].set(it.val);
+    const cw = (w - PAD * 2) / 4;
+    for (rings, 0..) |rg, i| {
+        v.perf_v[i].set(rg.val);
         if (v.perf_v[i].step(dt)) animating = true;
-        const cx = cw * @as(f32, @floatFromInt(i)) + cw / 2;
-        const cy: f32 = 128;
+        const cx = PAD + cw * @as(f32, @floatFromInt(i)) + cw / 2;
+        const cy: f32 = 150;
+        const R: f32 = @min(84, cw / 2 - 18);
         const val = std.math.clamp(v.perf_v[i].x, 0, 1);
-        const col = Color.mix(acc, Color.hex(0xff7a90), @max(0, (val - 0.7) / 0.3));
-        cv.arc(cx, cy, it.r, 10, val, col, Color.hex(0xffffff).alpha(0.08));
-        const big = switch (i) {
-            1 => cpu_big,
-            2 => mem_big,
-            else => it.big,
-        };
-        const sd = switch (i) {
-            1 => cpu_side,
-            2 => disk_side,
-            else => it.side,
-        };
-        _ = cv.text(cx, cy + 8, if (i == 1) 34 else 28, txt, big, .{ .bold = true, .alignment = .center });
-        _ = cv.text(cx, cy + 32, 12, sub, it.label, .{ .alignment = .center });
-        // 補足(使用率・ストレージ)は円弧の下に「ラベル 値」の形で
-        var lb: [64]u8 = undefined;
-        _ = cv.text(cx, 128 + 108 + 34, 13, Color.mix(txt, acc, 0.4), std.fmt.bufPrint(&lb, "{s}  {s}", .{ it.side_label, sd }) catch "", .{ .bold = true, .alignment = .center });
+        // 使用率が高いほど赤寄りに
+        const col = Color.mix(acc, Color.hex(0xff7a90), @max(0, (val - 0.75) / 0.25));
+        card(cv, cx - cw / 2 + 6, 56, cw - 12, 262);
+        cv.shadow(cx - R, cy - R, R * 2, R * 2, R, 14, col.alpha(0.18 * val + 0.05));
+        cv.arc(cx, cy, R, 12, val, col, Color.hex(0xffffff).alpha(0.07));
+        // 温度は内側の細い円弧(橙)
+        if (rg.temp) |t| cv.arc(cx, cy, R - 17, 4, std.math.clamp(t / 100, 0, 1), Color.hex(0xffb35c), Color.hex(0xffffff).alpha(0.05));
+        _ = cv.text(cx, cy - 18, 17, col.lighten(0.3), rg.icon, .{ .alignment = .center });
+        _ = cv.text(cx, cy + 16, 30, txt, rg.big, .{ .bold = true, .alignment = .center });
+        if (rg.temp) |t| {
+            _ = cv.text(cx, cy + 38, 12, Color.hex(0xffb35c), std.fmt.bufPrint(&hb, "{d}°C", .{@as(u32, @intFromFloat(t + 0.5))}) catch "", .{ .alignment = .center });
+        }
+        _ = cv.text(cx, cy + R + 32, 14, txt, rg.label, .{ .bold = true, .alignment = .center });
+        _ = cv.text(cx, cy + R + 52, 11.5, sub, rg.name, .{ .alignment = .center, .max_w = cw - 28 });
+        if (rg.extra.len > 0) _ = cv.text(cx, cy + R + 69, 10.5, sub.alpha(0.75), rg.extra, .{ .alignment = .center, .max_w = cw - 28 });
     }
     return animating;
 }
