@@ -50,4 +50,7 @@ pub usingnamespace @cImport({
     // WASM ランタイムと画像
     @cInclude("wasm3/source/wasm3.h");
     @cInclude("stb_image.h");
+    @cInclude("stdio.h");
+    @cInclude("nanosvg.h");
+    @cInclude("nanosvgrast.h");
 });

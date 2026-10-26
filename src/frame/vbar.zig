@@ -37,6 +37,8 @@ pub const Bar = struct {
     title_ms: u64 = 0,
     bt_on: bool = false,
     bt_checked_ms: u64 = 0,
+    logo_tex: c.GLuint = 0,
+    logo_tried: bool = false,
 
     fn focusedIndex(f: *Frame) f32 {
         const t = f.out.focused_tags;
@@ -111,8 +113,19 @@ pub const Bar = struct {
         {
             const hi = self.addHit(.logo, 0, y - 4, 40);
             const hv = self.hov(hi);
-            cv.rect(cx - 15, y, 30, 30, 15, acc.alpha(0.14 + 0.2 * hv));
-            _ = cv.text(cx, y + 22, 18, Color.mix(acc, txt, 0.3), "雨", .{ .bold = true, .alignment = .center, .glow = 3 + 4 * hv, .glow_color = acc.alpha(0.6) });
+            if (!self.logo_tried) {
+                self.logo_tried = true;
+                self.logo_tex = loadOsLogo();
+            }
+            if (self.logo_tex != 0) {
+                // OS のロゴ(/etc/os-release の LOGO=)。ホバーで少し大きく、背後に淡い光
+                const s: f32 = 26 + 4 * hv;
+                if (hv > 0.01) cv.shadow(cx - s / 2, y + 15 - s / 2, s, s, s / 2, 10, acc.alpha(0.5 * hv));
+                cv.image(self.logo_tex, cx - s / 2, y + 15 - s / 2, s, s, 0);
+            } else {
+                cv.rect(cx - 15, y, 30, 30, 15, acc.alpha(0.14 + 0.2 * hv));
+                _ = cv.text(cx, y + 22, 18, Color.mix(acc, txt, 0.3), "雨", .{ .bold = true, .alignment = .center, .glow = 3 + 4 * hv, .glow_color = acc.alpha(0.6) });
+            }
             y += 46;
         }
 
@@ -391,4 +404,24 @@ pub fn drawPopout(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
         },
     }
     return false;
+}
+
+/// /etc/os-release の LOGO=(Chimera なら chimera-logo)をアイコンテーマから探して読み込む。
+/// 起動直後に呼ばれるので、全テーマの索引は作らず hicolor だけを見る。
+fn loadOsLogo() c.GLuint {
+    const icons = @import("../icons.zig");
+    var b: [1024]u8 = undefined;
+    var name: []const u8 = "";
+    if (sys.readFile("/etc/os-release", &b)) |s| {
+        var lines = std.mem.splitScalar(u8, s, '\n');
+        while (lines.next()) |l| {
+            if (std.mem.startsWith(u8, l, "LOGO=")) name = std.mem.trim(u8, l[5..], "\"");
+        }
+    }
+    if (name.len == 0) return 0;
+    var pb: [512]u8 = undefined;
+    const p = icons.quickFind(name, &pb) orelse return 0;
+    const px = icons.decode(p, 96, 96, false) orelse return 0;
+    defer std.c.free(px);
+    return gfx.uploadImage(px, 96, 96);
 }

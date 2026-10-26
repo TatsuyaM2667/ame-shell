@@ -90,6 +90,7 @@ pub fn build(b: *std.Build) void {
         });
     }
     exe.addCSourceFile(.{ .file = b.path("third_party/stb_image_impl.c"), .flags = &.{ "-O2", "-fno-sanitize=undefined" } });
+    exe.addCSourceFile(.{ .file = b.path("third_party/nanosvg_impl.c"), .flags = &.{ "-O2", "-fno-sanitize=undefined" } });
     exe.addObjectFile(anim_obj);
     for ([_][]const u8{ "wayland-client", "wayland-egl", "EGL", "GLESv2", "xkbcommon", "freetype", "harfbuzz", "fontconfig", "dbus-1" }) |lib| {
         exe.linkSystemLibrary(lib);

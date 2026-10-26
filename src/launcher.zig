@@ -27,6 +27,7 @@ const Surface = surface.Surface;
 const sys = @import("platform/sys.zig");
 const loop = @import("platform/loop.zig");
 const cfgmod = @import("config.zig");
+const icons = @import("icons.zig");
 
 const SW: u32 = 720;
 const SH: u32 = 600;
@@ -900,39 +901,6 @@ fn parseDesktop(a: std.mem.Allocator, id: []const u8, data: []const u8) ?Entry {
     return e;
 }
 
-/// アイコン名から PNG のパスを探す(SVG は未対応 → 頭文字アイコンにフォールバック)。
-fn findIcon(name: []const u8, buf: []u8) ?[:0]const u8 {
-    if (name.len == 0) return null;
-    var path: ?[:0]const u8 = null;
-    if (name[0] == '/') {
-        if (std.mem.endsWith(u8, name, ".png")) path = std.fmt.bufPrintZ(buf, "{s}", .{name}) catch null;
-    } else {
-        const home = std.posix.getenv("HOME") orelse "";
-        const sizes = [_][]const u8{ "64x64", "48x48", "128x128", "96x96", "256x256", "32x32" };
-        const bases = [_][]const u8{ "/usr/share/icons/hicolor", "/usr/local/share/icons/hicolor", "/var/lib/flatpak/exports/share/icons/hicolor" };
-        outer: for (bases) |b| for (sizes) |sz| {
-            const p = std.fmt.bufPrintZ(buf, "{s}/{s}/apps/{s}.png", .{ b, sz, name }) catch continue;
-            if (c.access(p.ptr, c.R_OK) == 0) {
-                path = p;
-                break :outer;
-            }
-        };
-        if (path == null) {
-            const p = std.fmt.bufPrintZ(buf, "{s}/.local/share/icons/hicolor/48x48/apps/{s}.png", .{ home, name }) catch null;
-            if (p) |pp| if (c.access(pp.ptr, c.R_OK) == 0) {
-                path = pp;
-            };
-        }
-        if (path == null) {
-            const p = std.fmt.bufPrintZ(buf, "/usr/share/pixmaps/{s}.png", .{name}) catch null;
-            if (p) |pp| if (c.access(pp.ptr, c.R_OK) == 0) {
-                path = pp;
-            };
-        }
-    }
-    return path;
-}
-
 // ---------------------------------------------------------------------------
 // アイコン・サムネイルの非同期読み込み
 //
@@ -968,11 +936,11 @@ const IconWorker = struct {
             if (j.thumb) {
                 var zb: [600]u8 = undefined;
                 if (std.fmt.bufPrintZ(&zb, "{s}", .{j.name})) |p| {
-                    px = decodeScaled(p, THUMB_W, THUMB_H, true);
+                    px = icons.decode(p, THUMB_W, THUMB_H, true);
                 } else |_| {}
             } else {
                 var buf: [600]u8 = undefined;
-                if (findIcon(j.name, &buf)) |p| px = decodeScaled(p, ICON_PX, ICON_PX, false);
+                if (icons.lookup(j.name, &buf)) |p| px = icons.decode(p, ICON_PX, ICON_PX, false);
             }
             a.free(j.name);
             self.mutex.lock();
@@ -984,62 +952,6 @@ const IconWorker = struct {
         a.free(jobs);
     }
 };
-
-/// 画像を読み、ow x oh に縮小する。cover=true なら縦横比を保って隙間なく埋め(はみ出しは切る)、
-/// false なら全体が収まるように(余白は透明)。箱フィルタで縮小、乗算済みアルファで平均。
-fn decodeScaled(path: [:0]const u8, ow: usize, oh: usize, cover: bool) ?[*]u8 {
-    var w: c_int = 0;
-    var h: c_int = 0;
-    var n: c_int = 0;
-    const src = c.stbi_load(path.ptr, &w, &h, &n, 4) orelse return null;
-    defer c.stbi_image_free(src);
-    const out: [*]u8 = @ptrCast(std.c.malloc(ow * oh * 4) orelse return null);
-    @memset(out[0 .. ow * oh * 4], 0);
-    const sw: usize = @intCast(w);
-    const sh: usize = @intCast(h);
-    const fx = @as(f32, @floatFromInt(sw)) / @as(f32, @floatFromInt(ow));
-    const fy = @as(f32, @floatFromInt(sh)) / @as(f32, @floatFromInt(oh));
-    const scale = if (cover) @min(fx, fy) else @max(fx, fy);
-    const dw: usize = @min(ow, @max(1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(sw)) / scale))));
-    const dh: usize = @min(oh, @max(1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(sh)) / scale))));
-    const ox = (ow - dw) / 2;
-    const oy = (oh - dh) / 2;
-    // cover のときは入力の中央を切り出す
-    const sx0: f32 = if (cover) (@as(f32, @floatFromInt(sw)) - @as(f32, @floatFromInt(ow)) * scale) / 2 else 0;
-    const sy0: f32 = if (cover) (@as(f32, @floatFromInt(sh)) - @as(f32, @floatFromInt(oh)) * scale) / 2 else 0;
-    for (0..dh) |y| for (0..dw) |x| {
-        const x0: usize = @intFromFloat(sx0 + @as(f32, @floatFromInt(x)) * scale);
-        const y0: usize = @intFromFloat(sy0 + @as(f32, @floatFromInt(y)) * scale);
-        const x1 = @min(sw, @max(x0 + 1, @as(usize, @intFromFloat(sx0 + @as(f32, @floatFromInt(x + 1)) * scale))));
-        const y1 = @min(sh, @max(y0 + 1, @as(usize, @intFromFloat(sy0 + @as(f32, @floatFromInt(y + 1)) * scale))));
-        // 大きな画像で箱が広すぎると遅いので、最大 8x8 点だけ間引いてサンプルする
-        const stepx = @max(1, (x1 - x0) / 8);
-        const stepy = @max(1, (y1 - y0) / 8);
-        var acc = [4]u32{ 0, 0, 0, 0 };
-        var cnt: u32 = 0;
-        var yy = y0;
-        while (yy < y1) : (yy += stepy) {
-            var xx = x0;
-            while (xx < x1) : (xx += stepx) {
-                const i = (yy * sw + xx) * 4;
-                const al: u32 = src[i + 3];
-                acc[0] += @as(u32, src[i]) * al;
-                acc[1] += @as(u32, src[i + 1]) * al;
-                acc[2] += @as(u32, src[i + 2]) * al;
-                acc[3] += al;
-                cnt += 1;
-            }
-        }
-        const o = ((y + oy) * ow + (x + ox)) * 4;
-        if (acc[3] > 0) {
-            out[o] = @intCast(acc[0] / acc[3]);
-            out[o + 1] = @intCast(acc[1] / acc[3]);
-            out[o + 2] = @intCast(acc[2] / acc[3]);
-        }
-        out[o + 3] = @intCast(acc[3] / @max(cnt, 1));
-    };
-    return out;
-}
 
 fn onIconsReady(ctx: *anyopaque, fd: c_int, _: u32) void {
     const self: *Launcher = @ptrCast(@alignCast(ctx));

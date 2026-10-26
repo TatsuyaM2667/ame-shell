@@ -1,0 +1,8 @@
+// nanosvg の実装単位(SVG アイコンの読み込みとラスタライズ。C、zlib ライセンス)
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+#define NANOSVG_IMPLEMENTATION
+#include "nanosvg.h"
+#define NANOSVGRAST_IMPLEMENTATION
+#include "nanosvgrast.h"
