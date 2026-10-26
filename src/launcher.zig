@@ -35,8 +35,9 @@ const PW: f32 = 640;
 const SEARCH_H: f32 = 62;
 const ROW_H: f32 = 58;
 const MAX_ROWS = 7;
-const THUMB_W = 192;
-const THUMB_H = 120;
+// 壁紙ピッカーの大きなカードでも粗く見えない大きさ(GPU へ送ったら CPU 側は解放する)
+const THUMB_W = 640;
+const THUMB_H = 400;
 
 pub const Entry = struct {
     id: []const u8, // ファイル名(重複排除キー)
@@ -444,8 +445,9 @@ pub const Launcher = struct {
             .action => {
                 const a = actions[r.idx].a;
                 if (a == .wallpaper) {
-                    // 壁紙ピッカーへ
-                    self.setQuery(">壁紙 ");
+                    // 全画面の壁紙ピッカーへ
+                    self.close();
+                    self.app.wallpick.open();
                     return;
                 }
                 if (a != .lock and self.armed != a) {
@@ -611,7 +613,7 @@ pub const Launcher = struct {
             cv.save();
             cv.translate(0, (1 - rt) * 20);
             cv.opacity(rt);
-            if (wl.state == 2 and wl.tex == 0) wl.tex = gfx.uploadImage(wl.px.?, THUMB_W, THUMB_H);
+            _ = self.wallTex(self.results.items[self.scroll + i].idx);
             if (wl.tex != 0) {
                 cv.image(wl.tex, tx, y, tw, th, 12);
             } else {
@@ -624,6 +626,22 @@ pub const Launcher = struct {
             _ = cv.text(tx + tw / 2, y + th + 20, 12, txt, wl.name, .{ .alignment = .center, .max_w = tw });
             cv.restore();
         }
+    }
+
+    /// 壁紙のサムネイル(未転送なら GPU へ送り、CPU 側の画素は解放する)
+    pub fn wallTex(self: *Launcher, i: usize) c.GLuint {
+        const wl = &self.walls.items[i];
+        if (wl.tex == 0 and wl.state == 2) if (wl.px) |px| {
+            wl.tex = gfx.uploadImage(px, THUMB_W, THUMB_H);
+            std.c.free(px);
+            wl.px = null;
+        };
+        return wl.tex;
+    }
+
+    /// 一覧が無い/古ければ読み直す(壁紙ピッカーから)
+    pub fn ensureScanned(self: *Launcher) void {
+        if (self.entries.items.len == 0 or loop.nowMs() - self.scanned_ms > 30_000) self.scan();
     }
 
     fn visibleRows(self: *Launcher) usize {

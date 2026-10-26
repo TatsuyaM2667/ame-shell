@@ -52,6 +52,8 @@ pub const Config = struct {
     wall_battery_fps: f32 = 12,
     wall_scale: f32 = 0.5,
     wall_animate: bool = true,
+    /// ピッカーで切り替えるときの演出: -1=ランダム 0=波紋 1=円 2=斜めワイプ 3=短冊
+    wall_transition: c_int = -1,
     aurora_a: u32 = 0x29d6b0,
     aurora_b: u32 = 0x3d7bff,
     aurora_c: u32 = 0x9a5cff,
@@ -286,6 +288,8 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             if (num(val)) |n| cfg.wall_battery_fps = std.math.clamp(n, 1, 240) else ok = false;
         } else if (eq(u8, key, "scale")) {
             if (num(val)) |n| cfg.wall_scale = std.math.clamp(n, 0.2, 1) else ok = false;
+        } else if (eq(u8, key, "transition")) {
+            cfg.wall_transition = if (eq(u8, val, "ripple")) 0 else if (eq(u8, val, "circle")) 1 else if (eq(u8, val, "slant")) 2 else if (eq(u8, val, "shards")) 3 else -1;
         } else if (eq(u8, key, "animate")) {
             cfg.wall_animate = boolean(val) orelse true;
         } else if (eq(u8, key, "aurora-a")) {

@@ -146,6 +146,18 @@ const ui_fs =
     \\    ang = ang < 0.0 ? ang + 1.0 : ang;
     \\    float on = smoothstep(v_p1.x + 0.002, v_p1.x - 0.002, ang);
     \\    o = mix(pm(v_c1), pm(v_c0), on) * a;
+    \\  } else if (kind == 9.0) {     // 斜めのカード(平行四辺形でくり抜いた画像。画像自体は歪めない)
+    \\    float sk = v_c1.r;                                  // 傾き(x += sk * y)
+    \\    vec2 q = vec2(v_p.x - sk * v_p.y, v_p.y);
+    \\    vec2 hb = vec2(v_half.x - abs(sk) * v_half.y, v_half.y);
+    \\    float d = sdBox(q, hb, r);
+    \\    float a = clamp(0.5 - d / px, 0.0, 1.0);
+    \\    if (a <= 0.0) discard;
+    \\    vec4 t = texture(u_img, mix(v_p1.xy, v_p1.zw, v_l01));
+    \\    vec3 col = t.rgb * v_c0.rgb;                        // c0.rgb で明るさ(非選択は暗く)
+    \\    float bw = v_p0.z;
+    \\    if (bw > 0.0) col = mix(col, v_c2.rgb, (1.0 - clamp(0.5 - (d + bw) / px, 0.0, 1.0)) * v_c2.a);
+    \\    o = vec4(col, 1.0) * a * v_c0.a;
     \\  } else if (kind == 8.0) {     // 線分(両端が丸い)。p1 = 端点 a, b(矩形中心からの相対座標)
     \\    vec2 pa = v_p - v_p1.xy, ba = v_p1.zw - v_p1.xy;
     \\    float hh = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
@@ -185,6 +197,8 @@ const wall_fs =
     \\uniform sampler2D u_prev;     // 前の画像
     \\uniform vec2 u_img_size; uniform vec2 u_prev_size;
     \\uniform vec3 u_ca; uniform vec3 u_cb; uniform vec3 u_cc;
+    \\uniform int u_trans;          // 0=波紋 1=円 2=斜めワイプ 3=短冊
+    \\uniform vec2 u_origin;        // 円の中心(uv、下が 0)
     \\out vec4 o;
     \\float h21(vec2 p){ p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
     \\float noise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
@@ -274,20 +288,62 @@ const wall_fs =
     \\  if (mode == 1) return rain(uv, u_time);
     \\  return cover(s, sz, vec2(uv.x, 1.0 - uv.y));
     \\}
+    \\// 新しい壁紙: 少し拡大した状態から元の大きさへ落ち着く(着地感)
+    \\vec3 sceneB(vec2 uv, float zoom, vec2 o){ return scene(u_mode, (uv - o) / zoom + o, u_img, u_img_size); }
+    \\float ease(float t){ return t * t * (3.0 - 2.0 * t); }
     \\void main(){
     \\  vec2 uv = v_uv;
-    \\  vec3 cur, col;
+    \\  vec3 col;
+    \\  float m = clamp(u_mix, 0.0, 1.0);
     \\  if (u_mix < 1.0) {
-    \\    // 中心から広がる波紋で切り替え。境界の帯だけ UV を歪ませて水面のように見せる。
-    \\    vec2 cuv = (uv - 0.5) * vec2(u_res.x / u_res.y, 1.0);
-    \\    float r = length(cuv);
-    \\    float front = u_mix * 1.25;
-    \\    float band = exp(-pow((r - front) * 14.0, 2.0));
-    \\    vec2 dir = normalize(cuv + 1e-5);
-    \\    vec2 duv = uv + dir * band * 0.025 / vec2(u_res.x / u_res.y, 1.0);
-    \\    vec3 a = scene(u_prev_mode, duv, u_prev, u_prev_size);
-    \\    vec3 b = scene(u_mode, duv, u_img, u_img_size);
-    \\    col = mix(b, a, smoothstep(front - 0.02, front + 0.02, r)) + band * vec3(0.25, 0.4, 0.6) * 0.25;
+    \\    float ar = u_res.x / u_res.y;
+    \\    float zoom = 1.0 + 0.10 * (1.0 - m) * (1.0 - m);
+    \\    if (u_trans == 1) {
+    \\      // 円: 選んだカードの位置から広がる。境界は光るリングで、その内側を少し屈折させる
+    \\      vec2 o = u_origin;
+    \\      vec2 d = (uv - o) * vec2(ar, 1.0);
+    \\      float r = length(d);
+    \\      float maxr = length(vec2(max(o.x, 1.0 - o.x) * ar, max(o.y, 1.0 - o.y)));
+    \\      float front = ease(m) * (maxr + 0.08);
+    \\      float band = exp(-pow((r - front) * 18.0, 2.0));
+    \\      vec2 duv = uv - normalize(d + 1e-5) / vec2(ar, 1.0) * band * 0.03;
+    \\      vec3 a = scene(u_prev_mode, duv, u_prev, u_prev_size) * (1.0 - 0.35 * m);
+    \\      vec3 b = sceneB(duv, zoom, o);
+    \\      col = mix(a, b, smoothstep(front + 0.006, front - 0.006, r)) + band * mix(vec3(0.6, 0.8, 1.0), u_ca, 0.4) * 0.55;
+    \\    } else if (u_trans == 2) {
+    \\      // 斜めのワイプ(ピッカーのカードと同じ傾き)。境目を光の筋が横切る
+    \\      float sk = 0.35;
+    \\      float x = uv.x * ar + (uv.y - 0.5) * sk;
+    \\      float front = mix(-0.5 * sk - 0.12, ar + 0.5 * sk + 0.12, ease(m));
+    \\      float streak = exp(-pow((x - front) * 22.0, 2.0));
+    \\      vec2 duv = uv + vec2(streak * 0.02, 0.0);
+    \\      vec3 a = scene(u_prev_mode, duv, u_prev, u_prev_size) * (1.0 - 0.3 * m);
+    \\      vec3 b = sceneB(duv, zoom, vec2(0.0, 0.5));
+    \\      col = mix(a, b, smoothstep(front + 0.03, front - 0.03, x)) + streak * vec3(0.7, 0.85, 1.0) * 0.6;
+    \\    } else if (u_trans == 3) {
+    \\      // 短冊: 斜めの帯ごとに時間差で、帯の中を左から右へ塗り替える
+    \\      float sk = 0.35;
+    \\      float n = 9.0;
+    \\      float x = (uv.x * ar + (uv.y - 0.5) * sk + 0.5 * sk) / (ar + sk);
+    \\      float id = floor(x * n);
+    \\      float lt = ease(clamp((m - id / n * 0.55) / 0.45, 0.0, 1.0));
+    \\      float fx = fract(x * n);
+    \\      float show = smoothstep(lt + 0.03, lt - 0.03, fx);
+    \\      float glow = exp(-pow((fx - lt) * 26.0, 2.0)) * (1.0 - lt) * step(0.001, lt);
+    \\      vec3 a = scene(u_prev_mode, uv, u_prev, u_prev_size) * (1.0 - 0.3 * m);
+    \\      vec3 b = sceneB(uv, zoom, vec2(0.5));
+    \\      col = mix(a, b, show) + glow * vec3(0.7, 0.85, 1.0) * 0.5;
+    \\    } else {
+    \\      // 波紋: 中心から広がる。境界の帯だけ UV を歪ませて水面のように見せる
+    \\      vec2 cuv = (uv - 0.5) * vec2(ar, 1.0);
+    \\      float r = length(cuv);
+    \\      float front = u_mix * 1.25;
+    \\      float band = exp(-pow((r - front) * 14.0, 2.0));
+    \\      vec2 duv = uv + normalize(cuv + 1e-5) * band * 0.025 / vec2(ar, 1.0);
+    \\      vec3 a = scene(u_prev_mode, duv, u_prev, u_prev_size);
+    \\      vec3 b = scene(u_mode, duv, u_img, u_img_size);
+    \\      col = mix(b, a, smoothstep(front - 0.02, front + 0.02, r)) + band * vec3(0.25, 0.4, 0.6) * 0.25;
+    \\    }
     \\  } else {
     \\    col = scene(u_mode, uv, u_img, u_img_size);
     \\  }
@@ -584,6 +640,8 @@ pub const Target = struct {
 };
 
 pub const WallParams = struct {
+    trans: c_int = 0,
+    origin: [2]f32 = .{ 0.5, 0.5 },
     time: f32,
     mode: c_int,
     prev_mode: c_int,
@@ -625,6 +683,8 @@ pub const Backdrop = struct {
         c.glUniform3f(c.glGetUniformLocation(P, "u_ca"), p.ca.r, p.ca.g, p.ca.b);
         c.glUniform3f(c.glGetUniformLocation(P, "u_cb"), p.cb.r, p.cb.g, p.cb.b);
         c.glUniform3f(c.glGetUniformLocation(P, "u_cc"), p.cc.r, p.cc.g, p.cc.b);
+        c.glUniform1i(c.glGetUniformLocation(P, "u_trans"), p.trans);
+        c.glUniform2f(c.glGetUniformLocation(P, "u_origin"), p.origin[0], p.origin[1]);
         c.glActiveTexture(c.GL_TEXTURE3);
         c.glBindTexture(c.GL_TEXTURE_2D, if (p.img != 0) p.img else gpu.black_tex);
         c.glActiveTexture(c.GL_TEXTURE4);
@@ -935,6 +995,18 @@ pub const Canvas = struct {
         const cy = miny + h / 2;
         const s = self.xf.s;
         self.push(minx, miny, w, h, col, col, col, .{ 0, 8, thick * s, 0 }, .{ (x0 - cx) * s, (y0 - cy) * s, (x1 - cx) * s, (y1 - cy) * s });
+    }
+
+    /// 平行四辺形(傾き skew)にくり抜いた画像カード。x,y,w,h は外接矩形。uv は画像のどこを見せるか。
+    /// bright: 明るさ(非選択のカードを暗くする)、border: 縁取りの太さと色。
+    pub fn skewImage(self: *Canvas, tex: c.GLuint, x: f32, y: f32, w: f32, h: f32, r: f32, skew: f32, uv: [4]f32, bright: f32, border: f32, border_col: Color) void {
+        if (tex == 0) return;
+        if (self.cur_img != 0 and self.cur_img != tex) self.flush();
+        self.cur_img = tex;
+        const c0 = Color{ .r = bright, .g = bright, .b = bright, .a = 1 };
+        const c1 = Color{ .r = skew, .g = 0, .b = 0, .a = 1 };
+        // c1 は opacity を掛けられるが r(傾き)には掛からない
+        self.push(x, y, w, h, c0, c1, border_col, .{ r, 9, border * self.xf.s, 0 }, uv);
     }
 
     pub fn image(self: *Canvas, tex: c.GLuint, x: f32, y: f32, w: f32, h: f32, r: f32) void {

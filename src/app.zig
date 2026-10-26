@@ -21,6 +21,7 @@ const Dashboard = @import("dashboard.zig").Dashboard;
 const Notifs = @import("notify.zig").Notifs;
 const Lock = @import("lock.zig").Lock;
 const Media = @import("media.zig").Media;
+const WallPick = @import("wallpick.zig").WallPick;
 const ipc = @import("ipc.zig");
 const SuperTap = @import("platform/supertap.zig").SuperTap;
 
@@ -165,6 +166,7 @@ pub const App = struct {
     notifs: *Notifs = undefined,
     lock: *Lock = undefined,
     media: *Media = undefined,
+    wallpick: *WallPick = undefined,
     ipc_server: ipc.Server = undefined,
     supertap: SuperTap = undefined,
     initialized: bool = false,
@@ -238,6 +240,7 @@ pub const App = struct {
         app.notifs = try Notifs.create(app);
         app.lock = try Lock.create(app);
         app.media = try Media.create(app);
+        app.wallpick = try WallPick.create(app);
         app.ipc_server = try ipc.Server.init(app);
         app.ipc_server.register();
         app.supertap = .{ .loop = &app.loop, .ctx = app, .on_tap = onSuperTap, .enabled = app.cfg.super_launcher };
@@ -271,6 +274,7 @@ pub const App = struct {
                 self.dashboard.reap();
                 self.notifs.reap();
                 self.lock.reap();
+                self.wallpick.reap();
             }
         }
     }
@@ -717,6 +721,7 @@ fn onGlobalRemove(data: ?*anyopaque, _: ?*c.struct_wl_registry, name: u32) callc
         app.launcher.outputRemoved(o);
         app.osd.outputRemoved(o);
         app.notifs.outputRemoved(o);
+        app.wallpick.outputRemoved(o);
         c.wl_output_release(o.wl);
         _ = app.outputs.orderedRemove(i);
         app.alloc.destroy(o);

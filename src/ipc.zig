@@ -76,6 +76,7 @@ const help =
     \\  notifications toggle|clear
     \\  session | sidebar | utilities   (caelestia: 各ドロワーの開閉)
     \\  close-all
+    \\  wallpaper-picker        (全画面の壁紙ピッカー)
     \\  lock
     \\  reload                 (設定の再読込)
     \\  widgets reload
@@ -101,6 +102,8 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
     } else if (eq(u8, cmd, "session") or eq(u8, cmd, "sidebar") or eq(u8, cmd, "utilities")) {
         const f = app.activeFrame() orelse return "error: caelestia レイアウト(shell { layout caelestia })でのみ使えます";
         if (eq(u8, cmd, "session")) f.toggleSession() else if (eq(u8, cmd, "sidebar")) f.toggleSidebar() else f.toggleUtilities();
+    } else if (eq(u8, cmd, "wallpaper-picker")) {
+        app.wallpick.toggle();
     } else if (eq(u8, cmd, "close-all")) {
         if (app.activeFrame()) |f| f.closeAll();
         app.launcher.close();

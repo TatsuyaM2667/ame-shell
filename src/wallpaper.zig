@@ -40,6 +40,12 @@ pub const Wallpaper = struct {
     scene_time: f32 = 0,
     last_ms: u64 = 0,
     first_frames: u8 = 0,
+    /// 切り替え演出(0=波紋 1=円 2=斜めワイプ 3=短冊)と円の中心(uv、下が 0)
+    fx: c_int = 0,
+    /// 表示中の画像のパス(ピッカーで「いまの壁紙」を選ぶため)
+    img_path: [512]u8 = undefined,
+    img_path_len: usize = 0,
+    fx_origin: [2]f32 = .{ 0.5, 0.5 },
 
     pub fn create(app: *App, out: *Output) !*Wallpaper {
         const self = try app.alloc.create(Wallpaper);
@@ -64,7 +70,13 @@ pub const Wallpaper = struct {
         // 壁紙は入力を受けない(デスクトップのクリックはコンポジタへ)
         self.surf.setInputRect(0, 0, 0, 0);
         try app.loop.add(self.timer.fd, c.EPOLLIN, self, onTimer);
-        if (self.mode == .image) self.loadImage(app.cfg.wall_image.get());
+        // ピッカーで最後に選んだ壁紙があればそれを優先(再起動・再ログイン後も保つ)
+        var sb: [600]u8 = undefined;
+        if (loadSaved(&sb)) |saved| {
+            self.mode = saved.mode;
+            self.prev_mode = saved.mode;
+            if (saved.mode == .image) self.loadImage(saved.path);
+        } else if (self.mode == .image) self.loadImage(app.cfg.wall_image.get());
         self.updateTimer();
         return self;
     }
@@ -122,6 +134,15 @@ pub const Wallpaper = struct {
 
     /// 壁紙を切り替える(波紋トランジション付き)
     pub fn switchTo(self: *Wallpaper, mode: cfgmod.WallMode, image_path: []const u8) void {
+        self.switchFx(mode, image_path, 0, .{ 0.5, 0.5 });
+    }
+
+    /// 演出を指定して切り替える(fx < 0 なら円・斜めワイプ・短冊からランダム)。origin は出力上の uv。
+    pub fn switchFx(self: *Wallpaper, mode: cfgmod.WallMode, image_path: []const u8, fx: c_int, origin: [2]f32) void {
+        self.fx = if (fx >= 0) fx else @intCast(1 + @mod(loop.nowMs() / 7, 3));
+        self.fx_origin = .{ origin[0], 1 - origin[1] };
+        // 円の演出は時間をかけた方が映えるので応答を遅めに
+        self.trans.response = if (self.fx == 0) 1.6 else 1.25;
         // 前の画像テクスチャは捨てる(トランジション中なら途中のものも)
         if (self.prev_img.tex != 0 and self.prev_img.tex != self.img.tex) c.glDeleteTextures(1, &self.prev_img.tex);
         self.prev_img = self.img;
@@ -143,6 +164,8 @@ pub const Wallpaper = struct {
             std.fmt.bufPrintZ(&buf, "{s}/{s}", .{ std.posix.getenv("HOME") orelse "", path_in[2..] }) catch return
         else
             std.fmt.bufPrintZ(&buf, "{s}", .{path_in}) catch return;
+        self.img_path_len = @min(path_in.len, self.img_path.len);
+        @memcpy(self.img_path[0..self.img_path_len], path_in[0..self.img_path_len]);
         var w: c_int = 0;
         var h: c_int = 0;
         var n: c_int = 0;
@@ -186,6 +209,8 @@ pub const Wallpaper = struct {
             .mode = @intFromEnum(self.mode),
             .prev_mode = @intFromEnum(self.prev_mode),
             .mix = self.trans.x,
+            .trans = self.fx,
+            .origin = self.fx_origin,
             .img = self.img.tex,
             .img_w = self.img.w,
             .img_h = self.img.h,
@@ -211,3 +236,38 @@ pub const Wallpaper = struct {
         return transitioning;
     }
 };
+
+// ---- 最後に選んだ壁紙の保存(~/.local/state/ame-shell/wallpaper)----
+
+fn statePath(buf: []u8) ?[]const u8 {
+    if (std.posix.getenv("XDG_STATE_HOME")) |s| return std.fmt.bufPrint(buf, "{s}/ame-shell/wallpaper", .{s}) catch null;
+    const home = std.posix.getenv("HOME") orelse return null;
+    return std.fmt.bufPrint(buf, "{s}/.local/state/ame-shell/wallpaper", .{home}) catch null;
+}
+
+/// 1 行目: aurora|rain|image、2 行目: 画像のパス
+pub fn saveChoice(mode: cfgmod.WallMode, path: []const u8) void {
+    var pb: [512]u8 = undefined;
+    const p = statePath(&pb) orelse return;
+    if (std.fs.path.dirname(p)) |d| std.fs.cwd().makePath(d) catch {};
+    const f = std.fs.cwd().createFile(p, .{}) catch return;
+    defer f.close();
+    f.writer().print("{s}\n{s}\n", .{ @tagName(mode), path }) catch {};
+}
+
+const Saved = struct { mode: cfgmod.WallMode, path: []const u8 };
+
+fn loadSaved(buf: []u8) ?Saved {
+    var pb: [512]u8 = undefined;
+    const p = statePath(&pb) orelse return null;
+    const f = std.fs.cwd().openFile(p, .{}) catch return null;
+    defer f.close();
+    const n = f.readAll(buf) catch return null;
+    var it = std.mem.splitScalar(u8, buf[0..n], '\n');
+    const m = it.next() orelse return null;
+    const path = it.next() orelse "";
+    const mode: cfgmod.WallMode = if (std.mem.eql(u8, m, "rain")) .rain else if (std.mem.eql(u8, m, "image")) .image else if (std.mem.eql(u8, m, "aurora")) .aurora else return null;
+    // 画像が消えていたら保存内容は使わない
+    if (mode == .image and std.fs.cwd().access(path, .{}) == error.FileNotFound) return null;
+    return .{ .mode = mode, .path = path };
+}
