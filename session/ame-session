@@ -1,0 +1,142 @@
+#!/bin/sh
+# ame-session: SDDM から起動される Ame Shell セッション(POSIX sh。bash/GNU 拡張に依存しない)
+#
+#   ame-session          通常(River + ame-shell)
+#   ame-session --safe   セーフモード(River + foot + rivertile のみ)
+#   AME_SESSION_NESTED=1 ame-session   既存の Wayland セッション内でネスト試験
+#
+# ログ: ${XDG_STATE_HOME:-$HOME/.local/state}/ame-shell/session.log
+
+SAFE=0
+[ "${1:-}" = "--safe" ] && SAFE=1
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ame-shell"
+mkdir -p "$STATE_DIR" 2>/dev/null
+LOG="$STATE_DIR/session.log"
+CRASH="$STATE_DIR/crashloop"
+FAILS="$STATE_DIR/quick-fails"
+
+# ログが 1MB を超えたら 1 世代だけ退避
+if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 1048576 ]; then
+    mv -f "$LOG" "$LOG.old"
+fi
+log() { printf '%s [ame-session] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
+
+# 自分のディレクトリ(インストール先の bin)。ame-river-init / ame-shell / ame-ctl を探すのに使う
+case "$0" in
+    */*) SELF_DIR=$(cd "$(dirname "$0")" && pwd) ;;
+    *) SELF_DIR=$(dirname "$(command -v "$0")") ;;
+esac
+PREFIX_DIR=$(dirname "$SELF_DIR")
+INIT="$PREFIX_DIR/share/ame-shell/ame-river-init"
+[ -x "$INIT" ] || INIT="$SELF_DIR/ame-river-init"
+export PATH="$SELF_DIR:$PATH"
+
+log "=== start (safe=$SAFE nested=${AME_SESSION_NESTED:-0} pid=$$) ==="
+
+# ---- 環境変数 ----
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=river
+export XDG_SESSION_DESKTOP=ame-shell
+export MOZ_ENABLE_WAYLAND=1
+export QT_QPA_PLATFORM="wayland;xcb"
+export SDL_VIDEODRIVER="wayland,x11"
+export _JAVA_AWT_WM_NONREPARENTING=1
+export ELECTRON_OZONE_PLATFORM_HINT=auto
+# 日本語入力(fcitx5 等)の変数はユーザーの設定があればそれを尊重し、ここでは上書きしない
+
+# ---- XDG_RUNTIME_DIR(通常は turnstile の PAM モジュールが用意する) ----
+if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+    log "WARNING: XDG_RUNTIME_DIR が未設定です(turnstile/elogind の PAM 設定を確認してください)。代替を作成します"
+    rd="${TMPDIR:-/tmp}/ame-runtime-$(id -u)"
+    if [ -e "$rd" ]; then
+        # 既存なら「自分の所有」かつ「0700」であることを確認(他人に作られたディレクトリは使わない)
+        owner=$(ls -ldn "$rd" | awk '{print $3}')
+        perm=$(ls -ld "$rd" | awk '{print $1}')
+        if [ ! -d "$rd" ] || [ "$owner" != "$(id -u)" ] || [ "$perm" != "drwx------" ]; then
+            log "ERROR: $rd の所有者/パーミッションが不正です (owner=$owner perm=$perm)。終了します"
+            exit 1
+        fi
+    else
+        (umask 077 && mkdir "$rd") || { log "ERROR: $rd を作成できません"; exit 1; }
+    fi
+    export XDG_RUNTIME_DIR="$rd"
+fi
+log "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+
+if [ "${AME_SESSION_NESTED:-0}" = "1" ]; then
+    # ネスト試験: 親の Wayland 上にウィンドウとして River を開く。D-Bus/環境取り込みは行わない
+    export WLR_BACKENDS="${WLR_BACKENDS:-wayland}"
+    log "nested mode: WLR_BACKENDS=$WLR_BACKENDS parent=${WAYLAND_DISPLAY:-?}"
+else
+    # ---- D-Bus セッションバス ----
+    if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+        # turnstile のユーザーサービスが作るバスがあればそれを使う
+        if [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+            export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+            log "D-Bus: 既存のユーザーバスを使用 ($DBUS_SESSION_BUS_ADDRESS)"
+        elif command -v dbus-run-session >/dev/null 2>&1 && [ -z "${AME_IN_DBUS_RUN:-}" ]; then
+            log "D-Bus: dbus-run-session で再実行します"
+            AME_IN_DBUS_RUN=1 exec dbus-run-session -- "$0" "$@"
+        else
+            log "WARNING: D-Bus セッションバスがありません(通知・メディア連携が無効になります)"
+        fi
+    fi
+fi
+
+# ---- シート(libseat) ----
+# libseat は logind(elogind) → seatd の順に試す。elogind のセッションがあるか、
+# seatd のソケットに接続できれば何もしない。どちらも無く seatd-launch があればそれを経由する。
+SEAT_WRAP=""
+if [ "${AME_SESSION_NESTED:-0}" != "1" ]; then
+    if [ -n "${XDG_SESSION_ID:-}" ] && command -v loginctl >/dev/null 2>&1; then
+        log "seat: elogind セッション $XDG_SESSION_ID を使用"
+    elif [ -S /run/seatd.sock ] && [ -r /run/seatd.sock ] && [ -w /run/seatd.sock ]; then
+        log "seat: seatd (/run/seatd.sock) を使用"
+    elif command -v seatd-launch >/dev/null 2>&1; then
+        log "seat: seatd-launch 経由で起動します"
+        SEAT_WRAP="seatd-launch --"
+    else
+        log "WARNING: elogind も seatd も使えません。River の起動に失敗する可能性があります"
+    fi
+fi
+
+# ---- クラッシュループ検出: 5 秒未満で終了する失敗が 3 回続いたら次回はセーフモード ----
+if [ -f "$CRASH" ] && [ "$SAFE" = "0" ]; then
+    log "crashloop マーカーがあるためセーフモードで起動します(削除: rm $CRASH)"
+    SAFE=1
+fi
+export AME_SAFE_MODE="$SAFE"
+
+if [ "${AME_SESSION_NESTED:-0}" != "1" ] && command -v dbus-update-activation-environment >/dev/null 2>&1; then
+    dbus-update-activation-environment XDG_SESSION_TYPE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS PATH >/dev/null 2>&1
+fi
+
+if ! command -v river >/dev/null 2>&1; then
+    log "ERROR: river が見つかりません"
+    exit 1
+fi
+log "river $(river -version 2>&1) / init=$INIT / safe=$SAFE"
+
+# River 0.3 は -c <コマンド> で init を差し替えられる。~/.config/river/init は読まない。
+started=$(date +%s)
+# shellcheck disable=SC2086  # SEAT_WRAP は意図的に単語分割する
+$SEAT_WRAP river -c "$INIT" >> "$LOG" 2>&1
+rc=$?
+dur=$(( $(date +%s) - started ))
+log "river exited rc=$rc after ${dur}s"
+
+if [ "$dur" -lt 5 ] && [ "${AME_SESSION_NESTED:-0}" != "1" ]; then
+    n=$(( $(cat "$FAILS" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" > "$FAILS"
+    log "quick failure #$n"
+    if [ "$n" -ge 3 ]; then
+        : > "$CRASH"
+        log "3 回連続で起動直後に終了したため crashloop を記録しました(次回はセーフモード)"
+    fi
+elif [ "$dur" -ge 60 ]; then
+    # 正常に長く動いたので失敗記録を消す
+    rm -f "$FAILS" "$CRASH"
+fi
+log "=== end ==="
+exit $rc

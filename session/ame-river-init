@@ -1,0 +1,97 @@
+#!/bin/sh
+# ame-river-init: Ame Shell 用の River 0.3 初期化スクリプト(riverctl で設定)。
+# ユーザーの ~/.config/river/init は読まず、触りもしない。
+# 追加設定は ~/.config/ame-shell/river-extra.sh があれば最後に読み込む。
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ame-shell"
+LOG="$STATE_DIR/session.log"
+log() { printf '%s [river-init] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
+SAFE="${AME_SAFE_MODE:-0}"
+
+# ---- 基本 ----
+riverctl background-color 0x050a18
+riverctl border-color-focused 0x7ab8ff
+riverctl border-color-unfocused 0x1c2840
+riverctl border-width 2
+riverctl set-repeat 30 300
+riverctl focus-follows-cursor normal
+riverctl xcursor-theme Adwaita 24 2>/dev/null
+
+# ---- キーバインド ----
+riverctl map normal Super Return spawn foot
+riverctl map normal Super D spawn "ame-ctl launcher toggle"
+riverctl map normal Super A spawn "ame-ctl dashboard toggle"
+riverctl map normal Super N spawn "ame-ctl notifications toggle"
+riverctl map normal Super Q close
+riverctl map normal Super+Shift E exit
+riverctl map normal Super L spawn "ame-ctl lock"
+riverctl map normal Super+Shift R spawn "ame-ctl restart"
+riverctl map normal Super J focus-view next
+riverctl map normal Super K focus-view previous
+riverctl map normal Super+Shift J swap next
+riverctl map normal Super+Shift K swap previous
+riverctl map normal Super F toggle-fullscreen
+riverctl map normal Super Space toggle-float
+riverctl map normal Super H send-layout-cmd rivertile "main-ratio -0.05"
+riverctl map normal Super+Shift L send-layout-cmd rivertile "main-ratio +0.05"
+riverctl map-pointer normal Super BTN_LEFT move-view
+riverctl map-pointer normal Super BTN_RIGHT resize-view
+
+for i in 1 2 3 4 5 6 7 8 9; do
+    tags=$((1 << (i - 1)))
+    riverctl map normal Super "$i" set-focused-tags $tags
+    riverctl map normal Super+Shift "$i" set-view-tags $tags
+    riverctl map normal Super+Control "$i" toggle-focused-tags $tags
+done
+
+# メディアキー(OSD 付き)。ロック中でも効くよう locked モードにも割り当てる
+for mode in normal locked; do
+    riverctl map $mode None XF86AudioRaiseVolume spawn "ame-ctl volume up"
+    riverctl map $mode None XF86AudioLowerVolume spawn "ame-ctl volume down"
+    riverctl map $mode None XF86AudioMute spawn "ame-ctl volume mute"
+    riverctl map $mode None XF86MonBrightnessUp spawn "ame-ctl brightness up"
+    riverctl map $mode None XF86MonBrightnessDown spawn "ame-ctl brightness down"
+    riverctl map $mode None XF86AudioPlay spawn "playerctl play-pause"
+    riverctl map $mode None XF86AudioNext spawn "playerctl next"
+    riverctl map $mode None XF86AudioPrev spawn "playerctl previous"
+done
+
+# ---- レイアウト ----
+riverctl default-layout rivertile
+command -v rivertile >/dev/null 2>&1 && rivertile -view-padding 6 -outer-padding 8 &
+
+[ -f "$HOME/.config/ame-shell/river-extra.sh" ] && . "$HOME/.config/ame-shell/river-extra.sh"
+
+if [ "$SAFE" = "1" ]; then
+    log "safe mode: ame-shell は起動しません"
+    foot &
+    exit 0
+fi
+
+# ---- ame-shell の監督: 30 秒以内に 3 回落ちたら再起動をやめて foot で知らせる ----
+(
+    crashes=""
+    while :; do
+        start=$(date +%s)
+        ame-shell >> "$LOG" 2>&1
+        rc=$?
+        now=$(date +%s)
+        # Super+Shift+R(ame-ctl restart)は exec で自分を置き換えるのでここには来ない。
+        # rc=0 は ame-ctl quit などの意図した終了なので再起動しない。
+        if [ "$rc" -eq 0 ]; then
+            log "ame-shell exited normally"
+            break
+        fi
+        log "ame-shell crashed rc=$rc after $((now - start))s"
+        kept=""
+        for t in $crashes; do [ $((now - t)) -lt 30 ] && kept="$kept $t"; done
+        crashes="$kept $now"
+        set -- $crashes
+        if [ "$#" -ge 3 ]; then
+            log "30 秒以内に 3 回落ちたため再起動を停止します"
+            foot sh -c "echo 'ame-shell が繰り返し終了したため停止しました。'; echo 'ログ: $LOG'; echo 'Super+Shift+E で River を終了できます。'; exec \${SHELL:-/bin/sh}" &
+            break
+        fi
+        sleep 1
+    done
+) &

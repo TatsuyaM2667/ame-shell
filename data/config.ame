@@ -1,0 +1,53 @@
+// ame-shell 既定設定。~/.config/ame-shell/config.ame にコピーして編集すると、保存した瞬間に反映されます。
+// 文法: セクション { キー 値 }   値は数値 / "文字列" / 単語 / #RRGGBB / on|off
+
+theme {
+  accent #7ab8ff          // アクセント色
+  tint #0b1730            // ガラスの色
+  tint-strength 0.42      // ガラスの色の濃さ(0〜1)
+  text #eaf2ff
+  subtext #9fb4d6
+  radius 18               // 角丸
+  blur 3                  // ブラーの強さ(1〜4)
+  refraction 10           // 縁の屈折(px)
+  sparkle 0.7             // ガラスのきらめき(0で無効)
+  anim-speed 1.0          // アニメ速度の倍率
+  media-accent on         // 再生中のアルバムアートの色をアクセントにする
+}
+
+bar {
+  height 38
+  margin 8
+  position top            // top | bottom
+  clock-24h on
+  show-seconds off        // on にすると毎秒再描画(省電力のため既定は off)
+}
+
+wallpaper {
+  mode aurora             // aurora | rain | image
+  // image "~/Pictures/wallpaper.jpg"
+  animate on              // off で完全に静止(待機時 CPU ほぼ 0)
+  fps 30                  // AC 電源時
+  battery-fps 12          // バッテリー時(解像度も 3/4 に下がる)
+  scale 0.5               // ライブ壁紙の内部解像度
+  aurora-a #29d6b0
+  aurora-b #3d7bff
+  aurora-c #9a5cff
+}
+
+font {
+  ui "Noto Sans CJK JP"
+  icon "JetBrainsMono Nerd Font Propo"
+}
+
+apps {
+  terminal foot
+}
+
+notifications {
+  timeout 6000            // ms
+}
+
+lock {
+  enabled on
+}

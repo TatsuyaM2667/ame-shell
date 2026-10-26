@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Ame Shell (Safe Mode)
+Name[ja]=Ame Shell(セーフモード)
+Comment=River with foot only, without ame-shell
+Comment[ja]=ame-shell を起動しない最小構成(River + foot)
+Exec=@PREFIX@/bin/ame-session --safe
+TryExec=@PREFIX@/bin/ame-session
+DesktopNames=river

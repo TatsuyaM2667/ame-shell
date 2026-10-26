@@ -1,0 +1,6 @@
+#!/bin/sh
+# ネスト/ヘッドレス River での試験用 init(開発専用)
+riverctl map normal Super Return spawn foot
+riverctl default-layout rivertile
+rivertile -view-padding 6 -outer-padding 6 &
+exec "$AME_BIN" > "$AME_LOG" 2>&1
