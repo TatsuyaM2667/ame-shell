@@ -34,5 +34,6 @@ pub fn main() !u8 {
         // 監督ループ(river.sh / ame-river-init)が再起動するよう、異常終了として返す
         return 1;
     }
+    if (app.disconnected) return 1;
     return 0;
 }

@@ -155,6 +155,8 @@ pub const App = struct {
     sys: SysState = .{},
     running: bool = true,
     restart_requested: bool = false,
+    /// コンポジタとの接続が切れて終わった(監督ループに再起動させるため異常終了で返す)
+    disconnected: bool = false,
 
     // 入力
     ptr_surface: ?*Surface = null,
@@ -272,7 +274,11 @@ pub const App = struct {
             if (!self.read_done) c.wl_display_cancel_read(self.display);
             self.read_done = false;
             if (c.wl_display_dispatch_pending(self.display) < 0) {
-                log.err("Wayland 接続が切れました", .{});
+                var err_if: ?*const c.struct_wl_interface = null;
+                var id: u32 = 0;
+                const perr = c.wl_display_get_protocol_error(self.display, @ptrCast(&err_if), &id);
+                log.err("Wayland 接続が切れました(errno={d} protocol_error={d} {s}#{d})", .{ c.wl_display_get_error(self.display), perr, if (err_if) |i| std.mem.sliceTo(i.name, 0) else "-", id });
+                self.disconnected = true;
                 break;
             }
             if (self.reap_pending) {
