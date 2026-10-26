@@ -414,7 +414,7 @@ pub const App = struct {
             log.info("設定を再読込しました", .{});
             if (old.layout != cfg.layout) {
                 for (self.outputs.items) |o| self.setupShell(o);
-            } else if (self.cfg.layout == .caelestia and (old.frame_thickness != cfg.frame_thickness or old.frame_bar_width != cfg.frame_bar_width)) {
+            } else if (self.cfg.layout == .caelestia and (old.frame_thickness != cfg.frame_thickness or old.frame_bar_width != cfg.frame_bar_width or old.ui_scale != cfg.ui_scale)) {
                 for (self.outputs.items) |o| if (o.frame) |f| f.geometryChanged();
             }
             if (old.bar_position != cfg.bar_position) {

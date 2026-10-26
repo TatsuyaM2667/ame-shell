@@ -87,6 +87,8 @@ pub const Frame = struct {
     out: *Output,
     surf: *Surface,
     excl: [4]?*Surface = .{ null, null, null, null },
+    /// 表示倍率(shell.ui-scale)。レイアウトは「論理 px / S」の仮想座標で行い、描画と入力で S 倍・1/S 倍する
+    S: f32 = 1,
     W: f32 = 0,
     H: f32 = 0,
 
@@ -200,10 +202,10 @@ pub const Frame = struct {
         const Tp = c.ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP;
         const Bt = c.ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM;
         const specs = [4]struct { anchor: c_int, w: u32, h: u32, zone: f32 }{
-            .{ .anchor = L | Tp | Bt, .w = 1, .h = 0, .zone = self.BW() },
-            .{ .anchor = Tp | L | Rt, .w = 0, .h = 1, .zone = self.T() },
-            .{ .anchor = Rt | Tp | Bt, .w = 1, .h = 0, .zone = self.T() },
-            .{ .anchor = Bt | L | Rt, .w = 0, .h = 1, .zone = self.T() },
+            .{ .anchor = L | Tp | Bt, .w = 1, .h = 0, .zone = self.BW() * self.app.cfg.ui_scale },
+            .{ .anchor = Tp | L | Rt, .w = 0, .h = 1, .zone = self.T() * self.app.cfg.ui_scale },
+            .{ .anchor = Rt | Tp | Bt, .w = 1, .h = 0, .zone = self.T() * self.app.cfg.ui_scale },
+            .{ .anchor = Bt | L | Rt, .w = 0, .h = 1, .zone = self.T() * self.app.cfg.ui_scale },
         };
         for (specs, 0..) |sp, i| {
             const s = Surface.createLayer(self.app, .{ .ctx = self, .draw = drawNothing }, .{
@@ -236,8 +238,9 @@ pub const Frame = struct {
 
     fn configured(ctx: *anyopaque, s: *Surface) void {
         const self: *Frame = @ptrCast(@alignCast(ctx));
-        self.W = @floatFromInt(s.width);
-        self.H = @floatFromInt(s.height);
+        self.S = self.app.cfg.ui_scale;
+        self.W = @as(f32, @floatFromInt(s.width)) / self.S;
+        self.H = @as(f32, @floatFromInt(s.height)) / self.S;
         s.origin = .{ 0, 0 };
         // 全面サーフェスなので、壁紙より先に configure されたらここで出力サイズを決める
         if (self.out.width == 0) {
@@ -461,8 +464,12 @@ pub const Frame = struct {
     // 入力
     // ---------------------------------------------------------------------
 
-    fn pointer(ctx: *anyopaque, s: *Surface, ev: surface.PointerEvent) void {
+    fn pointer(ctx: *anyopaque, s: *Surface, ev_raw: surface.PointerEvent) void {
         const self: *Frame = @ptrCast(@alignCast(ctx));
+        // 仮想座標に直す
+        var ev = ev_raw;
+        ev.x /= self.S;
+        ev.y /= self.S;
         switch (ev.kind) {
             .enter => {
                 self.ptr_in = true;
@@ -552,7 +559,12 @@ pub const Frame = struct {
     fn draw(ctx: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
         const self: *Frame = @ptrCast(@alignCast(ctx));
         const app = self.app;
-        if (self.W == 0) return false;
+        if (s.width == 0) return false;
+        // 倍率は設定の再読込で変わりうるので毎回求め直す
+        self.S = app.cfg.ui_scale;
+        self.W = @as(f32, @floatFromInt(s.width)) / self.S;
+        self.H = @as(f32, @floatFromInt(s.height)) / self.S;
+        const S_ = self.S;
         const W = self.W;
         const H = self.H;
         const T_ = self.T();
@@ -708,7 +720,10 @@ pub const Frame = struct {
         }
 
         // ---- 枠 ----
+        sh.scale(S_);
         cv.frameBg(&sh);
+        cv.save();
+        cv.scaleAbout(0, 0, S_);
 
         // ---- バー ----
         if (self.bar.draw(self, cv, dt)) animating = true;
@@ -750,6 +765,7 @@ pub const Frame = struct {
         // 通知カードのスプリングは通知ドロワーが閉じていても進める(片付けのため)
         if (side.stepNotifs(self, dt)) animating = true;
 
+        cv.restore();
         // ---- 入力領域: バー + 縁 + 見えているドロワー ----
         var rects: [16][4]f32 = undefined;
         var n: usize = 0;
@@ -766,6 +782,9 @@ pub const Frame = struct {
                 rects[n] = d.vis;
                 n += 1;
             }
+        }
+        for (rects[0..n]) |*r| {
+            for (r) |*v| v.* *= S_;
         }
         s.setInputRects(rects[0..n]);
         return animating;

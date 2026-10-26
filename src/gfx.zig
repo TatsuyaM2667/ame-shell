@@ -1045,6 +1045,17 @@ pub const FrameShape = struct {
     shadow: f32 = 0.35,
     sparkle: f32 = 0.6,
 
+    /// 仮想座標で組んだ形を表示倍率に合わせて拡大する
+    pub fn scale(self: *FrameShape, s: f32) void {
+        for (&self.hole) |*v| v.* *= s;
+        self.hole_r *= s;
+        for (self.boxes[0..self.n], self.params[0..self.n]) |*b, *p| {
+            for (b) |*v| v.* *= s;
+            p[0] *= s;
+            p[1] *= s;
+        }
+    }
+
     pub fn add(self: *FrameShape, x: f32, y: f32, w: f32, h: f32, r: f32, k: f32) void {
         if (self.n >= self.boxes.len or w <= 0.5 or h <= 0.5) return;
         self.boxes[self.n] = .{ x, y, w, h };
