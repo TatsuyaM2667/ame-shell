@@ -57,3 +57,11 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - 壁紙ピッカー(src/wallpick.zig): ilyamiro の serpantinum を読んで(コードは使わず)、斜めの平行四辺形カード・選択カードの拡大・パララックス・時間差で飛び上がる出現を実装。切り替え演出(wallpaper シェーダ)に円(カード位置から、光るリング+屈折)/ 斜めワイプ(光の筋)/ 短冊、新しい壁紙のズーム着地を追加。選んだ壁紙は ~/.local/state/ame-shell/wallpaper に保存して次回起動時も使う。
 - メディア: 歌詞(src/lyrics.zig、LRCLIB から同期歌詞を非同期取得・キャッシュ、動画タイトルの飾りを除去して検索)。メディアタブを作り直し: ぼかしたジャケットの背景、回るレコード(ジャケットがラベル)+ cava の放射スペクトラム + 再生/停止で上下するトーンアーム、シャッフル/リピート、カラオケ風に塗られていく同期歌詞(スプリングでスクロール)。ダッシュボードの小さなメディア欄にも今の一節を表示。
 - 試験: `debug-media`(AME_DEBUG 時のみ)で再生中の状態を作り、ライラック(Mrs. GREEN APPLE)の同期歌詞が位置に合わせて進むことを確認。
+
+## 2026-10-27(追記 2)
+- パフォーマンス: CPU / GPU / メモリ / ストレージの 4 つの円(CPU・GPU は内側に温度の円弧)。機種(DMI)・CPU(/proc/cpuinfo)・GPU(GL_RENDERER)・ディスク型番(sysfs)を表示。ダッシュボードのユーザー欄にも機種・CPU・GPU。
+- ランチャー: よく使う順(起動回数 × 最近使ったかの重み)、お気に入りの固定(Ctrl+F / 右クリック、~/.config/ame-shell/favorites)。
+- 配色: 壁紙の画素から Odin で代表色 → HSL で アクセント / ガラス / 文字色 を生成し、1.1 秒かけて遷移(theme.auto-color)。再生中のアルバムアートはアクセントだけを上書き(theme.media-accent)。
+- Wi-Fi / Bluetooth 設定パネル(バーのネット/Bluetooth アイコン、ame-ctl network|bluetooth): 一覧・接続・切断・パスワード入力・スキャン・電源。nmcli / bluetoothctl を非同期キューで実行。不具合修正: 画面より背の高いパネルで clamp の上下限が逆転して落ちていた。
+- アプリ起動: river の default-attach-mode below(Hyprland と同じく、フォーカス中の窓の次に入る)。起動演出: ランチャーのアイコンから、ウィンドウが現れる位置(rivertile の配置から推定)へガラス板が広がり、新しい窓にフォーカスが移ると拡大しながら消える。
+- 未対応: ウィンドウそのものの開閉・移動アニメーション。River 0.3 ではウィンドウを外から動かす手段が無い。River 0.4 以降(river-window-management-v1)なら、WM として毎フレーム位置とクリップを指定できるので実装可能(要: wlroots0.20-devel の導入、Zig 0.16、WM の自作)。
