@@ -31,6 +31,14 @@ Chimera Linux(musl + dinit)向け。SDDM から選んでログインできるセ
 - **ロック画面**(Super+L): ext-session-lock-v1 + PAM。認証できない構成ではロックしない(閉じ込め防止)。
 - **ame-ctl**: Unix ソケットでシェルを操作する CLI。
 
+**その後に追加したもの**:
+- **River 0.5 セッション「Ame Shell (River 0.5)」**: ame-shell がウィンドウマネージャ(river-window-management-v1)を兼ねる。Hyprland の dwindle 配置、ワークスペース 1〜9、窓の開閉・移動・ワークスペース切替・閉じるのアニメーション(`src/wm/`)。River 0.3 のセッションもそのまま使える。
+- **壁紙から配色を自動生成**: 壁紙の一番鮮やかな色からアクセント(くすんだ緑は避ける)、ガラス・文字色も合わせて滑らかに遷移。エラーは赤で、失敗したときは枠の縁が赤く光る。
+- **ライブ壁紙に GIF / MP4**: libmpv を実行時に読み込み(dlopen)、ハードウェア復号した動画を壁紙に。
+- **Wi-Fi / Bluetooth の設定パネル**、音量のポップアウトで**出力先・入力先の切り替え**。Bluetooth のイヤホンは接続すると自動で音の出力先になる。
+- **ダッシュボード**: 機種・CPU・GPU 名、ユーザーの写真(クリックで選択)、同期歌詞つきのメディア、CPU/GPU/メモリ/ストレージの円グラフ、ワークスペースごとのアプリ名。
+- **ランチャー**: よく使う順・お気に入りの固定、アイコンは全アイコンテーマ + SVG。
+
 ## ビルド
 
 必要: zig 0.13、odin、wayland-scanner、wayland / EGL / GLESv2 / xkbcommon / freetype / harfbuzz / fontconfig / dbus の開発ファイル(詳細は `docs/deps.md`)。
@@ -91,7 +99,7 @@ PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session
 | Super+Shift+W | 壁紙ピッカー(斜めのカード。決定するとカードの位置から円・斜めワイプ・短冊のいずれかで切り替え)|
 | Super+N | 通知センター |
 | Super+Q | ウィンドウを閉じる |
-| Super+L | ロック |
+| Super+L | ロック(River 0.5 / river.sh では比率の変更は Super+Ctrl+H/L) |
 | Super+Shift+E | River を終了(脱出口) |
 | Super+Shift+R | ame-shell を再起動 |
 | Super+1..9 / Super+Shift+1..9 / Super+Ctrl+1..9 | タグ切替 / ウィンドウを移動 / タグの表示を足す |
@@ -148,10 +156,15 @@ ame-ctl lock | reload | widgets reload | stats | restart | quit
 
 ## 既知の問題
 
-- River 0.3.5 にはウィンドウ越しのブラー(ext-background-effect)と外部 WM プロトコルが無いため、ウィンドウの開閉アニメ(Phase 6)とウィンドウ越しのガラスは未対応。
-- ランチャーの日本語入力(IME)未対応。アイコンは PNG のみ(SVG は頭文字アイコン)。トレイ未実装。
+- ウィンドウの開閉アニメは River 0.5 セッションのみ(River 0.3 には外部から窓を動かす手段が無い)。ウィンドウ越しのガラスは未対応。
+- ランチャーの日本語入力(IME)未対応。トレイ未実装。
+- 動画壁紙は再生中 CPU 約 5%(720p)・メモリ +130MB 程度。
 - RSS は約 130MB(うち約 70MB は Mesa/LLVM の共有ライブラリ。PSS は約 75MB)。
 - 詳細は `docs/blockers.md`、計測値は `docs/perf.md`。
 
 ## ドキュメント
 `docs/architecture.md`(構成)・`docs/decisions.md`(設計判断と理由)・`docs/perf.md`(実測)・`docs/reference-analysis.md`(参考シェルの分析)・`docs/progress.md`(進捗)
+
+## ライセンス
+
+GPL-3.0(`LICENSE`)。同梱のサードパーティ: wasm3(MIT、`third_party/wasm3/LICENSE`)、stb_image(MIT / パブリックドメイン)、nanosvg(zlib)。`protocol/` の XML は各プロトコルのライセンスに従います。
