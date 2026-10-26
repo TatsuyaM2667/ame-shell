@@ -35,14 +35,15 @@ const ui_vs =
     \\void main(){
     \\  float kind = a_p0.y;
     \\  // 影・発光は矩形の外側まで描くので四角形を広げる。文字は SDF の余白内で完結。
-    \\  float pad = kind == 1.0 ? a_p0.w * 1.6 + 2.0 : (kind == 3.0 ? 0.0 : 1.5);
+    \\  float pad = kind == 1.0 ? a_p0.w * 1.6 + 2.0 : ((kind == 3.0 || kind == 7.0) ? 0.0 : 1.5);
     \\  vec2 half_ = a_rect.zw * 0.5;
     \\  vec2 center = a_rect.xy + half_;
     \\  vec2 lp = (a_corner * 2.0 - 1.0) * (half_ + pad);
     \\  vec2 pos = center + lp;
     \\  v_p = lp; v_frag = pos; v_half = half_;
     \\  v_l01 = lp / max(half_, vec2(0.001)) * 0.5 + 0.5;
-    \\  v_uv = kind == 3.0 ? mix(a_p1.xy, a_p1.zw, a_corner) : v_l01;
+    \\  // 7 = 縦書き(時計回りに 90° 回したグリフ): 画面の下方向がグリフの右方向になる
+    \\  v_uv = kind == 3.0 ? mix(a_p1.xy, a_p1.zw, a_corner) : (kind == 7.0 ? mix(a_p1.xy, a_p1.zw, vec2(a_corner.y, 1.0 - a_corner.x)) : v_l01);
     \\  v_c0 = a_c0; v_c1 = a_c1; v_c2 = a_c2; v_p0 = a_p0; v_p1 = a_p1; v_clip = a_clip;
     \\  gl_Position = vec4(pos.x / u_size.x * 2.0 - 1.0, 1.0 - pos.y / u_size.y * 2.0, 0.0, 1.0);
     \\}
@@ -126,7 +127,7 @@ const ui_fs =
     \\      }
     \\    }
     \\    o = vec4(col, 1.0) * mask * v_p1.y;
-    \\  } else if (kind == 3.0) {     // SDF 文字
+    \\  } else if (kind == 3.0 || kind == 7.0) {     // SDF 文字(7 は縦)
     \\    float v = texture(u_atlas, v_uv).r;
     \\    float k = v_p0.z;           // 基準px → 画面px の倍率
     \\    float dist = (v - 0.5) * 2.0 * 6.0 * k + 0.15;  // 画面px単位の符号付き距離(内側が正)
@@ -145,6 +146,11 @@ const ui_fs =
     \\    ang = ang < 0.0 ? ang + 1.0 : ang;
     \\    float on = smoothstep(v_p1.x + 0.002, v_p1.x - 0.002, ang);
     \\    o = mix(pm(v_c1), pm(v_c0), on) * a;
+    \\  } else if (kind == 8.0) {     // 線分(両端が丸い)。p1 = 端点 a, b(矩形中心からの相対座標)
+    \\    vec2 pa = v_p - v_p1.xy, ba = v_p1.zw - v_p1.xy;
+    \\    float hh = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
+    \\    float d = length(pa - ba * hh) - v_p0.z * 0.5;
+    \\    o = pm(v_c0) * clamp(0.5 - d / px, 0.0, 1.0);
     \\  } else {                      // 画像(角丸マスク)
     \\    float d = sdBox(v_p, v_half, r);
     \\    float a = clamp(0.5 - d / px, 0.0, 1.0);
@@ -293,6 +299,67 @@ const wall_fs =
     \\}
 ;
 
+/// caelestia 風の「枠」: 画面の縁 + 縁から生える引き出し(ドロワー)を 1 つの SDF で描く。
+/// 枠 = 「窓の穴(角丸矩形)」の外側。各ドロワーは縁に貼り付いた角丸矩形で、smooth-min で
+/// 枠と融合させるので、付け根に凹の丸み(フィレット)ができ、伸びると「ニョキッ」と生えて見える。
+const frame_fs =
+    \\#version 300 es
+    \\precision highp float;
+    \\in vec2 v_uv;
+    \\uniform vec2 u_size; uniform float u_scale; uniform vec2 u_output; uniform vec2 u_origin;
+    \\uniform sampler2D u_blur; uniform float u_time;
+    \\uniform vec4 u_hole; uniform float u_hole_r;
+    \\uniform vec4 u_box[14]; uniform vec2 u_boxp[14]; uniform int u_n;
+    \\uniform vec4 u_tint; uniform vec4 u_rim; uniform vec4 u_sheen; uniform float u_shadow; uniform float u_sparkle;
+    \\out vec4 o;
+    \\float sdBox(vec2 p, vec2 b, float r){ r = min(r, min(b.x, b.y)); vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
+    \\float smin(float a, float b, float k){ if (k <= 0.01) return min(a, b); float h = max(k - abs(a - b), 0.0) / k; return min(a, b) - h * h * k * 0.25; }
+    \\float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+    \\// 各ドロワーは「枠とだけ」なめらかに融合させ、ドロワー同士は普通の和集合にする
+    \\//(連鎖的に smin すると、近くのドロワー同士が細い橋でつながってしまうため)
+    \\float scene(vec2 p){
+    \\  float fr = -sdBox(p - (u_hole.xy + u_hole.zw * 0.5), u_hole.zw * 0.5, u_hole_r);
+    \\  float m = fr;
+    \\  for (int i = 0; i < 14; i++) {
+    \\    if (i >= u_n) break;
+    \\    vec4 b = u_box[i];
+    \\    m = min(m, smin(fr, sdBox(p - (b.xy + b.zw * 0.5), b.zw * 0.5, u_boxp[i].x), u_boxp[i].y));
+    \\  }
+    \\  return m;
+    \\}
+    \\void main(){
+    \\  vec2 p = vec2(v_uv.x, 1.0 - v_uv.y) * u_size;
+    \\  float m = scene(p);
+    \\  float px = 1.0 / u_scale;
+    \\  if (m > 36.0) discard;                       // 枠から遠い(窓の領域): 何も描かない
+    \\  float a = clamp(0.5 - m / px, 0.0, 1.0);
+    \\  float sh = u_shadow * exp(-max(m, 0.0) / 8.0) * (1.0 - a);   // 窓側に落ちる柔らかい影
+    \\  if (a <= 0.0) { o = vec4(0.0, 0.005, 0.02, 1.0) * sh; return; }
+    \\  vec2 e = vec2(0.75, 0.0);
+    \\  vec2 n = normalize(vec2(scene(p + e.xy) - scene(p - e.xy), scene(p + e.yx) - scene(p - e.yx)) + 1e-5);
+    \\  float edge = 1.0 - smoothstep(0.0, 14.0, -m);
+    \\  vec2 sp = u_origin + p - n * edge * edge * 8.0;
+    \\  vec2 uv = vec2(sp.x / u_output.x, 1.0 - sp.y / u_output.y);
+    \\  vec3 bg = texture(u_blur, uv).rgb;
+    \\  vec3 col = mix(bg, u_tint.rgb, u_tint.a);
+    \\  col += u_sheen.rgb * u_sheen.a * edge * edge;
+    \\  float line = clamp(1.0 - abs(m + 0.75) / (1.1 * px + 0.35), 0.0, 1.0);
+    \\  float facing = 0.4 + 0.6 * max(0.0, dot(n, normalize(vec2(-0.5, -0.85))));
+    \\  col = mix(col, u_rim.rgb, line * facing * u_rim.a);
+    \\  col += (hash(gl_FragCoord.xy) - 0.5) * 0.025;
+    \\  if (u_sparkle > 0.0) {
+    \\    vec2 cell = floor((p + u_origin) / 30.0);
+    \\    float h = hash(cell);
+    \\    if (h > 0.9) {
+    \\      vec2 star = (cell + vec2(hash(cell + 7.1), hash(cell + 3.7))) * 30.0 - u_origin;
+    \\      float tw = 0.5 + 0.5 * sin(u_time * (1.5 + h * 2.0) + h * 40.0);
+    \\      col += vec3(0.8, 0.9, 1.0) * pow(max(0.0, 1.0 - length(p - star) / 1.5), 2.0) * tw * u_sparkle;
+    \\    }
+    \\  }
+    \\  o = vec4(col, 1.0) * a + vec4(0.0, 0.005, 0.02, 1.0) * sh;
+    \\}
+;
+
 const down_fs =
     \\#version 300 es
     \\precision mediump float;
@@ -345,6 +412,7 @@ pub const Gpu = struct {
     down: c.GLuint = 0,
     up: c.GLuint = 0,
     blit: c.GLuint = 0,
+    frame: c.GLuint = 0,
     vao: c.GLuint = 0,
     quad_vbo: c.GLuint = 0,
     inst_vbo: c.GLuint = 0,
@@ -395,6 +463,7 @@ pub const Gpu = struct {
         g.down = try program(fs_vs, down_fs);
         g.up = try program(fs_vs, up_fs);
         g.blit = try program(fs_vs, blit_fs);
+        g.frame = try program(fs_vs, frame_fs);
         g.u.size = c.glGetUniformLocation(g.ui, "u_size");
         g.u.origin = c.glGetUniformLocation(g.ui, "u_origin");
         g.u.output = c.glGetUniformLocation(g.ui, "u_output");
@@ -784,6 +853,90 @@ pub const Canvas = struct {
     pub fn arc(self: *Canvas, cx: f32, cy: f32, radius: f32, thick: f32, progress: f32, fg: Color, track: Color) void {
         self.push(cx - radius, cy - radius, radius * 2, radius * 2, fg, track, fg, .{ 0, 4, 0, 0 }, .{ std.math.clamp(progress, 0, 1), thick * self.xf.s, 0, 0 });
     }
+    /// caelestia 風の枠とドロワーを描く(全画面パス)。それまでの命令は先に描いておく。
+    pub fn frameBg(self: *Canvas, sh: *const FrameShape) void {
+        self.flush();
+        const g = self.gpu;
+        const P = g.frame;
+        c.glEnable(c.GL_BLEND);
+        c.glBlendFunc(c.GL_ONE, c.GL_ONE_MINUS_SRC_ALPHA);
+        c.glUseProgram(P);
+        c.glBindVertexArray(g.empty_vao);
+        c.glUniform2f(c.glGetUniformLocation(P, "u_size"), self.size[0], self.size[1]);
+        c.glUniform1f(c.glGetUniformLocation(P, "u_scale"), self.scale);
+        c.glUniform2f(c.glGetUniformLocation(P, "u_output"), self.output[0], self.output[1]);
+        c.glUniform2f(c.glGetUniformLocation(P, "u_origin"), self.origin[0], self.origin[1]);
+        c.glUniform1f(c.glGetUniformLocation(P, "u_time"), self.time);
+        c.glUniform4f(c.glGetUniformLocation(P, "u_hole"), sh.hole[0], sh.hole[1], sh.hole[2], sh.hole[3]);
+        c.glUniform1f(c.glGetUniformLocation(P, "u_hole_r"), sh.hole_r);
+        c.glUniform4fv(c.glGetUniformLocation(P, "u_box"), @intCast(sh.n), @ptrCast(&sh.boxes));
+        c.glUniform2fv(c.glGetUniformLocation(P, "u_boxp"), @intCast(sh.n), @ptrCast(&sh.params));
+        c.glUniform1i(c.glGetUniformLocation(P, "u_n"), @intCast(sh.n));
+        c.glUniform4f(c.glGetUniformLocation(P, "u_tint"), sh.tint.r, sh.tint.g, sh.tint.b, sh.tint.a);
+        c.glUniform4f(c.glGetUniformLocation(P, "u_rim"), sh.rim.r, sh.rim.g, sh.rim.b, sh.rim.a);
+        c.glUniform4f(c.glGetUniformLocation(P, "u_sheen"), sh.sheen.r, sh.sheen.g, sh.sheen.b, sh.sheen.a);
+        c.glUniform1f(c.glGetUniformLocation(P, "u_shadow"), sh.shadow);
+        c.glUniform1f(c.glGetUniformLocation(P, "u_sparkle"), sh.sparkle);
+        c.glUniform1i(c.glGetUniformLocation(P, "u_blur"), 1);
+        c.glActiveTexture(c.GL_TEXTURE1);
+        c.glBindTexture(c.GL_TEXTURE_2D, self.blur_tex);
+        c.glActiveTexture(c.GL_TEXTURE0);
+        c.glDrawArrays(c.GL_TRIANGLES, 0, 3);
+    }
+
+    /// 縦書き(時計回りに 90°。英数字は寝かせ、上から下へ読む)。cx は文字列の中心線、y は書き出し位置。
+    /// 戻り値は使った長さ(縦方向)。
+    pub fn textV(self: *Canvas, cx: f32, y: f32, size: f32, col: Color, str: []const u8, o: TextOpts) f32 {
+        const k = size / textmod.BASE_PX;
+        const shaped = self.fonts.shape(str, o.bold);
+        var len = shaped.width * k;
+        var limit = shaped.glyphs.len;
+        if (o.max_w > 0 and len > o.max_w) {
+            var n: usize = 0;
+            for (shaped.glyphs, 0..) |g, i| {
+                if ((g.x + g.glyph.left + g.glyph.w) * k > o.max_w - size) break;
+                n = i + 1;
+            }
+            limit = n;
+            len = o.max_w;
+        }
+        const y0 = switch (o.alignment) {
+            .left => y,
+            .center => y - len / 2,
+            .right => y - len,
+        };
+        // ベースラインは中心線より少し左(字面の高さの中央が cx に来るように)
+        const bx = cx - size * 0.36;
+        const kk = k * self.xf.s * self.scale;
+        var last: f32 = 0;
+        for (shaped.glyphs[0..limit]) |pg| {
+            const g = pg.glyph;
+            const gx = bx + (g.top - g.h - pg.y) * k;
+            const gy = y0 + (pg.x + g.left) * k;
+            self.push(gx, gy, g.h * k, g.w * k, col, col, o.glow_color, .{ 0, 7, kk, o.glow * self.xf.s * self.scale }, .{ g.u0, g.v0, g.u1, g.v1 });
+            last = (pg.x + g.left + g.w) * k;
+        }
+        if (limit < shaped.glyphs.len) {
+            // 省略は縦の「…」(点を 3 つ)
+            var i: f32 = 0;
+            while (i < 3) : (i += 1) self.rect(cx - 1.2, y0 + last + 4 + i * 4, 2.4, 2.4, 1.2, col);
+        }
+        return len;
+    }
+
+    /// 両端の丸い線分(音声スペクトラムの放射状のバー等)
+    pub fn line(self: *Canvas, x0: f32, y0: f32, x1: f32, y1: f32, thick: f32, col: Color) void {
+        const pad = thick;
+        const minx = @min(x0, x1) - pad;
+        const miny = @min(y0, y1) - pad;
+        const w = @abs(x1 - x0) + pad * 2;
+        const h = @abs(y1 - y0) + pad * 2;
+        const cx = minx + w / 2;
+        const cy = miny + h / 2;
+        const s = self.xf.s;
+        self.push(minx, miny, w, h, col, col, col, .{ 0, 8, thick * s, 0 }, .{ (x0 - cx) * s, (y0 - cy) * s, (x1 - cx) * s, (y1 - cy) * s });
+    }
+
     pub fn image(self: *Canvas, tex: c.GLuint, x: f32, y: f32, w: f32, h: f32, r: f32) void {
         if (tex == 0) return;
         if (self.cur_img != 0 and self.cur_img != tex) self.flush();
@@ -878,3 +1031,24 @@ pub fn textWrapImpl(self: *Canvas, x: f32, y: f32, size: f32, col: Color, str: [
         _ = self.text(x, y + @as(f32, @floatFromInt(i)) * line_h, size, col, seg, .{ .max_w = max_w });
     }
 }
+
+/// 枠の形(frameBg に渡す)。座標はサーフェスの論理 px。
+pub const FrameShape = struct {
+    hole: [4]f32 = .{ 0, 0, 0, 0 }, // 窓の穴 x, y, w, h
+    hole_r: f32 = 25,
+    boxes: [14][4]f32 = undefined, // ドロワーの矩形
+    params: [14][2]f32 = undefined, // 角丸, smooth-min の幅
+    n: usize = 0,
+    tint: Color = .{},
+    rim: Color = .{},
+    sheen: Color = .{},
+    shadow: f32 = 0.35,
+    sparkle: f32 = 0.6,
+
+    pub fn add(self: *FrameShape, x: f32, y: f32, w: f32, h: f32, r: f32, k: f32) void {
+        if (self.n >= self.boxes.len or w <= 0.5 or h <= 0.5) return;
+        self.boxes[self.n] = .{ x, y, w, h };
+        self.params[self.n] = .{ r, k };
+        self.n += 1;
+    }
+};

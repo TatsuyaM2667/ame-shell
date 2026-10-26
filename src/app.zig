@@ -13,6 +13,7 @@ const sys = @import("platform/sys.zig");
 const surface = @import("surface.zig");
 const Surface = surface.Surface;
 const Bar = @import("bar.zig").Bar;
+const Frame = @import("frame/frame.zig").Frame;
 const Wallpaper = @import("wallpaper.zig").Wallpaper;
 const Osd = @import("osd.zig").Osd;
 const Launcher = @import("launcher.zig").Launcher;
@@ -44,6 +45,8 @@ pub const Output = struct {
     layout: cfgmod.Str = .{},
     backdrop: gfx.Backdrop = .{},
     bar: ?*Bar = null,
+    /// caelestia レイアウトの枠(classic では null)
+    frame: ?*Frame = null,
     wall: ?*Wallpaper = null,
 
     pub fn logicalSize(self: *const Output) [2]u32 {
@@ -101,6 +104,7 @@ pub const App = struct {
     river_control: ?*c.struct_zriver_control_v1 = null,
     lock_mgr: ?*c.struct_ext_session_lock_manager_v1 = null,
     cursor_mgr: ?*c.struct_wp_cursor_shape_manager_v1 = null,
+    idle_mgr: ?*c.struct_zwp_idle_inhibit_manager_v1 = null,
     seat: ?*c.struct_wl_seat = null,
     seat_status: ?*c.struct_zriver_seat_status_v1 = null,
     pointer: ?*c.struct_wl_pointer = null,
@@ -219,6 +223,7 @@ pub const App = struct {
         app.startPactl();
         app.warmer = text.Warmer.init(alloc);
         app.warmer.add(text.common_chars);
+        app.warmer.add(@import("frame/warm_strings.zig").warm);
         app.warm_timer = try loop_mod.Timer.init();
         try app.loop.add(app.warm_timer.fd, c.EPOLLIN, app, onWarmTimer);
         app.warm_timer.arm(400, 0);
@@ -290,7 +295,7 @@ pub const App = struct {
             }
         }
         if (o.wall == null) o.wall = Wallpaper.create(self, o) catch null;
-        if (o.bar == null) o.bar = Bar.create(self, o) catch null;
+        self.setupShell(o);
         if (self.focused_output == null) self.focused_output = o;
     }
 
@@ -328,13 +333,41 @@ pub const App = struct {
     }
 
     /// 全てのバーを描き直す(状態が変わったとき)
+    /// レイアウトに応じてバー(classic)か枠(caelestia)を作る
+    fn setupShell(self: *App, o: *Output) void {
+        if (self.cfg.layout == .caelestia) {
+            if (o.bar) |b| b.destroy();
+        if (o.frame) |f| f.destroy();
+            o.bar = null;
+            if (o.frame == null) o.frame = Frame.create(self, o) catch |e| blk: {
+                log.err("枠を作れません: {s}", .{@errorName(e)});
+                break :blk null;
+            };
+        } else {
+            if (o.frame) |f| f.destroy();
+            o.frame = null;
+            if (o.bar == null) o.bar = Bar.create(self, o) catch null;
+        }
+    }
+
+    /// ランチャー等を出す出力の枠(caelestia のときだけ)
+    pub fn activeFrame(self: *App) ?*Frame {
+        if (self.cfg.layout != .caelestia) return null;
+        const o = self.activeOutput() orelse return null;
+        return o.frame;
+    }
+
     pub fn redrawBars(self: *App) void {
-        for (self.outputs.items) |o| if (o.bar) |b| b.surf.schedule();
+        for (self.outputs.items) |o| {
+            if (o.bar) |b| b.surf.schedule();
+            if (o.frame) |f| f.schedule();
+        }
     }
 
     /// 壁紙が変わったとき、その出力のガラス面を全て描き直す
     pub fn backdropChanged(self: *App, o: *Output) void {
         if (o.bar) |b| b.surf.schedule();
+        if (o.frame) |f| f.schedule();
         self.osd.backdropChanged();
         self.launcher.backdropChanged();
         self.dashboard.backdropChanged();
@@ -379,6 +412,11 @@ pub const App = struct {
         anim.speed_scale = cfg.anim_speed;
         if (!first) {
             log.info("設定を再読込しました", .{});
+            if (old.layout != cfg.layout) {
+                for (self.outputs.items) |o| self.setupShell(o);
+            } else if (self.cfg.layout == .caelestia and (old.frame_thickness != cfg.frame_thickness or old.frame_bar_width != cfg.frame_bar_width)) {
+                for (self.outputs.items) |o| if (o.frame) |f| f.geometryChanged();
+            }
             if (old.bar_position != cfg.bar_position) {
                 // 上下の入れ替えはアンカーが変わるので作り直す(入場アニメもやり直し)
                 for (self.outputs.items) |o| if (o.bar) |b| {
@@ -629,6 +667,8 @@ fn onGlobal(data: ?*anyopaque, reg: ?*c.struct_wl_registry, name: u32, interface
         app.river_control = @ptrCast(bind(reg, name, &c.zriver_control_v1_interface, ver, 1));
     } else if (iface(interface, &c.ext_session_lock_manager_v1_interface)) {
         app.lock_mgr = @ptrCast(bind(reg, name, &c.ext_session_lock_manager_v1_interface, ver, 1));
+    } else if (iface(interface, &c.zwp_idle_inhibit_manager_v1_interface)) {
+        app.idle_mgr = @ptrCast(bind(reg, name, &c.zwp_idle_inhibit_manager_v1_interface, ver, 1));
     } else if (iface(interface, &c.wp_cursor_shape_manager_v1_interface)) {
         app.cursor_mgr = @ptrCast(bind(reg, name, &c.wp_cursor_shape_manager_v1_interface, ver, 1));
     } else if (iface(interface, &c.wl_seat_interface)) {
@@ -706,6 +746,7 @@ fn rFocusedTags(data: ?*anyopaque, _: ?*c.struct_zriver_output_status_v1, tags: 
     const o: *Output = @ptrCast(@alignCast(data.?));
     o.focused_tags = tags;
     if (o.bar) |b| b.tagsChanged();
+    if (o.frame) |f| f.bar.tagsChanged(f);
 }
 fn rViewTags(data: ?*anyopaque, _: ?*c.struct_zriver_output_status_v1, arr: [*c]c.struct_wl_array) callconv(.C) void {
     const o: *Output = @ptrCast(@alignCast(data.?));
@@ -715,11 +756,13 @@ fn rViewTags(data: ?*anyopaque, _: ?*c.struct_zriver_output_status_v1, arr: [*c]
     for (0..n) |i| mask |= items[i];
     o.view_tags = mask;
     if (o.bar) |b| b.tagsChanged();
+    if (o.frame) |f| f.bar.tagsChanged(f);
 }
 fn rUrgent(data: ?*anyopaque, _: ?*c.struct_zriver_output_status_v1, tags: u32) callconv(.C) void {
     const o: *Output = @ptrCast(@alignCast(data.?));
     o.urgent_tags = tags;
     if (o.bar) |b| b.tagsChanged();
+    if (o.frame) |f| f.bar.tagsChanged(f);
 }
 fn rLayout(data: ?*anyopaque, _: ?*c.struct_zriver_output_status_v1, name: [*c]const u8) callconv(.C) void {
     const o: *Output = @ptrCast(@alignCast(data.?));
@@ -748,7 +791,10 @@ fn sFocusedView(data: ?*anyopaque, _: ?*c.struct_zriver_seat_status_v1, title: [
     if (std.mem.eql(u8, t, app.focused_title.get())) return;
     app.focused_title.set(t);
     app.title_serial +%= 1;
-    for (app.outputs.items) |o| if (o.bar) |b| b.titleChanged();
+    for (app.outputs.items) |o| {
+        if (o.bar) |b| b.titleChanged();
+        if (o.frame) |f| f.bar.titleChanged(f);
+    }
 }
 fn sMode(_: ?*anyopaque, _: ?*c.struct_zriver_seat_status_v1, _: [*c]const u8) callconv(.C) void {}
 const river_seat_listener = c.struct_zriver_seat_status_v1_listener{

@@ -15,6 +15,7 @@ const std = @import("std");
 
 pub const WallMode = enum(c_int) { aurora = 0, rain = 1, image = 2 };
 pub const BarPos = enum { top, bottom };
+pub const Layout = enum { caelestia, classic };
 
 pub const Config = struct {
     // theme
@@ -29,6 +30,13 @@ pub const Config = struct {
     sparkle: f32 = 0.7,
     anim_speed: f32 = 1.0,
     media_accent: bool = true, // 再生中のアルバムアートの色をアクセントにする
+    // shell: caelestia = 枠 + 縦バー + 縁から生えるドロワー / classic = 浮いた横バー
+    layout: Layout = .caelestia,
+    frame_thickness: f32 = 10,
+    frame_rounding: f32 = 25,
+    frame_smoothing: f32 = 20,
+    frame_bar_width: f32 = 46,
+    frame_opacity: f32 = 0.82,
     // bar
     bar_height: f32 = 38,
     bar_margin: f32 = 8,
@@ -234,6 +242,20 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             cfg.media_accent = boolean(val) orelse true;
         } else if (eq(u8, key, "anim-speed")) {
             if (num(val)) |n| cfg.anim_speed = std.math.clamp(n, 0.2, 4) else ok = false;
+        } else ok = false;
+    } else if (eq(u8, sec, "shell")) {
+        if (eq(u8, key, "layout")) {
+            cfg.layout = if (eq(u8, val, "classic")) .classic else .caelestia;
+        } else if (eq(u8, key, "frame-thickness")) {
+            if (num(val)) |n| cfg.frame_thickness = std.math.clamp(n, 2, 40) else ok = false;
+        } else if (eq(u8, key, "frame-rounding")) {
+            if (num(val)) |n| cfg.frame_rounding = std.math.clamp(n, 0, 60) else ok = false;
+        } else if (eq(u8, key, "frame-smoothing")) {
+            if (num(val)) |n| cfg.frame_smoothing = std.math.clamp(n, 0, 60) else ok = false;
+        } else if (eq(u8, key, "bar-width")) {
+            if (num(val)) |n| cfg.frame_bar_width = std.math.clamp(n, 30, 80) else ok = false;
+        } else if (eq(u8, key, "frame-opacity")) {
+            if (num(val)) |n| cfg.frame_opacity = std.math.clamp(n, 0, 1) else ok = false;
         } else ok = false;
     } else if (eq(u8, sec, "bar")) {
         if (eq(u8, key, "height")) {

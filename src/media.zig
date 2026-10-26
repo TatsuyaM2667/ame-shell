@@ -111,6 +111,8 @@ pub const Media = struct {
         set(&self.artist, &self.artist_len, artist);
         set(&self.title, &self.title_len, title);
         self.length_s = (std.fmt.parseFloat(f32, len_us) catch 0) / 1e6;
+        // ライブ配信などは長さが無意味な値(数日以上)になるので「不明」扱いにする
+        if (self.length_s > 86400) self.length_s = 0;
         self.pos_s = (std.fmt.parseFloat(f32, pos_us) catch 0) / 1e6;
         self.pos_at_ms = loop.nowMs();
         if (!std.mem.eql(u8, art, self.art_url[0..self.art_len])) {

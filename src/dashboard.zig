@@ -235,10 +235,34 @@ pub const Dashboard = struct {
     // ---------------------------------------------------------------------
 
     pub fn toggle(self: *Dashboard) void {
+        if (self.app.activeFrame()) |f| {
+            f.toggleDashboard();
+            return;
+        }
         if (self.is_open) self.close() else self.open();
     }
 
+    // ---- 枠(caelestia)から WASM ウィジェットを使うための口 ----
+    pub fn widgetByName(self: *Dashboard, name: []const u8) ?*wasm.Widget {
+        if (!self.loaded) self.loadWidgets();
+        for (WIDGETS, 0..) |w, i| if (std.mem.eql(u8, w, name)) return self.cards[i].widget;
+        return null;
+    }
+    pub fn refreshStore(self: *Dashboard) void {
+        self.fillStore();
+    }
+    pub fn runCmdsPub(self: *Dashboard, cv: *gfx.Canvas, w: *wasm.Widget, cmds: []align(1) const abi.Cmd, h: f32) void {
+        self.runCmds(cv, w, cmds, h);
+    }
+    pub fn queryRadiosPub(self: *Dashboard) void {
+        self.queryRadios();
+    }
+
     pub fn open(self: *Dashboard) void {
+        if (self.app.activeFrame()) |f| {
+            if (!f.dash.open) f.toggleDashboard();
+            return;
+        }
         if (self.is_open) return;
         const app = self.app;
         if (!self.loaded) self.loadWidgets();
@@ -272,6 +296,9 @@ pub const Dashboard = struct {
     }
 
     pub fn close(self: *Dashboard) void {
+        if (self.app.activeFrame()) |f| {
+            if (f.dash.open) f.toggleDashboard();
+        }
         if (!self.is_open) return;
         self.is_open = false;
         self.open_s.set(0);
@@ -304,6 +331,7 @@ pub const Dashboard = struct {
 
     pub fn dataChanged(self: *Dashboard) void {
         if (self.surf) |s| s.schedule();
+        if (self.app.cfg.layout == .caelestia) self.app.redrawBars();
     }
 
     pub fn backdropChanged(self: *Dashboard) void {

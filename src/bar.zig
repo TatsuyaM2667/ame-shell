@@ -442,6 +442,10 @@ pub const Bar = struct {
     }
 };
 
+pub fn batteryIconPub(b: sys.Battery) []const u8 {
+    return batteryIcon(b);
+}
+
 fn batteryIcon(b: sys.Battery) []const u8 {
     if (b.charging) return "\u{F0084}";
     const icons = [_][]const u8{ "\u{F008E}", "\u{F007A}", "\u{F007B}", "\u{F007C}", "\u{F007D}", "\u{F007E}", "\u{F007F}", "\u{F0080}", "\u{F0081}", "\u{F0082}", "\u{F0079}" };

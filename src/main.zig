@@ -24,12 +24,15 @@ pub fn main() !u8 {
     app.run();
     app.ipc_server.deinit();
     if (app.restart_requested) {
-        // 自分自身を exec し直す(設定やウィジェットを完全に読み直したいとき用)
-        var buf: [512]u8 = undefined;
-        const exe = std.fs.selfExePath(&buf) catch return 0;
-        buf[exe.len] = 0;
-        const argv = [_:null]?[*:0]const u8{ @ptrCast(exe.ptr), null };
-        _ = c.execv(@ptrCast(exe.ptr), @ptrCast(&argv));
+        // 自分自身を exec し直す(設定やウィジェットを完全に読み直したいとき用)。
+        // /proc/self/exe は、ビルドで実行ファイルが置き換わると "… (deleted)" になって exec できないので、
+        // 起動時の argv[0](シンボリックリンク経由なら新しいビルドを指す)を PATH 検索付きで使う。
+        const arg0 = std.os.argv[0];
+        const argv = [_:null]?[*:0]const u8{ arg0, null };
+        _ = c.execvp(arg0, @ptrCast(&argv));
+        std.log.err("再起動(exec)に失敗しました", .{});
+        // 監督ループ(river.sh / ame-river-init)が再起動するよう、異常終了として返す
+        return 1;
     }
     return 0;
 }

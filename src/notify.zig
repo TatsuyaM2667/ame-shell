@@ -344,6 +344,7 @@ pub const Notifs = struct {
         };
         self.layout();
         if (self.surf) |s| s.schedule();
+        if (self.app.cfg.layout == .caelestia) self.app.redrawBars();
     }
 
     pub fn clearAll(self: *Notifs) void {
@@ -355,6 +356,10 @@ pub const Notifs = struct {
 
     pub fn toggleCenter(self: *Notifs) void {
         self.unread = 0;
+        if (self.app.activeFrame()) |f| {
+            f.toggleSidebar();
+            return;
+        }
         self.app.dashboard.toggle();
     }
 
@@ -411,6 +416,11 @@ pub const Notifs = struct {
     }
 
     fn ensureSurface(self: *Notifs) void {
+        // caelestia: 通知は枠の右上のドロワーに描く(専用サーフェスは作らない)
+        if (self.app.cfg.layout == .caelestia) {
+            self.app.redrawBars();
+            return;
+        }
         if (self.surf != null) {
             self.surf.?.schedule();
             return;

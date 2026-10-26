@@ -21,6 +21,7 @@ pub usingnamespace @cImport({
     @cInclude("sys/wait.h");
     @cInclude("sys/stat.h");
     @cInclude("sys/resource.h");
+    @cInclude("sys/statvfs.h");
     @cInclude("locale.h");
     // Wayland
     @cInclude("wayland-client.h");
@@ -31,6 +32,7 @@ pub usingnamespace @cImport({
     @cInclude("xdg-shell-client-protocol.h");
     @cInclude("ext-session-lock-v1-client-protocol.h");
     @cInclude("cursor-shape-v1-client-protocol.h");
+    @cInclude("idle-inhibit-unstable-v1-client-protocol.h");
     @cInclude("xkbcommon/xkbcommon.h");
     // GPU
     @cInclude("EGL/egl.h");

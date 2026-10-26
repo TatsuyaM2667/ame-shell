@@ -74,6 +74,8 @@ const help =
     \\  accent <#rrggbb>|reset
     \\  notify <text>          (テスト用の通知)
     \\  notifications toggle|clear
+    \\  session | sidebar | utilities   (caelestia: 各ドロワーの開閉)
+    \\  close-all
     \\  lock
     \\  reload                 (設定の再読込)
     \\  widgets reload
@@ -96,6 +98,13 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
         } else if (eq(u8, arg, "close")) app.launcher.close() else app.launcher.toggle();
     } else if (eq(u8, cmd, "dashboard")) {
         if (eq(u8, arg, "open")) app.dashboard.open() else if (eq(u8, arg, "close")) app.dashboard.close() else app.dashboard.toggle();
+    } else if (eq(u8, cmd, "session") or eq(u8, cmd, "sidebar") or eq(u8, cmd, "utilities")) {
+        const f = app.activeFrame() orelse return "error: caelestia レイアウト(shell { layout caelestia })でのみ使えます";
+        if (eq(u8, cmd, "session")) f.toggleSession() else if (eq(u8, cmd, "sidebar")) f.toggleSidebar() else f.toggleUtilities();
+    } else if (eq(u8, cmd, "close-all")) {
+        if (app.activeFrame()) |f| f.closeAll();
+        app.launcher.close();
+        app.dashboard.close();
     } else if (eq(u8, cmd, "volume")) {
         if (eq(u8, arg, "up")) sys.setVolumeDelta(5) else if (eq(u8, arg, "down")) sys.setVolumeDelta(-5) else if (eq(u8, arg, "mute")) sys.toggleMute() else {
             const v = std.fmt.parseFloat(f32, arg) catch return "error: volume up|down|mute|0-100";

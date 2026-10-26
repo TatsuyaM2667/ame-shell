@@ -1,15 +1,17 @@
-// ランチャー: 画面中央のガラスパネル。.desktop を検索してアプリを起動する。
+// ランチャー: .desktop を検索してアプリを起動する。2 つの見せ方を持つ:
+//   * classic  … 画面中央のガラスパネル(専用サーフェス)
+//   * caelestia … 枠の下辺から生えるドロワー(描画は frame から drawPanel で呼ばれる)
 //
-// アニメーション:
-//  * 開閉: 拡大(0.92→1)・上昇・フェードを1本のスプリングで
-//  * 結果の行: 連鎖スプリング。前の行がある程度出てから次の行の目標を 1 にするので、
-//    上から順に「とととっ」と出てくる
-//  * 選択ハイライト: 縦位置のスプリングで行間をすべる
-//  * パネルの高さ: 結果数に合わせてスプリングで伸縮
+// モード(検索欄の先頭文字で切り替え):
+//   (なし)     アプリ検索。Odin 製ファジーマッチ + 起動回数で並べる
+//   ">"        アクション(壁紙 / ロック / ログアウト / スリープ / 再起動 / 電源オフ / コマンド実行)
+//   ">壁紙" / ">wallpaper"  壁紙ピッカー(~/Pictures/wallpapers 等のサムネイル + オーロラ/雨)
 //
-// 検索: Odin 製ファジーマッチ(anim.fuzzy)。名前・日本語名・汎用名・キーワード・コマンド名を対象に、
-// 起動回数(~/.local/state/ame-shell/launcher-history)を加点。空クエリのときはよく使う順。
-// 先頭が ">" ならシェルコマンドとして実行する。
+// アニメーション: 結果の行は連鎖スプリングで順に出現、選択ハイライトはスプリングで移動、
+// パネルの大きさも結果数に合わせて伸縮する。
+//
+// アイコンと壁紙のサムネイルはワーカースレッドでデコード・縮小する(巨大な PNG/JPEG で
+// 描画が止まらないように)。結果は pipe + epoll で受け取る。
 const std = @import("std");
 const c = @import("c.zig");
 const anim = @import("anim.zig");
@@ -24,6 +26,7 @@ const surface = @import("surface.zig");
 const Surface = surface.Surface;
 const sys = @import("platform/sys.zig");
 const loop = @import("platform/loop.zig");
+const cfgmod = @import("config.zig");
 
 const SW: u32 = 720;
 const SH: u32 = 600;
@@ -31,6 +34,8 @@ const PW: f32 = 640;
 const SEARCH_H: f32 = 62;
 const ROW_H: f32 = 58;
 const MAX_ROWS = 7;
+const THUMB_W = 192;
+const THUMB_H = 120;
 
 pub const Entry = struct {
     id: []const u8, // ファイル名(重複排除キー)
@@ -52,12 +57,33 @@ pub const Entry = struct {
     }
 };
 
-const Result = struct { idx: u32, score: i32 };
+pub const Wall = struct {
+    name: []const u8,
+    path: []const u8, // 空ならシェーダ壁紙
+    mode: cfgmod.WallMode,
+    tex: c.GLuint = 0,
+    state: u8 = 0,
+    px: ?[*]u8 = null,
+};
+
+const Action = enum { wallpaper, lock, logout, sleep, reboot, poweroff };
+const actions = [_]struct { a: Action, icon: []const u8, name: []const u8, desc: []const u8, keys: []const u8 }{
+    .{ .a = .wallpaper, .icon = "\u{F0E09}", .name = "壁紙", .desc = "壁紙を選ぶ", .keys = "wallpaper kabegami" },
+    .{ .a = .lock, .icon = "\u{F033E}", .name = "ロック", .desc = "画面をロックする", .keys = "lock rokku" },
+    .{ .a = .logout, .icon = "\u{F0343}", .name = "ログアウト", .desc = "River を終了する", .keys = "logout exit" },
+    .{ .a = .sleep, .icon = "\u{F04B2}", .name = "スリープ", .desc = "ロックしてサスペンド", .keys = "sleep suspend" },
+    .{ .a = .reboot, .icon = "\u{F0709}", .name = "再起動", .desc = "コンピュータを再起動する", .keys = "reboot restart" },
+    .{ .a = .poweroff, .icon = "\u{F0425}", .name = "電源オフ", .desc = "コンピュータの電源を切る", .keys = "shutdown poweroff" },
+};
+
+const Kind = enum { app, action, command, wallpaper };
+const Result = struct { kind: Kind, idx: u32, score: i32 };
 
 pub const Launcher = struct {
     app: *App,
     arena: std.heap.ArenaAllocator,
     entries: std.ArrayList(Entry),
+    walls: std.ArrayList(Wall),
     results: std.ArrayList(Result),
     surf: ?*Surface = null,
     out: ?*Output = null,
@@ -67,9 +93,13 @@ pub const Launcher = struct {
     sel: usize = 0,
     scroll: usize = 0,
     scanned_ms: u64 = 0,
+    wall_mode: bool = false,
+    /// 2 回押しで実行する危険なアクション
+    armed: ?Action = null,
     // アニメーション
     open_s: Spring = Spring.init(0, 0.38, 0.78),
     sel_y: Spring = Spring.init(0, 0.22, 0.82),
+    sel_x: Spring = Spring.init(0, 0.22, 0.82),
     height_s: Spring = Spring.init(SEARCH_H, 0.34, 0.85),
     rows: [MAX_ROWS]Spring = [_]Spring{Spring.init(0, 0.30, 0.72)} ** MAX_ROWS,
     caret: Spring = Spring.init(0, 0.15, 1.0),
@@ -83,6 +113,7 @@ pub const Launcher = struct {
             .app = app,
             .arena = std.heap.ArenaAllocator.init(app.alloc),
             .entries = std.ArrayList(Entry).init(app.alloc),
+            .walls = std.ArrayList(Wall).init(app.alloc),
             .results = std.ArrayList(Result).init(app.alloc),
         };
         self.icons = try IconWorker.create();
@@ -91,16 +122,20 @@ pub const Launcher = struct {
     }
 
     // ---------------------------------------------------------------------
-    // .desktop の読み込み
+    // .desktop と壁紙の読み込み
     // ---------------------------------------------------------------------
 
     fn scan(self: *Launcher) void {
-        // アイコンテクスチャを解放してから作り直す
         for (self.entries.items) |e| {
             if (e.icon_tex != 0) c.glDeleteTextures(1, &e.icon_tex);
             if (e.icon_px) |p| std.c.free(p);
         }
+        for (self.walls.items) |w| {
+            if (w.tex != 0) c.glDeleteTextures(1, &w.tex);
+            if (w.px) |p| std.c.free(p);
+        }
         self.entries.clearRetainingCapacity();
+        self.walls.clearRetainingCapacity();
         _ = self.arena.reset(.retain_capacity);
         const a = self.arena.allocator();
         var seen = std.StringHashMap(void).init(a);
@@ -133,10 +168,33 @@ pub const Launcher = struct {
                 if (parseDesktop(a, id, data)) |e| self.entries.append(e) catch {};
             }
         }
+        self.scanWalls();
         self.loadHistory();
         self.scanned_ms = loop.nowMs();
         self.startIconWorker();
-        std.log.info("launcher: {d} 件のアプリ", .{self.entries.items.len});
+        std.log.info("launcher: {d} 件のアプリ / {d} 件の壁紙", .{ self.entries.items.len, self.walls.items.len });
+    }
+
+    fn scanWalls(self: *Launcher) void {
+        const a = self.arena.allocator();
+        self.walls.append(.{ .name = "オーロラ(ライブ)", .path = "", .mode = .aurora }) catch {};
+        self.walls.append(.{ .name = "雨(ライブ)", .path = "", .mode = .rain }) catch {};
+        const home = std.posix.getenv("HOME") orelse return;
+        const dirs = [_][]const u8{ "Pictures/wallpapers", "Pictures/Wallpapers", ".config/ame-shell/wallpapers" };
+        for (dirs) |rel| {
+            const p = std.fmt.allocPrint(a, "{s}/{s}", .{ home, rel }) catch continue;
+            var dir = std.fs.cwd().openDir(p, .{ .iterate = true }) catch continue;
+            defer dir.close();
+            var di = dir.iterate();
+            while (di.next() catch null) |ent| {
+                if (ent.kind != .file and ent.kind != .sym_link) continue;
+                const lower = std.ascii.allocLowerString(a, ent.name) catch continue;
+                if (!(std.mem.endsWith(u8, lower, ".jpg") or std.mem.endsWith(u8, lower, ".jpeg") or std.mem.endsWith(u8, lower, ".png"))) continue;
+                const full = std.fmt.allocPrint(a, "{s}/{s}", .{ p, ent.name }) catch continue;
+                const stem = a.dupe(u8, std.fs.path.stem(ent.name)) catch continue;
+                self.walls.append(.{ .name = stem, .path = full, .mode = .image }) catch {};
+            }
+        }
     }
 
     fn historyPath(buf: []u8) ?[]const u8 {
@@ -174,12 +232,33 @@ pub const Launcher = struct {
     // 検索
     // ---------------------------------------------------------------------
 
+    fn isWallQuery(q: []const u8) bool {
+        if (q.len == 0 or q[0] != '>') return false;
+        const rest = std.mem.trimLeft(u8, q[1..], " ");
+        return std.mem.startsWith(u8, rest, "壁紙") or std.mem.startsWith(u8, rest, "wallpaper") or std.mem.startsWith(u8, rest, "wall ");
+    }
+
     fn search(self: *Launcher) void {
         self.results.clearRetainingCapacity();
+        self.armed = null;
         const q = self.query[0..self.qlen];
-        if (q.len > 0 and q[0] == '>') {
-            // コマンド実行モード: 結果は「実行」1行だけ
-            self.results.append(.{ .idx = std.math.maxInt(u32), .score = 0 }) catch {};
+        self.wall_mode = isWallQuery(q);
+        if (self.wall_mode) {
+            // 壁紙: ">壁紙 " の後ろの語で絞り込む
+            const sp = std.mem.indexOfScalar(u8, q, ' ');
+            const filt = if (sp) |i| std.mem.trim(u8, q[i..], " ") else "";
+            for (self.walls.items, 0..) |w, i| {
+                const sc = if (filt.len == 0) 0 else anim.fuzzy(filt, w.name);
+                if (sc >= 0) self.results.append(.{ .kind = .wallpaper, .idx = @intCast(i), .score = sc }) catch {};
+            }
+        } else if (q.len > 0 and q[0] == '>') {
+            const rest = std.mem.trim(u8, q[1..], " ");
+            for (actions, 0..) |ac, i| {
+                var sc: i32 = if (rest.len == 0) 0 else -1;
+                if (rest.len > 0) sc = @max(anim.fuzzy(rest, ac.name), anim.fuzzy(rest, ac.keys));
+                if (sc >= 0) self.results.append(.{ .kind = .action, .idx = @intCast(i), .score = sc }) catch {};
+            }
+            if (rest.len > 0) self.results.append(.{ .kind = .command, .idx = 0, .score = -100 }) catch {};
         } else {
             for (self.entries.items, 0..) |e, i| {
                 var best: i32 = -1;
@@ -202,20 +281,23 @@ pub const Launcher = struct {
                 }
                 if (best < 0) continue;
                 best += @as(i32, @intCast(@min(e.uses, 50))) * 3;
-                self.results.append(.{ .idx = @intCast(i), .score = best }) catch {};
+                self.results.append(.{ .kind = .app, .idx = @intCast(i), .score = best }) catch {};
             }
-            const Ctx = struct {
-                entries: []const Entry,
-                fn lt(ctx: @This(), a: Result, b: Result) bool {
-                    if (a.score != b.score) return a.score > b.score;
-                    return std.ascii.lessThanIgnoreCase(ctx.entries[a.idx].display(), ctx.entries[b.idx].display());
-                }
-            };
-            std.mem.sort(Result, self.results.items, Ctx{ .entries = self.entries.items }, Ctx.lt);
         }
+        const Ctx = struct {
+            l: *Launcher,
+            fn lt(ctx: @This(), a: Result, b: Result) bool {
+                if (a.score != b.score) return a.score > b.score;
+                if (a.kind == .app and b.kind == .app)
+                    return std.ascii.lessThanIgnoreCase(ctx.l.entries.items[a.idx].display(), ctx.l.entries.items[b.idx].display());
+                return a.idx < b.idx;
+            }
+        };
+        std.mem.sort(Result, self.results.items, Ctx{ .l = self }, Ctx.lt);
         self.sel = 0;
         self.scroll = 0;
         self.sel_y.set(0);
+        self.sel_x.set(0);
         // 結果が変わったら行の出現アニメをやり直す(連鎖)
         for (&self.rows) |*r| {
             r.snap(@min(r.x, 0.4));
@@ -237,6 +319,14 @@ pub const Launcher = struct {
         // 起動のたびに再走査するのは重いので 30 秒キャッシュ
         if (self.entries.items.len == 0 or loop.nowMs() - self.scanned_ms > 30_000) self.scan();
         const app = self.app;
+        self.is_open = true;
+        self.qlen = 0;
+        self.search();
+        if (app.activeFrame()) |f| {
+            // caelestia: 枠の下辺から生える(サーフェスは作らない)
+            f.launcherChanged();
+            return;
+        }
         if (self.surf == null) {
             const out = app.activeOutput() orelse return;
             self.out = out;
@@ -253,9 +343,6 @@ pub const Launcher = struct {
             self.open_s.snap(0);
             self.height_s.snap(SEARCH_H);
         }
-        self.is_open = true;
-        self.qlen = 0;
-        self.search();
         self.open_s.set(1);
         self.surf.?.schedule();
     }
@@ -263,6 +350,10 @@ pub const Launcher = struct {
     pub fn close(self: *Launcher) void {
         if (!self.is_open) return;
         self.is_open = false;
+        self.armed = null;
+        if (self.app.cfg.layout == .caelestia) {
+            for (self.app.outputs.items) |o| if (o.frame) |f| f.launcherChanged();
+        }
         self.open_s.set(0);
         // キーボードを即座に返す(閉じるアニメの間も入力を奪わない)
         if (self.surf) |s| if (s.layer) |l| {
@@ -300,43 +391,110 @@ pub const Launcher = struct {
         s.origin = .{ (@as(f32, @floatFromInt(sz[0])) - @as(f32, @floatFromInt(s.width))) / 2, (@as(f32, @floatFromInt(sz[1])) - @as(f32, @floatFromInt(s.height))) / 2 };
     }
 
-    fn launch(self: *Launcher, i: usize) void {
+    fn redraw(self: *Launcher) void {
+        if (self.surf) |s| s.schedule();
+        if (self.app.activeFrame()) |f| f.schedule();
+    }
+
+    /// 起動直後のアイドル時に一覧を読み、表示名をグリフ先読みに回す
+    pub fn prescan(self: *Launcher, warmer: *@import("text.zig").Warmer) void {
+        self.scan();
+        for (self.entries.items) |e| {
+            warmer.add(e.display());
+            if (e.comment.len > 0) warmer.add(e.comment);
+        }
+        for (actions) |a| {
+            warmer.add(a.name);
+            warmer.add(a.desc);
+        }
+    }
+
+    /// 外部(ame-ctl)から検索語を入れる
+    pub fn setQuery(self: *Launcher, q: []const u8) void {
+        self.qlen = @min(q.len, self.query.len);
+        @memcpy(self.query[0..self.qlen], q[0..self.qlen]);
+        self.search();
+        self.redraw();
+    }
+
+    fn activate(self: *Launcher, i: usize) void {
         if (i >= self.results.items.len) return;
         const r = self.results.items[i];
         var buf: [1024]u8 = undefined;
-        if (r.idx == std.math.maxInt(u32)) {
-            const cmd = std.mem.trim(u8, self.query[1..self.qlen], " ");
-            if (cmd.len == 0) return;
-            const z = std.fmt.bufPrintZ(&buf, "{s}", .{cmd}) catch return;
-            self.app.spawn(z);
-        } else {
-            const e = &self.entries.items[r.idx];
-            var exec_buf: [1024]u8 = undefined;
-            const cmd = stripFieldCodes(e.exec, &exec_buf);
-            const z = if (e.terminal)
-                std.fmt.bufPrintZ(&buf, "{s} -e {s}", .{ self.app.cfg.terminal.get(), cmd }) catch return
-            else
-                std.fmt.bufPrintZ(&buf, "{s}", .{cmd}) catch return;
-            self.app.spawn(z);
-            e.uses += 1;
-            self.saveHistory();
+        switch (r.kind) {
+            .command => {
+                const cmd = std.mem.trim(u8, self.query[1..self.qlen], " ");
+                if (cmd.len == 0) return;
+                const z = std.fmt.bufPrintZ(&buf, "{s}", .{cmd}) catch return;
+                self.app.spawn(z);
+            },
+            .app => {
+                const e = &self.entries.items[r.idx];
+                var exec_buf: [1024]u8 = undefined;
+                const cmd = stripFieldCodes(e.exec, &exec_buf);
+                const z = if (e.terminal)
+                    std.fmt.bufPrintZ(&buf, "{s} -e {s}", .{ self.app.cfg.terminal.get(), cmd }) catch return
+                else
+                    std.fmt.bufPrintZ(&buf, "{s}", .{cmd}) catch return;
+                self.app.spawn(z);
+                e.uses += 1;
+                self.saveHistory();
+            },
+            .action => {
+                const a = actions[r.idx].a;
+                if (a == .wallpaper) {
+                    // 壁紙ピッカーへ
+                    self.setQuery(">壁紙 ");
+                    return;
+                }
+                if (a != .lock and self.armed != a) {
+                    // 取り返しのつかない操作は 2 回目の Enter で実行
+                    self.armed = a;
+                    self.redraw();
+                    return;
+                }
+                self.close();
+                switch (a) {
+                    .lock => _ = self.app.lock.lock(),
+                    .logout => self.app.riverCommand(&.{"exit"}),
+                    .sleep => {
+                        _ = self.app.lock.lock();
+                        sys.spawnDetached("sleep 1; loginctl suspend");
+                    },
+                    .reboot => sys.spawnDetached("loginctl reboot"),
+                    .poweroff => sys.spawnDetached("loginctl poweroff"),
+                    .wallpaper => {},
+                }
+                return;
+            },
+            .wallpaper => {
+                const w = self.walls.items[r.idx];
+                for (self.app.outputs.items) |o| if (o.wall) |wp| wp.switchTo(w.mode, w.path);
+            },
         }
         self.close();
     }
 
     // ---------------------------------------------------------------------
-    // 入力
+    // キー入力(classic のサーフェスと caelestia の枠の両方から呼ばれる)
     // ---------------------------------------------------------------------
+
+    pub fn frameKey(self: *Launcher, s: *Surface, ev: surface.KeyEvent) void {
+        key(self, s, ev);
+    }
 
     fn key(ctx: *anyopaque, s: *Surface, ev: surface.KeyEvent) void {
         const self: *Launcher = @ptrCast(@alignCast(ctx));
         if (!self.is_open) return;
         const n = self.results.items.len;
+        const horiz = self.wall_mode; // 壁紙は横に並ぶので左右で選ぶ
         switch (ev.sym) {
             c.XKB_KEY_Escape => self.close(),
-            c.XKB_KEY_Return, c.XKB_KEY_KP_Enter => self.launch(self.sel),
+            c.XKB_KEY_Return, c.XKB_KEY_KP_Enter => self.activate(self.sel),
             c.XKB_KEY_Down, c.XKB_KEY_Tab => if (n > 0) self.select(@min(self.sel + 1, n - 1)),
             c.XKB_KEY_Up, c.XKB_KEY_ISO_Left_Tab => if (self.sel > 0) self.select(self.sel - 1),
+            c.XKB_KEY_Right => if (horiz and n > 0) self.select(@min(self.sel + 1, n - 1)),
+            c.XKB_KEY_Left => if (horiz and self.sel > 0) self.select(self.sel - 1),
             c.XKB_KEY_Page_Down => if (n > 0) self.select(@min(self.sel + MAX_ROWS, n - 1)),
             c.XKB_KEY_Page_Up => self.select(self.sel -| MAX_ROWS),
             c.XKB_KEY_BackSpace => {
@@ -370,102 +528,242 @@ pub const Launcher = struct {
             },
         }
         s.schedule();
-    }
-
-    fn startIconWorker(self: *Launcher) void {
-        startIconWorkerImpl(self);
-    }
-
-    /// 起動直後のアイドル時に一覧を読み、表示名をグリフ先読みに回す
-    pub fn prescan(self: *Launcher, warmer: *@import("text.zig").Warmer) void {
-        self.scan();
-        for (self.entries.items) |e| {
-            warmer.add(e.display());
-            if (e.comment.len > 0) warmer.add(e.comment);
-        }
-    }
-
-    /// 外部(ame-ctl)から検索語を入れる
-    pub fn setQuery(self: *Launcher, q: []const u8) void {
-        self.qlen = @min(q.len, self.query.len);
-        @memcpy(self.query[0..self.qlen], q[0..self.qlen]);
-        self.search();
-        if (self.surf) |s| s.schedule();
+        self.redraw();
     }
 
     fn select(self: *Launcher, i: usize) void {
         self.sel = i;
+        self.armed = null;
+        const vis: usize = if (self.wall_mode) 4 else MAX_ROWS;
         if (i < self.scroll) self.scroll = i;
-        if (i >= self.scroll + MAX_ROWS) self.scroll = i + 1 - MAX_ROWS;
+        if (i >= self.scroll + vis) self.scroll = i + 1 - vis;
         self.sel_y.set(@floatFromInt(i - self.scroll));
-    }
-
-    fn panelX(s: *Surface) f32 {
-        return (@as(f32, @floatFromInt(s.width)) - PW) / 2;
-    }
-
-    fn rowAt(self: *Launcher, s: *Surface, x: f32, y: f32) ?usize {
-        const px = panelX(s);
-        const py: f32 = 30;
-        if (x < px or x > px + PW) return null;
-        const ry = y - (py + SEARCH_H + 6);
-        if (ry < 0) return null;
-        const r: usize = @intFromFloat(ry / ROW_H);
-        if (r >= MAX_ROWS or self.scroll + r >= self.results.items.len) return null;
-        return r;
-    }
-
-    fn pointer(ctx: *anyopaque, s: *Surface, ev: surface.PointerEvent) void {
-        const self: *Launcher = @ptrCast(@alignCast(ctx));
-        if (!self.is_open) return;
-        switch (ev.kind) {
-            .motion, .enter => {
-                const r = self.rowAt(s, ev.x, ev.y);
-                if (r != self.hover_row) {
-                    self.hover_row = r;
-                    if (r) |ri| self.select(self.scroll + ri);
-                    s.schedule();
-                }
-            },
-            .press => {
-                if (self.rowAt(s, ev.x, ev.y)) |r| {
-                    self.launch(self.scroll + r);
-                } else {
-                    // パネルの外をクリックしたら閉じる
-                    const px = panelX(s);
-                    if (ev.x < px or ev.x > px + PW or ev.y < 30 or ev.y > 30 + self.height_s.x) self.close();
-                }
-            },
-            .scroll => {
-                const n = self.results.items.len;
-                if (n == 0) return;
-                if (ev.scroll > 0) self.select(@min(self.sel + 1, n - 1)) else if (self.sel > 0) self.select(self.sel - 1);
-                s.schedule();
-            },
-            else => {},
-        }
+        self.sel_x.set(@floatFromInt(i - self.scroll));
     }
 
     // ---------------------------------------------------------------------
-    // 描画
+    // 結果の行(classic と caelestia で共有)
     // ---------------------------------------------------------------------
 
-    fn draw(ctx: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
-        const self: *Launcher = @ptrCast(@alignCast(ctx));
-        const app = self.app;
-        const n_vis = @min(self.results.items.len -| self.scroll, MAX_ROWS);
-        self.height_s.set(SEARCH_H + (if (n_vis > 0) @as(f32, @floatFromInt(n_vis)) * ROW_H + 14 else 0));
-
+    fn stepRows(self: *Launcher, dt: f32, n_vis: usize) bool {
         var animating = false;
-        var springs = [_]*Spring{ &self.open_s, &self.sel_y, &self.height_s, &self.caret };
-        if (anim.stepAll(&springs, dt)) animating = true;
-        // 連鎖: 前の行が 0.35 を超えたら次の行を出す
         for (0..MAX_ROWS) |i| {
             if (i < n_vis) {
                 if (i == 0 or self.rows[i - 1].x > 0.35) self.rows[i].set(1);
             } else self.rows[i].set(0);
             if (self.rows[i].step(dt)) animating = true;
         }
+        return animating;
+    }
+
+    fn drawRow(self: *Launcher, cv: *gfx.Canvas, res: Result, x: f32, ry: f32, w: f32) void {
+        const app = self.app;
+        const txt = theme.text(app);
+        const sub = theme.subtext(app);
+        const acc = theme.accent(app);
+        const ix = x + 16;
+        const iy = ry + (ROW_H - 38) / 2;
+        switch (res.kind) {
+            .command => {
+                cv.rect(ix, iy, 38, 38, 11, acc.alpha(0.25));
+                _ = cv.text(ix + 19, iy + 27, 20, txt, "\u{F018D}", .{ .alignment = .center });
+                _ = cv.text(ix + 54, ry + 26, 16, txt, "コマンドを実行", .{ .bold = true });
+                _ = cv.text(ix + 54, ry + 46, 12.5, sub, std.mem.trim(u8, self.query[1..self.qlen], " "), .{ .max_w = w - 100 });
+            },
+            .action => {
+                const a = actions[res.idx];
+                const armed = self.armed == a.a;
+                const col = if (armed) Color.hex(0xff7a90) else acc;
+                cv.rect(ix, iy, 38, 38, 11, col.alpha(0.25));
+                _ = cv.text(ix + 19, iy + 27, 20, txt, a.icon, .{ .alignment = .center });
+                _ = cv.text(ix + 54, ry + 26, 16, txt, a.name, .{ .bold = true });
+                _ = cv.text(ix + 54, ry + 46, 12.5, if (armed) col else sub, if (armed) "もう一度 Enter で実行" else a.desc, .{ .max_w = w - 100 });
+            },
+            .app => {
+                const e = &self.entries.items[res.idx];
+                self.drawIcon(cv, e, ix, iy, 38);
+                _ = cv.text(ix + 54, ry + 26, 16, txt, e.display(), .{ .bold = true, .max_w = w - 100 });
+                const desc = if (e.comment.len > 0) e.comment else if (e.generic.len > 0) e.generic else firstWord(e.exec);
+                _ = cv.text(ix + 54, ry + 46, 12.5, sub, desc, .{ .max_w = w - 100 });
+            },
+            .wallpaper => {},
+        }
+    }
+
+    /// 壁紙ピッカー: サムネイルを横に並べる
+    fn drawWalls(self: *Launcher, cv: *gfx.Canvas, x: f32, y: f32, w: f32) void {
+        const app = self.app;
+        const acc = theme.accent(app);
+        const txt = theme.text(app);
+        const tw: f32 = (w - 32 - 3 * 12) / 4;
+        const th = tw * 0.625;
+        const n = @min(self.results.items.len -| self.scroll, 4);
+        // 選択枠(スプリングで横移動)
+        const sx = x + 16 + self.sel_x.x * (tw + 12);
+        cv.shadow(sx - 4, y - 4, tw + 8, th + 8, 16, 10, acc.alpha(0.5));
+        cv.rectBorder(sx - 4, y - 4, tw + 8, th + 8, 16, .{ .a = 0 }, acc, 2.5);
+        for (0..n) |i| {
+            const res = self.results.items[self.scroll + i];
+            const wl = &self.walls.items[res.idx];
+            const rt = self.rows[@min(i, MAX_ROWS - 1)].x;
+            const tx = x + 16 + @as(f32, @floatFromInt(i)) * (tw + 12);
+            cv.save();
+            cv.translate(0, (1 - rt) * 20);
+            cv.opacity(rt);
+            if (wl.state == 2 and wl.tex == 0) wl.tex = gfx.uploadImage(wl.px.?, THUMB_W, THUMB_H);
+            if (wl.tex != 0) {
+                cv.image(wl.tex, tx, y, tw, th, 12);
+            } else {
+                // ライブ壁紙(またはサムネイル待ち)はそれらしいグラデーション
+                const a = Color.hex(app.cfg.aurora_a);
+                const b = Color.hex(app.cfg.aurora_b);
+                cv.rectGrad(tx, y, tw, th, 12, if (wl.mode == .rain) Color.hex(0x1b2a55) else b.alpha(0.8), if (wl.mode == .rain) Color.hex(0x070b18) else a.alpha(0.6));
+                _ = cv.text(tx + tw / 2, y + th / 2 + 10, 26, Color.hex(0xffffff).alpha(0.85), if (wl.mode == .rain) "\u{F0597}" else if (wl.mode == .aurora) "\u{F0E09}" else "\u{F02E9}", .{ .alignment = .center });
+            }
+            _ = cv.text(tx + tw / 2, y + th + 20, 12, txt, wl.name, .{ .alignment = .center, .max_w = tw });
+            cv.restore();
+        }
+    }
+
+    fn visibleRows(self: *Launcher) usize {
+        return @min(self.results.items.len -| self.scroll, MAX_ROWS);
+    }
+
+    // ---------------------------------------------------------------------
+    // caelestia: 枠の下辺のドロワーとして描く(リストが上、検索欄が下)
+    // ---------------------------------------------------------------------
+
+    pub fn panelSize(self: *Launcher) [2]f32 {
+        if (self.wall_mode) return .{ 820, 14 + (820 - 32 - 36) / 4 * 0.625 + 34 + 64 };
+        const n = self.visibleRows();
+        return .{ PW, 12 + @as(f32, @floatFromInt(n)) * ROW_H + (if (n > 0) @as(f32, 8) else 0) + 64 };
+    }
+
+    pub fn drawPanel(self: *Launcher, cv: *gfx.Canvas, w: f32, h: f32, dt: f32) bool {
+        const app = self.app;
+        const acc = theme.accent(app);
+        const txt = theme.text(app);
+        const sub = theme.subtext(app);
+        const n_vis = if (self.wall_mode) @min(self.results.items.len -| self.scroll, 4) else self.visibleRows();
+        var animating = false;
+        var sp = [_]*Spring{ &self.sel_y, &self.sel_x, &self.caret };
+        if (anim.stepAll(&sp, dt)) animating = true;
+        if (self.stepRows(dt, n_vis)) animating = true;
+
+        // ---- 結果(上から)----
+        if (self.wall_mode) {
+            self.drawWalls(cv, 0, 16, w);
+        } else {
+            if (n_vis > 0) {
+                const hy = 12 + self.sel_y.x * ROW_H;
+                cv.rectGrad(10, hy + 3, w - 20, ROW_H - 6, 14, acc.alpha(0.30), acc.alpha(0.18));
+                cv.rectBorder(10, hy + 3, w - 20, ROW_H - 6, 14, .{ .a = 0 }, acc.lighten(0.4).alpha(0.45), 1);
+            }
+            for (0..n_vis) |i| {
+                const rt = self.rows[i].x;
+                if (rt < 0.01) continue;
+                cv.save();
+                cv.translate(0, (1 - rt) * 18);
+                cv.opacity(rt);
+                self.drawRow(cv, self.results.items[self.scroll + i], 0, 12 + @as(f32, @floatFromInt(i)) * ROW_H, w);
+                cv.restore();
+            }
+            if (self.results.items.len == 0 and self.qlen > 0) {
+                _ = cv.text(w / 2, h - 80, 14, sub, "見つかりません", .{ .alignment = .center });
+            }
+        }
+
+        // ---- 検索欄(下)----
+        const fy = h - 58;
+        cv.rect(12, fy, w - 24, 46, 23, Color.hex(0xffffff).alpha(0.07));
+        _ = cv.text(36, fy + 30, 17, acc, "\u{F0349}", .{ .alignment = .center });
+        const q = self.query[0..self.qlen];
+        var caret_x: f32 = 58;
+        if (q.len == 0) {
+            _ = cv.text(58, fy + 29, 14.5, sub.alpha(0.75), "検索…  ( > でアクション / >壁紙 で壁紙)", .{});
+        } else {
+            caret_x += cv.text(58, fy + 29, 15.5, txt, q, .{ .max_w = w - 100 });
+        }
+        cv.rect(caret_x + 2, fy + 12 - self.caret.x * 0.03, 2, 22 + self.caret.x * 0.05, 1, acc);
+        if (q.len > 0) _ = cv.text(w - 30, fy + 29, 13, sub, "\u{F0156}", .{ .alignment = .center });
+        return animating or theme.accentAnimating();
+    }
+
+    pub fn panelPointer(self: *Launcher, ev: surface.PointerEvent, lx: f32, ly: f32, w: f32, h: f32) bool {
+        if (!self.is_open) return false;
+        var idx: ?usize = null;
+        if (self.wall_mode) {
+            const tw: f32 = (w - 32 - 3 * 12) / 4;
+            const th = tw * 0.625;
+            if (ly >= 16 and ly < 16 + th + 24 and lx >= 16) {
+                const i: usize = @intFromFloat((lx - 16) / (tw + 12));
+                if (i < 4 and self.scroll + i < self.results.items.len) idx = i;
+            }
+        } else if (ly >= 12 and ly < h - 64) {
+            const i: usize = @intFromFloat((ly - 12) / ROW_H);
+            if (i < self.visibleRows()) idx = i;
+        }
+        switch (ev.kind) {
+            .motion, .enter => if (idx != self.hover_row) {
+                self.hover_row = idx;
+                if (idx) |i| self.select(self.scroll + i);
+                return true;
+            },
+            .press => {
+                if (idx) |i| {
+                    self.activate(self.scroll + i);
+                } else if (ly >= h - 58 and lx > w - 50 and self.qlen > 0) {
+                    self.qlen = 0; // ✕ で検索語を消す
+                    self.search();
+                }
+                return true;
+            },
+            .scroll => {
+                const n = self.results.items.len;
+                if (n == 0) return false;
+                if (ev.scroll > 0) self.select(@min(self.sel + 1, n - 1)) else if (self.sel > 0) self.select(self.sel - 1);
+                return true;
+            },
+            else => {},
+        }
+        return false;
+    }
+
+    // ---------------------------------------------------------------------
+    // classic: 中央のパネル
+    // ---------------------------------------------------------------------
+
+    fn panelX(s: *Surface) f32 {
+        return (@as(f32, @floatFromInt(s.width)) - PW) / 2;
+    }
+
+    fn pointer(ctx: *anyopaque, s: *Surface, ev: surface.PointerEvent) void {
+        const self: *Launcher = @ptrCast(@alignCast(ctx));
+        if (!self.is_open) return;
+        const px = panelX(s);
+        const py: f32 = 30;
+        if (ev.kind == .press) {
+            if (ev.x < px or ev.x > px + PW or ev.y < py or ev.y > py + self.height_s.x) {
+                self.close();
+                return;
+            }
+        }
+        // 中身の座標に直して共有の処理へ(classic は検索欄が上なので行の開始を合わせる)
+        const ly = ev.y - (py + SEARCH_H + 6) + 12;
+        if (self.panelPointer(ev, ev.x - px, ly, PW, 10000)) s.schedule();
+    }
+
+    fn draw(ctx: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
+        const self: *Launcher = @ptrCast(@alignCast(ctx));
+        const app = self.app;
+        const n_vis = if (self.wall_mode) @min(self.results.items.len -| self.scroll, 4) else self.visibleRows();
+        const body: f32 = if (self.wall_mode) (PW - 32 - 36) / 4 * 0.625 + 50 else @as(f32, @floatFromInt(n_vis)) * ROW_H + 14;
+        self.height_s.set(SEARCH_H + (if (n_vis > 0) body else 0));
+
+        var animating = false;
+        var springs = [_]*Spring{ &self.open_s, &self.sel_y, &self.sel_x, &self.height_s, &self.caret };
+        if (anim.stepAll(&springs, dt)) animating = true;
+        if (self.stepRows(dt, n_vis)) animating = true;
         if (theme.accentAnimating()) animating = true;
         if (!self.is_open and self.open_s.x < 0.01 and !self.open_s.moving()) {
             app.reap_pending = true;
@@ -488,60 +786,41 @@ pub const Launcher = struct {
         cv.shadow(px, py + 10, PW, ph, r, 30, theme.shadow().alpha(1.2));
         cv.glass(px, py, PW, ph, r, theme.glassStrong(app));
 
-        // ---- 検索欄 ----
         const sx = px + 22;
         const base = py + SEARCH_H / 2 + 8;
-        _ = cv.text(sx, base + 1, 22, acc, "\u{F0349}", .{ .glow = 4, .glow_color = acc.alpha(0.4) }); // 虫眼鏡
+        _ = cv.text(sx, base + 1, 22, acc, "\u{F0349}", .{ .glow = 4, .glow_color = acc.alpha(0.4) });
         const q = self.query[0..self.qlen];
         const qx = sx + 40;
         var caret_x = qx;
         if (q.len == 0) {
-            _ = cv.text(qx, base, 20, sub.alpha(0.7), "アプリを検索…  ( > でコマンド実行)", .{});
+            _ = cv.text(qx, base, 18, sub.alpha(0.7), "アプリを検索…  ( > でアクション)", .{});
         } else {
             caret_x += cv.text(qx, base, 20, txt, q, .{ .max_w = PW - 90 });
         }
-        // キャレット(入力時に少し弾む)
-        const ch: f32 = 24 + self.caret.x * 0.06;
-        cv.rect(caret_x + 2, base - 19 - self.caret.x * 0.03, 2, ch, 1, acc);
+        cv.rect(caret_x + 2, base - 19 - self.caret.x * 0.03, 2, 24 + self.caret.x * 0.06, 1, acc);
         if (n_vis > 0) cv.rect(px + 18, py + SEARCH_H, PW - 36, 1, 0.5, Color.hex(0xffffff).alpha(0.10 * t));
 
-        // ---- 結果 ----
         const ly = py + SEARCH_H + 6;
         cv.setClip(px, ly, PW, ph - SEARCH_H - 6);
-        if (n_vis > 0) {
-            // 選択ハイライト
-            const hy = ly + self.sel_y.x * ROW_H;
-            cv.shadow(px + 10, hy + 4, PW - 20, ROW_H - 6, 14, 10, acc.alpha(0.25));
-            cv.rectGrad(px + 10, hy + 3, PW - 20, ROW_H - 6, 14, acc.alpha(0.30), acc.alpha(0.18));
-            cv.rectBorder(px + 10, hy + 3, PW - 20, ROW_H - 6, 14, .{ .a = 0 }, acc.lighten(0.4).alpha(0.45), 1);
-        }
-        for (0..n_vis) |i| {
-            const rt = self.rows[i].x;
-            if (rt < 0.01) continue;
-            const res = self.results.items[self.scroll + i];
-            const ry = ly + @as(f32, @floatFromInt(i)) * ROW_H;
-            cv.save();
-            cv.translate((1 - rt) * 28, 0);
-            cv.opacity(rt);
-            const ix = px + 24;
-            const iy = ry + (ROW_H - 38) / 2;
-            if (res.idx == std.math.maxInt(u32)) {
-                cv.rect(ix, iy, 38, 38, 11, acc.alpha(0.25));
-                _ = cv.text(ix + 19, iy + 27, 20, txt, "\u{F018D}", .{ .alignment = .center });
-                _ = cv.text(ix + 54, ry + 26, 17, txt, "コマンドを実行", .{ .bold = true });
-                _ = cv.text(ix + 54, ry + 46, 13, sub, std.mem.trim(u8, q[1..], " "), .{ .max_w = PW - 120 });
-            } else {
-                const e = &self.entries.items[res.idx];
-                self.drawIcon(cv, e, ix, iy, 38);
-                const name = e.display();
-                _ = cv.text(ix + 54, ry + 26, 17, txt, name, .{ .bold = true, .max_w = PW - 120 });
-                const desc = if (e.comment.len > 0) e.comment else if (e.generic.len > 0) e.generic else firstWord(e.exec);
-                _ = cv.text(ix + 54, ry + 46, 13, sub, desc, .{ .max_w = PW - 120 });
+        if (self.wall_mode) {
+            self.drawWalls(cv, px, ly + 10, PW);
+        } else {
+            if (n_vis > 0) {
+                const hy = ly + self.sel_y.x * ROW_H;
+                cv.rectGrad(px + 10, hy + 3, PW - 20, ROW_H - 6, 14, acc.alpha(0.30), acc.alpha(0.18));
+                cv.rectBorder(px + 10, hy + 3, PW - 20, ROW_H - 6, 14, .{ .a = 0 }, acc.lighten(0.4).alpha(0.45), 1);
             }
-            cv.restore();
-        }
-        if (self.results.items.len == 0 and q.len > 0) {
-            _ = cv.text(px + PW / 2, py + SEARCH_H + 40, 15, sub, "見つかりません", .{ .alignment = .center });
+            for (0..n_vis) |i| {
+                const rt = self.rows[i].x;
+                if (rt < 0.01) continue;
+                cv.save();
+                cv.translate((1 - rt) * 28, 0);
+                cv.opacity(rt);
+                self.drawRow(cv, self.results.items[self.scroll + i], px, ly + @as(f32, @floatFromInt(i)) * ROW_H, PW);
+                cv.restore();
+            }
+            if (self.results.items.len == 0 and q.len > 0)
+                _ = cv.text(px + PW / 2, py + SEARCH_H + 40, 15, sub, "見つかりません", .{ .alignment = .center });
         }
         cv.setClip(0, 0, 0, 0);
         cv.restore();
@@ -564,6 +843,10 @@ pub const Launcher = struct {
         const name = e.display();
         const n = std.unicode.utf8ByteSequenceLength(name[0]) catch 1;
         _ = cv.text(x + size / 2, y + size * 0.68, size * 0.5, Color.hex(0xffffff), name[0..@min(n, name.len)], .{ .bold = true, .alignment = .center });
+    }
+
+    fn startIconWorker(self: *Launcher) void {
+        startIconWorkerImpl(self);
     }
 };
 
@@ -651,18 +934,18 @@ fn findIcon(name: []const u8, buf: []u8) ?[:0]const u8 {
 }
 
 // ---------------------------------------------------------------------------
-// アイコンの非同期読み込み
+// アイコン・サムネイルの非同期読み込み
 //
-// 巨大な PNG(例: 1000px 超の pixmaps)はデコードだけで 100ms 近くかかり、描画スレッドで
-// やるとフレームが止まる。そこでワーカースレッドで「探す → デコード → 64x64 に縮小」まで行い、
-// 結果を pipe 経由で epoll に知らせる。ワーカーはランチャーのデータに一切触れず、
-// (世代番号, 行番号, 画素) を返すだけなので、途中で再走査されても古い結果を捨てれば安全。
+// 巨大な PNG/JPEG はデコードだけで 100ms 近くかかり、描画スレッドでやるとフレームが止まる。
+// ワーカースレッドで「探す → デコード → 縮小」まで行い、結果を pipe 経由で epoll に知らせる。
+// ワーカーはランチャーのデータに一切触れず、(世代, 種類, 番号, 画素) を返すだけなので、
+// 途中で再走査されても古い結果を捨てれば安全。
 // ---------------------------------------------------------------------------
 
 const ICON_PX = 64;
 
-const IconJob = struct { idx: u32, name: []u8 };
-const IconResult = struct { idx: u32, gen: u32, px: ?[*]u8 };
+const IconJob = struct { idx: u32, name: []u8, thumb: bool };
+const IconResult = struct { idx: u32, gen: u32, thumb: bool, px: ?[*]u8 };
 
 const IconWorker = struct {
     mutex: std.Thread.Mutex = .{},
@@ -681,11 +964,19 @@ const IconWorker = struct {
     fn run(self: *IconWorker, jobs: []IconJob, gen: u32) void {
         const a = std.heap.c_allocator;
         for (jobs) |j| {
-            var buf: [600]u8 = undefined;
-            const px = if (findIcon(j.name, &buf)) |p| decodeIcon(p) else null;
+            var px: ?[*]u8 = null;
+            if (j.thumb) {
+                var zb: [600]u8 = undefined;
+                if (std.fmt.bufPrintZ(&zb, "{s}", .{j.name})) |p| {
+                    px = decodeScaled(p, THUMB_W, THUMB_H, true);
+                } else |_| {}
+            } else {
+                var buf: [600]u8 = undefined;
+                if (findIcon(j.name, &buf)) |p| px = decodeScaled(p, ICON_PX, ICON_PX, false);
+            }
             a.free(j.name);
             self.mutex.lock();
-            self.results.append(.{ .idx = j.idx, .gen = gen, .px = px }) catch if (px) |p| std.c.free(p);
+            self.results.append(.{ .idx = j.idx, .gen = gen, .thumb = j.thumb, .px = px }) catch if (px) |p| std.c.free(p);
             self.mutex.unlock();
             // まとめて通知されても良い(読む側は全部取り出す)。満杯の EAGAIN は無視。
             _ = c.write(self.pipe_w, "i", 1);
@@ -694,46 +985,58 @@ const IconWorker = struct {
     }
 };
 
-/// PNG を読み、縦横比を保って 64x64 に収める(余白は透明)。箱フィルタで縮小。
-fn decodeIcon(path: [:0]const u8) ?[*]u8 {
+/// 画像を読み、ow x oh に縮小する。cover=true なら縦横比を保って隙間なく埋め(はみ出しは切る)、
+/// false なら全体が収まるように(余白は透明)。箱フィルタで縮小、乗算済みアルファで平均。
+fn decodeScaled(path: [:0]const u8, ow: usize, oh: usize, cover: bool) ?[*]u8 {
     var w: c_int = 0;
     var h: c_int = 0;
     var n: c_int = 0;
     const src = c.stbi_load(path.ptr, &w, &h, &n, 4) orelse return null;
     defer c.stbi_image_free(src);
-    const out: [*]u8 = @ptrCast(std.c.malloc(ICON_PX * ICON_PX * 4) orelse return null);
-    @memset(out[0 .. ICON_PX * ICON_PX * 4], 0);
+    const out: [*]u8 = @ptrCast(std.c.malloc(ow * oh * 4) orelse return null);
+    @memset(out[0 .. ow * oh * 4], 0);
     const sw: usize = @intCast(w);
     const sh: usize = @intCast(h);
-    const scale = @as(f32, @floatFromInt(@max(sw, sh))) / ICON_PX;
-    const dw: usize = @max(1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(sw)) / scale)));
-    const dh: usize = @max(1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(sh)) / scale)));
-    const ox = (ICON_PX - @min(dw, ICON_PX)) / 2;
-    const oy = (ICON_PX - @min(dh, ICON_PX)) / 2;
-    for (0..@min(dh, ICON_PX)) |y| for (0..@min(dw, ICON_PX)) |x| {
-        // この出力画素に対応する入力の矩形を平均(乗算済みアルファで平均して縁のにじみを防ぐ)
-        const x0: usize = @intFromFloat(@as(f32, @floatFromInt(x)) * scale);
-        const y0: usize = @intFromFloat(@as(f32, @floatFromInt(y)) * scale);
-        const x1 = @min(sw, @max(x0 + 1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(x + 1)) * scale))));
-        const y1 = @min(sh, @max(y0 + 1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(y + 1)) * scale))));
+    const fx = @as(f32, @floatFromInt(sw)) / @as(f32, @floatFromInt(ow));
+    const fy = @as(f32, @floatFromInt(sh)) / @as(f32, @floatFromInt(oh));
+    const scale = if (cover) @min(fx, fy) else @max(fx, fy);
+    const dw: usize = @min(ow, @max(1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(sw)) / scale))));
+    const dh: usize = @min(oh, @max(1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(sh)) / scale))));
+    const ox = (ow - dw) / 2;
+    const oy = (oh - dh) / 2;
+    // cover のときは入力の中央を切り出す
+    const sx0: f32 = if (cover) (@as(f32, @floatFromInt(sw)) - @as(f32, @floatFromInt(ow)) * scale) / 2 else 0;
+    const sy0: f32 = if (cover) (@as(f32, @floatFromInt(sh)) - @as(f32, @floatFromInt(oh)) * scale) / 2 else 0;
+    for (0..dh) |y| for (0..dw) |x| {
+        const x0: usize = @intFromFloat(sx0 + @as(f32, @floatFromInt(x)) * scale);
+        const y0: usize = @intFromFloat(sy0 + @as(f32, @floatFromInt(y)) * scale);
+        const x1 = @min(sw, @max(x0 + 1, @as(usize, @intFromFloat(sx0 + @as(f32, @floatFromInt(x + 1)) * scale))));
+        const y1 = @min(sh, @max(y0 + 1, @as(usize, @intFromFloat(sy0 + @as(f32, @floatFromInt(y + 1)) * scale))));
+        // 大きな画像で箱が広すぎると遅いので、最大 8x8 点だけ間引いてサンプルする
+        const stepx = @max(1, (x1 - x0) / 8);
+        const stepy = @max(1, (y1 - y0) / 8);
         var acc = [4]u32{ 0, 0, 0, 0 };
         var cnt: u32 = 0;
-        for (y0..y1) |yy| for (x0..x1) |xx| {
-            const i = (yy * sw + xx) * 4;
-            const al: u32 = src[i + 3];
-            acc[0] += @as(u32, src[i]) * al;
-            acc[1] += @as(u32, src[i + 1]) * al;
-            acc[2] += @as(u32, src[i + 2]) * al;
-            acc[3] += al;
-            cnt += 1;
-        };
-        const o = ((y + oy) * ICON_PX + (x + ox)) * 4;
+        var yy = y0;
+        while (yy < y1) : (yy += stepy) {
+            var xx = x0;
+            while (xx < x1) : (xx += stepx) {
+                const i = (yy * sw + xx) * 4;
+                const al: u32 = src[i + 3];
+                acc[0] += @as(u32, src[i]) * al;
+                acc[1] += @as(u32, src[i + 1]) * al;
+                acc[2] += @as(u32, src[i + 2]) * al;
+                acc[3] += al;
+                cnt += 1;
+            }
+        }
+        const o = ((y + oy) * ow + (x + ox)) * 4;
         if (acc[3] > 0) {
             out[o] = @intCast(acc[0] / acc[3]);
             out[o + 1] = @intCast(acc[1] / acc[3]);
             out[o + 2] = @intCast(acc[2] / acc[3]);
         }
-        out[o + 3] = @intCast(acc[3] / cnt);
+        out[o + 3] = @intCast(acc[3] / @max(cnt, 1));
     };
     return out;
 }
@@ -746,27 +1049,40 @@ fn onIconsReady(ctx: *anyopaque, fd: c_int, _: u32) void {
     w.mutex.lock();
     defer w.mutex.unlock();
     for (w.results.items) |r| {
-        if (r.gen == self.gen and r.idx < self.entries.items.len) {
+        if (r.gen == self.gen and !r.thumb and r.idx < self.entries.items.len) {
             const e = &self.entries.items[r.idx];
             e.icon_px = r.px;
             e.icon_state = if (r.px != null) 2 else 1;
+        } else if (r.gen == self.gen and r.thumb and r.idx < self.walls.items.len) {
+            const wl = &self.walls.items[r.idx];
+            wl.px = r.px;
+            wl.state = if (r.px != null) 2 else 1;
         } else if (r.px) |p| std.c.free(p); // 古い走査の結果
     }
     w.results.clearRetainingCapacity();
-    if (self.surf) |s| s.schedule();
+    self.redraw();
 }
 
 fn startIconWorkerImpl(self: *Launcher) void {
     self.gen +%= 1;
     const a = std.heap.c_allocator;
     var jobs = std.ArrayList(IconJob).init(a);
+    // 壁紙のサムネイルを先に(壁紙ピッカーは開いた瞬間に全部見えるため)
+    for (self.walls.items, 0..) |wl, i| {
+        if (wl.path.len == 0) {
+            self.walls.items[i].state = 1;
+            continue;
+        }
+        const name = a.dupe(u8, wl.path) catch continue;
+        jobs.append(.{ .idx = @intCast(i), .name = name, .thumb = true }) catch a.free(name);
+    }
     for (self.entries.items, 0..) |e, i| {
         if (e.icon.len == 0) {
             self.entries.items[i].icon_state = 1;
             continue;
         }
         const name = a.dupe(u8, e.icon) catch continue;
-        jobs.append(.{ .idx = @intCast(i), .name = name }) catch a.free(name);
+        jobs.append(.{ .idx = @intCast(i), .name = name, .thumb = false }) catch a.free(name);
     }
     const owned = jobs.toOwnedSlice() catch return;
     const t = std.Thread.spawn(.{}, IconWorker.run, .{ self.icons, owned, self.gen }) catch {

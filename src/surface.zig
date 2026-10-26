@@ -138,6 +138,18 @@ pub const Surface = struct {
         self.input_region_full = false;
     }
 
+    /// 複数の矩形を入力領域にする(枠: バー・縁・開いているドロワーだけクリックを受け、それ以外は窓へ透過)
+    pub fn setInputRects(self: *Surface, rects: []const [4]f32) void {
+        const r = c.wl_compositor_create_region(self.app.compositor);
+        for (rects) |q| {
+            if (q[2] < 1 or q[3] < 1) continue;
+            c.wl_region_add(r, @intFromFloat(@floor(q[0])), @intFromFloat(@floor(q[1])), @intFromFloat(@ceil(q[2])), @intFromFloat(@ceil(q[3])));
+        }
+        c.wl_surface_set_input_region(self.wl, r);
+        c.wl_region_destroy(r);
+        self.input_region_full = false;
+    }
+
     /// 次のフレームで描き直す。
     pub fn schedule(self: *Surface) void {
         if (!self.configured) {

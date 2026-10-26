@@ -57,6 +57,11 @@ pub const Osd = struct {
 
     fn showKind(self: *Osd, kind: Kind, v: f32) void {
         const app = self.app;
+        // caelestia: 音量・明るさは枠の右辺から生える縦スライダーで見せる
+        if (kind != .info) if (app.activeFrame()) |f| {
+            f.showOsd();
+            return;
+        };
         if (self.surf == null) {
             const out = app.activeOutput() orelse return;
             self.out = out;

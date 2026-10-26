@@ -16,6 +16,8 @@ const protocols = [_][]const u8{
     "protocol/ext-session-lock-v1.xml",
     "protocol/cursor-shape-v1.xml",
     "protocol/tablet-unstable-v2.xml",
+    "protocol/idle-inhibit-unstable-v1.xml",
+    "protocol/wlr-virtual-pointer-unstable-v1.xml",
 };
 
 pub fn build(b: *std.Build) void {
@@ -93,6 +95,14 @@ pub fn build(b: *std.Build) void {
         exe.linkSystemLibrary(lib);
     }
     b.installArtifact(exe);
+
+    // --- 試験用ツール(zig build tools): 仮想ポインタでホバー等を自動試験する ---
+    const vptr = b.addExecutable(.{ .name = "vptr", .root_source_file = b.path("tools/vptr.zig"), .target = target, .optimize = optimize });
+    vptr.linkLibC();
+    vptr.addIncludePath(gen.getDirectory());
+    for (proto_c.items) |c_file| vptr.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
+    vptr.linkSystemLibrary("wayland-client");
+    b.step("tools", "試験用ツール").dependOn(&b.addInstallArtifact(vptr, .{}).step);
 
     // --- 制御CLI(libc のみ。軽量に保つ) ---
     const ctl = b.addExecutable(.{
