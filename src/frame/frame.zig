@@ -459,6 +459,8 @@ pub const Frame = struct {
                 if (kind == .none) {
                     self.pop.hide();
                 } else {
+                    // 音量のポップアウト: 出力先・入力先の一覧を読み直す
+                    if (kind == .volume and self.pop_kind != .volume) self.app.audio.refresh();
                     if (self.pop_kind == .none) self.pop_cy.snap(cy) else self.pop_cy.set(cy);
                     self.pop.show(false);
                     self.pop_kind = kind;

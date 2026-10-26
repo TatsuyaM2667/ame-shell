@@ -89,3 +89,7 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - エラーは theme.danger()(はっきりした赤)。Wi-Fi/Bluetooth の操作失敗・緊急通知で枠の縁が赤く光る(theme.flashError)。
 - Bluetooth: 接続は data/bt-connect.sh(信頼 → 接続、失敗したら 1 回やり直し、profile-unavailable なら WirePlumber を再起動)→ イヤホンなら A2DP にして既定の出力にし、再生中の音も移す。実際には繋がっているのに bluetoothctl が失敗を出していた場合も成功扱い。AirPods の br-connection-refused 対策として session/bt-airpods-fix.sh(root: ControllerMode = bredr 等)。
 - River 0.5: ame-ctl restart の前に窓のタグを $XDG_RUNTIME_DIR/ame-wm-state-<ディスプレイ> に保存し、再起動後に River の窓識別子で戻す。セッション終了要求はどこから来たかをログに出す(06:51 に起動 3 秒で終了した件の調査用)。
+
+## 2026-10-27(追記 5)
+- AirPods が Bluetooth では繋がっているのに音がスピーカーのまま: bluetoothd の再起動(bt-airpods-fix.sh)後に WirePlumber が BlueZ へ登録し直しておらず、PipeWire に音の機器(bluez_card)が現れていなかった。WirePlumber の再起動で解消。bt-connect.sh は「繋がったのに音の機器が出ない」ときに自動で WirePlumber を再起動する。接続後、既定の入力がイヤホンのマイクなら内蔵マイクに戻す(録音のたびに通話用の低音質へ切り替わるのを防ぐ)。
+- 音量のポップアウト(縦バーの音量アイコン)に出力先・入力先の一覧。クリックで切り替え(再生中・録音中の音も移す)、音量バーのクリックで音量、右クリックでミュート。pactl の JSON は日本語の機器名で壊れるのでテキスト形式を読む(src/audio.zig、別スレッド)。

@@ -45,12 +45,22 @@ fi
 # ---- 音声の出力先にする ----
 command -v pactl >/dev/null 2>&1 || { echo "Connection successful"; exit 0; }
 card="bluez_card.$id"
-i=0
-while [ $i -lt 24 ]; do
-    pactl list short cards 2>/dev/null | grep -q "$card" && break
-    sleep 0.25
-    i=$((i + 1))
-done
+wait_card() {
+    i=0
+    while [ $i -lt 24 ]; do
+        pactl list short cards 2>/dev/null | grep -q "$card" && return 0
+        sleep 0.25
+        i=$((i + 1))
+    done
+    return 1
+}
+# Bluetooth では繋がったのに PipeWire に音の機器が現れない: bluetoothd の再起動後に WirePlumber が
+# 登録し直していないときに起きる。WirePlumber を再起動すると、繋がっている機器を拾い直す
+if ! wait_card && command -v dinitctl >/dev/null 2>&1; then
+    dinitctl --user restart wireplumber >/dev/null 2>&1
+    sleep 2
+    wait_card
+fi
 if pactl list short cards 2>/dev/null | grep -q "$card"; then
     # 通話用(HFP)ではなく音楽用の高音質プロファイルに(AirPods は AAC になる)
     pactl set-card-profile "$card" a2dp-sink >/dev/null 2>&1
@@ -69,5 +79,13 @@ if pactl list short cards 2>/dev/null | grep -q "$card"; then
         done
         echo "audio: $sink"
     fi
+    # 既定の入力がイヤホンのマイクだと、録音するアプリがあるたびに通話用(低音質)へ切り替わるので、
+    # 内蔵マイクを既定の入力にしておく(イヤホンのマイクは音量のポップアウトで選べる)
+    case "$(pactl get-default-source 2>/dev/null)" in
+        bluez_input.*)
+            mic=$(pactl list short sources 2>/dev/null | awk '$2 ~ /^alsa_input/ { print $2; exit }')
+            [ -n "$mic" ] && pactl set-default-source "$mic" >/dev/null 2>&1
+            ;;
+    esac
 fi
 echo "Connection successful"

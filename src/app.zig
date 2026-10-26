@@ -24,6 +24,7 @@ const Media = @import("media.zig").Media;
 const WallPick = @import("wallpick.zig").WallPick;
 const Avatar = @import("avatar.zig").Avatar;
 const Toplevels = @import("toplevels.zig").Toplevels;
+const Audio = @import("audio.zig").Audio;
 const ipc = @import("ipc.zig");
 const SuperTap = @import("platform/supertap.zig").SuperTap;
 const Wm = @import("wm/wm.zig").Wm;
@@ -183,6 +184,8 @@ pub const App = struct {
     wallpick: *WallPick = undefined,
     /// ダッシュボードのユーザーの写真
     avatar: *Avatar = undefined,
+    /// 音の出力先・入力先
+    audio: *Audio = undefined,
     ipc_server: ipc.Server = undefined,
     supertap: SuperTap = undefined,
     initialized: bool = false,
@@ -258,6 +261,7 @@ pub const App = struct {
         app.media = try Media.create(app);
         app.wallpick = try WallPick.create(app);
         app.avatar = try Avatar.create(app);
+        app.audio = try Audio.create(app);
         app.ipc_server = try ipc.Server.init(app);
         app.ipc_server.register();
         app.supertap = .{ .loop = &app.loop, .ctx = app, .on_tap = onSuperTap, .enabled = app.cfg.super_launcher };

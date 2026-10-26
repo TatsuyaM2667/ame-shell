@@ -329,16 +329,98 @@ pub const Bar = struct {
 // ---------------------------------------------------------------------------
 
 pub fn popSize(f: *Frame, kind: Pop) [2]f32 {
-    _ = f;
+    const au = f.app.audio;
     return switch (kind) {
         .none => .{ 200, 60 },
         .window => .{ 340, 78 },
         .clock => .{ 250, 128 },
-        .volume => .{ 280, 84 },
+        // 音量 + 出力先の一覧 + 入力先の一覧
+        .volume => .{ 320, 84 + 26 + @as(f32, @floatFromInt(@max(au.sinks.n, 1))) * ROW_A + 26 + @as(f32, @floatFromInt(@max(au.sources.n, 1))) * ROW_A + 24 },
         .network => .{ 290, 96 },
         .bluetooth => .{ 260, 76 },
         .battery => .{ 290, 104 },
     };
+}
+
+const audio = @import("../audio.zig");
+const ROW_A: f32 = 32;
+
+/// 音量ポップアウトの当たり判定(最後に描いた位置)
+const AudioHit = struct { kind: audio.Kind, idx: usize, rect: [4]f32 };
+var pop_audio: struct {
+    hits: [2 * audio.MAX]AudioHit = undefined,
+    n: usize = 0,
+    hover: ?usize = null,
+    vol_bar: [4]f32 = .{ 0, 0, 0, 0 },
+} = .{};
+
+fn drawDevList(f: *Frame, cv: *gfx.Canvas, w: f32, y0: f32, kind: audio.Kind) f32 {
+    const app = f.app;
+    const acc = theme.accent(app);
+    const txt = theme.text(app);
+    const sub = theme.subtext(app);
+    const l = app.audio.list(kind);
+    _ = cv.text(18, y0 + 14, 12, acc, if (kind == .sink) "出力先" else "入力先", .{ .bold = true });
+    var y = y0 + 22;
+    if (l.n == 0) {
+        _ = cv.text(30, y + 20, 12.5, sub, "読み込み中…", .{});
+        return y + ROW_A;
+    }
+    for (0..l.n) |i| {
+        const d = &l.devs[i];
+        const sel = l.isDefault(i);
+        const hi = pop_audio.n;
+        const hv = pop_audio.hover != null and pop_audio.hover.? == hi;
+        const r = [4]f32{ 10, y, w - 20, ROW_A - 4 };
+        if (pop_audio.n < pop_audio.hits.len) {
+            pop_audio.hits[pop_audio.n] = .{ .kind = kind, .idx = i, .rect = r };
+            pop_audio.n += 1;
+        }
+        if (sel) {
+            cv.rect(r[0], r[1], r[2], r[3], 10, acc.alpha(0.22));
+        } else if (hv) cv.rect(r[0], r[1], r[2], r[3], 10, Color.hex(0xffffff).alpha(0.07));
+        const nm = d.nameStr();
+        const icon: []const u8 = if (d.bluetooth) "\u{F02CB}" else if (std.ascii.indexOfIgnoreCase(nm, "hdmi") != null) "\u{F0379}" else if (kind == .sink) "\u{F04C3}" else "\u{F036C}";
+        const col = if (sel) acc.lighten(0.25) else txt;
+        _ = cv.text(30, y + 19, 15, col, icon, .{ .alignment = .center });
+        _ = cv.text(46, y + 19, 12.5, col, d.labelStr(), .{ .bold = sel, .max_w = w - 90 });
+        if (sel) _ = cv.text(w - 28, y + 19, 14, acc.lighten(0.25), "\u{F012C}", .{ .alignment = .center });
+        y += ROW_A;
+    }
+    return y;
+}
+
+/// 音量ポップアウトの操作。扱ったら true
+pub fn audioPopPointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
+    const app = f.app;
+    var hov: ?usize = null;
+    for (pop_audio.hits[0..pop_audio.n], 0..) |h, i| {
+        const r = h.rect;
+        if (lx >= r[0] and lx < r[0] + r[2] and ly >= r[1] and ly < r[1] + r[3]) hov = i;
+    }
+    const changed = hov != pop_audio.hover;
+    pop_audio.hover = if (ev.kind == .leave) null else hov;
+    if (ev.kind == .press) {
+        if (ev.button == 0x111) {
+            sys.toggleMute();
+            app.sys.volume = sys.volume();
+            return true;
+        }
+        if (hov) |i| {
+            const h = pop_audio.hits[i];
+            app.audio.select(h.kind, h.idx);
+            return true;
+        }
+        const b = pop_audio.vol_bar;
+        if (lx >= b[0] - 6 and lx <= b[0] + b[2] + 6 and ly >= b[1] and ly <= b[1] + b[3]) {
+            sys.setVolume(std.math.clamp((lx - b[0]) / b[2], 0, 1));
+            app.sys.volume = sys.volume();
+            app.redrawBars();
+            return true;
+        }
+        return true;
+    }
+    return changed;
 }
 
 pub fn drawPopout(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
@@ -369,10 +451,16 @@ pub fn drawPopout(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
             const v = if (st.volume.known) st.volume.level else 0;
             _ = cv.text(x, 28, 12, acc, "音量", .{ .bold = true });
             const pct = std.fmt.bufPrint(&buf, "{d}%{s}", .{ @as(u32, @intFromFloat(@round(v * 100))), if (st.volume.muted) " (ミュート)" else "" }) catch "";
-            _ = cv.text(w - 18, 28, 13, txt, pct, .{ .alignment = .right, .bold = true });
+            _ = cv.text(w - 18, 28, 13, if (st.volume.muted) theme.danger(app) else txt, pct, .{ .alignment = .right, .bold = true });
             cv.rect(x, 48, w - 36, 8, 4, Color.hex(0xffffff).alpha(0.12));
             cv.rectGrad(x, 48, @max((w - 36) * std.math.clamp(v, 0, 1), 8), 8, 4, acc.lighten(0.3), acc);
-            _ = cv.text(x, 74, 11.5, sub, "ホイールで調整 / クリックでミュート", .{});
+            pop_audio.vol_bar = .{ x, 38, w - 36, 28 };
+            _ = cv.text(x, 74, 11, sub, "ホイール・クリックで音量 / 右クリックでミュート", .{});
+            // 出力先・入力先(クリックで切り替え。再生中の音も移る)
+            pop_audio.n = 0;
+            var y: f32 = 84;
+            y = drawDevList(f, cv, w, y, .sink);
+            _ = drawDevList(f, cv, w, y, .source);
         },
         .network => {
             _ = cv.text(x, 28, 12, acc, "ネットワーク", .{ .bold = true });

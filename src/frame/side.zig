@@ -363,6 +363,8 @@ pub fn draw(f: *Frame, which: Which, cv: *gfx.Canvas, w: f32, h: f32, dt: f32) b
 
 pub fn pointer(f: *Frame, which: Which, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
     const app = f.app;
+    // 音量のポップアウト: 出力先・入力先の選択と音量バー(ホイールは下の共通処理)
+    if (which == .popout and f.pop_kind == .volume and ev.kind != .scroll) return vbar.audioPopPointer(f, ev, lx, ly);
     const st = &f.sidev;
     var hov: i32 = -1;
     if (ev.kind != .leave) switch (which) {
