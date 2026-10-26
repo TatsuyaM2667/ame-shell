@@ -40,6 +40,11 @@ pub const View = struct {
     vinyl_angle: f32 = 0,
     arm: Spring = Spring.init(0, 0.6, 0.85),
     lyr_scroll: Spring = Spring.init(0, 0.45, 0.9),
+    /// 同期歌詞の各行の位置(クリックでその時間へ飛ぶ)。y はタブの中身の座標
+    lyr_hits: [48]struct { y0: f32, y1: f32, t: f32, idx: usize } = undefined,
+    n_lyr_hits: usize = 0,
+    lyr_area: [4]f32 = .{ 0, 0, 0, 0 },
+    lyr_hover: ?usize = null,
     // カレンダー(WASM)の配置(入力の転送用)
     cal_rect: [4]f32 = .{ 0, 0, 0, 0 },
     btn_rects: [16][4]f32 = undefined,
@@ -343,15 +348,15 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
     const cy: f32 = H / 2 + 4;
     const R: f32 = 128;
     if (playing) {
-        // 33⅓ 回転のつもりで 1 周約 6 秒
-        v.vinyl_angle += dt * std.math.tau / 6.0;
+        // レコードの溝は同心円で回転が見えないため、目に入るのはジャケットだけ。目が疲れないよう 1 周 24 秒でゆっくり
+        v.vinyl_angle += dt * std.math.tau / 24.0;
         if (v.vinyl_angle > std.math.tau) v.vinyl_angle -= std.math.tau;
         animating = true;
     }
     // スペクトラム(cava)をレコードの外周に放射状に
     const n = data.BARS;
     for (0..n) |i| {
-        const a = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(n)) * std.math.tau - std.math.pi / 2.0 + v.vinyl_angle * 0.15;
+        const a = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(n)) * std.math.tau - std.math.pi / 2.0 + v.vinyl_angle * 0.25;
         const val = if (f.cava.running()) f.cava.values[i] else 0.05;
         const r0 = R + 10;
         const r1 = r0 + 4 + val * 44;
@@ -433,6 +438,7 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
     const pos = m.position();
     const center_y: f32 = 18 + (H - 28) / 2;
     cv.setClip(lx, 20, lw, H - 32);
+    v.n_lyr_hits = 0;
     switch (ly.state) {
         .idle, .fetching => {
             _ = cv.text(lx + lw / 2, center_y, 14, sub, "歌詞を検索中…", .{ .alignment = .center });
@@ -458,10 +464,23 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
             if (v.lyr_scroll.target != target) v.lyr_scroll.set(target);
             if (v.lyr_scroll.step(dt)) animating = true;
             const LH: f32 = 40;
+            v.n_lyr_hits = 0;
+            v.lyr_area = .{ lx, 20, lw, H - 32 };
             for (ly.lines.items, 0..) |l, i| {
                 const fi: f32 = @floatFromInt(i);
                 const yy = center_y + (fi - v.lyr_scroll.x) * LH;
                 if (yy < -LH or yy > H + LH) continue;
+                if (v.n_lyr_hits < v.lyr_hits.len) {
+                    v.lyr_hits[v.n_lyr_hits] = .{ .y0 = yy - LH / 2 - 4, .y1 = yy + LH / 2 - 4, .t = l.t, .idx = i };
+                    v.n_lyr_hits += 1;
+                }
+                // カーソルが乗っている行: 薄い帯と、その行の時刻(クリックでそこへ飛ぶ)
+                if (v.lyr_hover != null and v.lyr_hover.? == i) {
+                    cv.rect(lx + 10, yy - LH / 2 - 2, lw - 20, LH - 4, 12, Color.hex(0xffffff).alpha(0.07));
+                    var tb: [16]u8 = undefined;
+                    const ts = std.fmt.bufPrint(&tb, "{d}:{d:0>2}", .{ @as(u32, @intFromFloat(l.t)) / 60, @as(u32, @intFromFloat(l.t)) % 60 }) catch "";
+                    _ = cv.text(lx + 16, yy + 4, 10.5, acc.lighten(0.3).alpha(0.9), ts, .{});
+                }
                 const dist = @abs(fi - v.lyr_scroll.x);
                 const is_cur = cur.idx != null and cur.idx.? == i;
                 const fsz: f32 = if (is_cur) 21 else 15.5 - @min(dist, 3) * 0.6;
@@ -469,14 +488,14 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
                 const text_ = if (l.text.len > 0) l.text else "♪";
                 if (is_cur) {
                     // カラオケ風: 行の時間の進みに合わせて左から明るく塗る
-                    const tw2 = @min(cv.measure(text_, fsz, true), lw - 40);
+                    const tw2 = @min(cv.measure(text_, fsz, true), lw - 92);
                     const x0 = lx + lw / 2 - tw2 / 2;
-                    _ = cv.text(lx + lw / 2, yy + 7, fsz, sub.alpha(0.55), text_, .{ .bold = true, .alignment = .center, .max_w = lw - 40 });
+                    _ = cv.text(lx + lw / 2, yy + 7, fsz, sub.alpha(0.55), text_, .{ .bold = true, .alignment = .center, .max_w = lw - 92 });
                     cv.setClip(x0 - 4, yy - 30, tw2 * cur.frac + 4, 50);
-                    _ = cv.text(lx + lw / 2, yy + 7, fsz, Color.mix(txt, acc.lighten(0.5), 0.35), text_, .{ .bold = true, .alignment = .center, .max_w = lw - 40, .glow = 2.5, .glow_color = acc.lighten(0.3).alpha(0.5) });
+                    _ = cv.text(lx + lw / 2, yy + 7, fsz, Color.mix(txt, acc.lighten(0.5), 0.35), text_, .{ .bold = true, .alignment = .center, .max_w = lw - 92, .glow = 2.5, .glow_color = acc.lighten(0.3).alpha(0.5) });
                     cv.setClip(lx, 20, lw, H - 32);
                 } else {
-                    _ = cv.text(lx + lw / 2, yy + 6, fsz, txt.alpha(alpha * 0.7), text_, .{ .alignment = .center, .max_w = lw - 40 });
+                    _ = cv.text(lx + lw / 2, yy + 6, fsz, txt.alpha(alpha * 0.7), text_, .{ .alignment = .center, .max_w = lw - 92 });
                 }
             }
             if (playing) animating = true; // カラオケの塗りを滑らかに
@@ -682,6 +701,25 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
             };
             if (wd.pointer(k, lx - cr[0], cy - cr[1])) redraw = true;
         }
+    }
+    // 同期歌詞: 行の上でクリックするとその時間へ
+    if (v.tab == 1) {
+        const cy = ly - TAB_H;
+        const a = v.lyr_area;
+        var lh: ?usize = null;
+        if (ev.kind != .leave and lx >= a[0] and lx < a[0] + a[2] and cy >= a[1] and cy < a[1] + a[3]) {
+            for (v.lyr_hits[0..v.n_lyr_hits]) |hh| {
+                if (cy >= hh.y0 and cy < hh.y1) lh = hh.idx;
+            }
+        }
+        if (lh != v.lyr_hover) redraw = true;
+        v.lyr_hover = lh;
+        if (ev.kind == .press and ev.button == 0x110) if (lh) |idx| {
+            for (v.lyr_hits[0..v.n_lyr_hits]) |hh| if (hh.idx == idx) {
+                @import("../media.zig").seekTo(app.media, hh.t);
+            };
+            return true;
+        };
     }
     // ワークスペースのタイル
     if (v.tab == 3) {

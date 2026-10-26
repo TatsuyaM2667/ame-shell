@@ -266,6 +266,17 @@ pub fn resync(self: *Media) void {
     self.pos_at_ms = loop.nowMs();
 }
 
+/// 再生位置を sec 秒へ(歌詞の行をクリックしたとき)。表示はすぐに新しい位置から進める
+pub fn seekTo(self: *Media, sec: f32) void {
+    var buf: [64]u8 = undefined;
+    const cmd = std.fmt.bufPrintZ(&buf, "playerctl position {d:.2}", .{@max(sec, 0)}) catch return;
+    sys.spawnDetached(cmd.ptr);
+    self.pos_s = @max(sec, 0);
+    self.pos_at_ms = loop.nowMs();
+    // 直後の位置問い合わせが古い位置を返すことがあるので、次の補正は少し後に
+    self.last_resync_ms = loop.nowMs();
+}
+
 /// シャッフル・リピートの状態を問い合わせる(メディア画面を開いたとき)
 pub fn queryModes(self: *Media) void {
     var out: [64]u8 = undefined;

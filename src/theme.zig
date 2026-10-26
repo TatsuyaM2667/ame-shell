@@ -235,10 +235,10 @@ fn vividHue(rgba: [*]const u8, count: c_int, stride: c_int) ?f32 {
 }
 
 /// アクセントの色相を「アクセントとして見栄えの良い色相」に寄せる。
-/// 黄緑〜緑(くすみやすく、UI の「有効」表示が安っぽく見える)は避けて、近い青緑か琥珀へ逃がす
+/// 黄緑〜緑(くすみやすく、UI の「有効」表示が安っぽく見える)は避けて、近い青緑か琥珀へ逃がす。
+/// 赤もエラー表示(theme.danger)と紛らわしいので使わない
 pub fn accentHue(h: f32) f32 {
     const anchors = [_]f32{
-        0.015, // コーラル
         0.085, // 琥珀
         0.49, // ティール
         0.545, // スカイ
@@ -263,7 +263,8 @@ pub fn accentHue(h: f32) f32 {
     if (d > 0.5) d -= 1;
     if (d < -0.5) d += 1;
     var out = h + d * 0.75;
-    if (h > 0.13 and h < 0.44) out = best;
+    // 赤はエラーの色と紛らわしいので、ピンクか琥珀へ完全に寄せる
+    if ((h > 0.13 and h < 0.44) or h < 0.05 or h > 0.97) out = best;
     return out - @floor(out);
 }
 
