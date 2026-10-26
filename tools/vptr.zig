@@ -1,5 +1,5 @@
 // vptr: 試験用の仮想ポインタ(zwlr_virtual_pointer_v1)。ヘッドレス River でホバー等を自動試験するため。
-// 使い方: vptr <幅> <高さ> m X Y | s ミリ秒 | c(左クリック)| w 量(縦ホイール) ...
+// 使い方: vptr <幅> <高さ> m X Y | s ミリ秒 | c(左クリック)| r(右クリック)| w 量(縦ホイール) ...
 const std = @import("std");
 const c = @cImport({
     @cInclude("wayland-client.h");
@@ -44,6 +44,11 @@ pub fn main() !u8 {
             c.zwlr_virtual_pointer_v1_button(ptr, t, 0x110, 1);
             c.zwlr_virtual_pointer_v1_frame(ptr);
             c.zwlr_virtual_pointer_v1_button(ptr, t + 5, 0x110, 0);
+            c.zwlr_virtual_pointer_v1_frame(ptr);
+        } else if (std.mem.eql(u8, cmd, "r")) {
+            c.zwlr_virtual_pointer_v1_button(ptr, t, 0x111, 1);
+            c.zwlr_virtual_pointer_v1_frame(ptr);
+            c.zwlr_virtual_pointer_v1_button(ptr, t + 5, 0x111, 0);
             c.zwlr_virtual_pointer_v1_frame(ptr);
         } else if (std.mem.eql(u8, cmd, "w")) {
             const v = try std.fmt.parseFloat(f64, args.next() orelse break);

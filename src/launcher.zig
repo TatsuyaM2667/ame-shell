@@ -50,6 +50,10 @@ pub const Entry = struct {
     icon: []const u8 = "",
     terminal: bool = false,
     uses: u32 = 0,
+    /// 最後に起動した時刻(UNIX 秒)。よく使う順(frecency)の計算に使う
+    last_used: i64 = 0,
+    /// お気に入りの順番(上に固定される)。null = お気に入りではない
+    fav: ?u32 = null,
     icon_tex: c.GLuint = 0,
     icon_state: u8 = 0, // 0=読み込み中 1=無し 2=画素あり(icon_px)
     icon_px: ?[*]u8 = null, // 64x64 RGBA(c_allocator)
@@ -172,6 +176,7 @@ pub const Launcher = struct {
         }
         self.scanWalls();
         self.loadHistory();
+        self.loadFavorites();
         self.scanned_ms = loop.nowMs();
         self.startIconWorker();
         std.log.info("launcher: {d} 件のアプリ / {d} 件の壁紙", .{ self.entries.items.len, self.walls.items.len });
@@ -214,10 +219,74 @@ pub const Launcher = struct {
             var t = std.mem.tokenizeScalar(u8, l, ' ');
             const n = std.fmt.parseInt(u32, t.next() orelse continue, 10) catch continue;
             const id = t.next() orelse continue;
+            const last = std.fmt.parseInt(i64, t.next() orelse "0", 10) catch 0;
             for (self.entries.items) |*e| if (std.mem.eql(u8, e.id, id)) {
                 e.uses = n;
+                e.last_used = last;
             };
         }
+    }
+
+    /// お気に入り: ~/.config/ame-shell/favorites に 1 行 1 つ(.desktop の ID)。手で並べ替えてもよい
+    fn loadFavorites(self: *Launcher) void {
+        var pbuf: [512]u8 = undefined;
+        const p = favoritesPath(&pbuf) orelse return;
+        const data = std.fs.cwd().readFileAlloc(self.arena.allocator(), p, 1 << 20) catch return;
+        var lines = std.mem.splitScalar(u8, data, '\n');
+        var rank: u32 = 0;
+        while (lines.next()) |l| {
+            const id = std.mem.trim(u8, l, " \r\t");
+            if (id.len == 0 or id[0] == '#') continue;
+            for (self.entries.items) |*e| if (std.mem.eql(u8, e.id, id)) {
+                e.fav = rank;
+            };
+            rank += 1;
+        }
+    }
+
+    fn saveFavorites(self: *Launcher) void {
+        var pbuf: [512]u8 = undefined;
+        const p = favoritesPath(&pbuf) orelse return;
+        if (std.fs.path.dirname(p)) |d| std.fs.cwd().makePath(d) catch {};
+        const f = std.fs.cwd().createFile(p, .{}) catch return;
+        defer f.close();
+        const w = f.writer();
+        w.writeAll("# ランチャーで上に固定するアプリ(.desktop の ID、上から順)\n") catch {};
+        // 順番を保って書き出す
+        var r: u32 = 0;
+        while (r < 1000) : (r += 1) {
+            var found = false;
+            for (self.entries.items) |e| if (e.fav != null and e.fav.? == r) {
+                w.print("{s}\n", .{e.id}) catch {};
+                found = true;
+            };
+            if (!found and r > self.entries.items.len) break;
+        }
+    }
+
+    /// 選択中のアプリをお気に入りに入れる/外す(Ctrl+F・右クリック)
+    fn toggleFavorite(self: *Launcher, i: usize) void {
+        if (i >= self.results.items.len) return;
+        const r = self.results.items[i];
+        if (r.kind != .app) return;
+        const e = &self.entries.items[r.idx];
+        if (e.fav != null) {
+            e.fav = null;
+        } else {
+            var max: u32 = 0;
+            var any = false;
+            for (self.entries.items) |x| if (x.fav) |fr| {
+                max = @max(max, fr);
+                any = true;
+            };
+            e.fav = if (any) max + 1 else 0;
+        }
+        self.saveFavorites();
+        const keep = e.id;
+        self.search();
+        // 並び替わった後も同じアプリを選んだままにする
+        for (self.results.items, 0..) |res, j| if (res.kind == .app and std.mem.eql(u8, self.entries.items[res.idx].id, keep)) self.select(j);
+        self.redraw();
     }
 
     fn saveHistory(self: *Launcher) void {
@@ -227,7 +296,7 @@ pub const Launcher = struct {
         const f = std.fs.cwd().createFile(p, .{}) catch return;
         defer f.close();
         const w = f.writer();
-        for (self.entries.items) |e| if (e.uses > 0) w.print("{d} {s}\n", .{ e.uses, e.id }) catch {};
+        for (self.entries.items) |e| if (e.uses > 0) w.print("{d} {s} {d}\n", .{ e.uses, e.id, e.last_used }) catch {};
     }
 
     // ---------------------------------------------------------------------
@@ -282,7 +351,9 @@ pub const Launcher = struct {
                     }
                 }
                 if (best < 0) continue;
-                best += @as(i32, @intCast(@min(e.uses, 50))) * 3;
+                // お気に入りは常に上、その次によく(最近)使うもの
+                if (e.fav) |rank| best += 100000 - @as(i32, @intCast(@min(rank, 1000))) * 10;
+                best += frecency(&e);
                 self.results.append(.{ .kind = .app, .idx = @intCast(i), .score = best }) catch {};
             }
         }
@@ -440,6 +511,7 @@ pub const Launcher = struct {
                     std.fmt.bufPrintZ(&buf, "{s}", .{cmd}) catch return;
                 self.app.spawn(z);
                 e.uses += 1;
+                e.last_used = std.time.timestamp();
                 self.saveHistory();
             },
             .action => {
@@ -517,6 +589,8 @@ pub const Launcher = struct {
                     if (ev.sym == c.XKB_KEY_u) {
                         self.qlen = 0;
                         self.search();
+                    } else if (ev.sym == c.XKB_KEY_f) {
+                        self.toggleFavorite(self.sel);
                     } else if (ev.sym == c.XKB_KEY_n or ev.sym == c.XKB_KEY_j) {
                         if (n > 0) self.select(@min(self.sel + 1, n - 1));
                     } else if (ev.sym == c.XKB_KEY_p or ev.sym == c.XKB_KEY_k) {
@@ -585,6 +659,10 @@ pub const Launcher = struct {
             .app => {
                 const e = &self.entries.items[res.idx];
                 self.drawIcon(cv, e, ix, iy, 38);
+                if (e.fav != null) {
+                    // お気に入りの印(右端の星)
+                    _ = cv.text(x + w - 28, ry + 35, 16, Color.hex(0xffd36b), "\u{F04CE}", .{ .alignment = .center, .glow = 3, .glow_color = Color.hex(0xffd36b).alpha(0.5) });
+                }
                 _ = cv.text(ix + 54, ry + 26, 16, txt, e.display(), .{ .bold = true, .max_w = w - 100 });
                 const desc = if (e.comment.len > 0) e.comment else if (e.generic.len > 0) e.generic else firstWord(e.exec);
                 _ = cv.text(ix + 54, ry + 46, 12.5, sub, desc, .{ .max_w = w - 100 });
@@ -699,7 +777,7 @@ pub const Launcher = struct {
         const q = self.query[0..self.qlen];
         var caret_x: f32 = 58;
         if (q.len == 0) {
-            _ = cv.text(58, fy + 29, 14.5, sub.alpha(0.75), "検索…  ( > でアクション / >壁紙 で壁紙)", .{});
+            _ = cv.text(58, fy + 29, 14.5, sub.alpha(0.75), "検索…  ( > アクション ・ Ctrl+F/右クリックでお気に入り)", .{});
         } else {
             caret_x += cv.text(58, fy + 29, 15.5, txt, q, .{ .max_w = w - 100 });
         }
@@ -729,7 +807,10 @@ pub const Launcher = struct {
                 return true;
             },
             .press => {
-                if (idx) |i| {
+                if (idx != null and ev.button == 0x111) {
+                    // 右クリック: お気に入りの切り替え
+                    self.toggleFavorite(self.scroll + idx.?);
+                } else if (idx) |i| {
                     self.activate(self.scroll + i);
                 } else if (ly >= h - 58 and lx > w - 50 and self.qlen > 0) {
                     self.qlen = 0; // ✕ で検索語を消す
@@ -1021,4 +1102,19 @@ fn startIconWorkerImpl(self: *Launcher) void {
         return;
     };
     t.detach();
+}
+
+/// よく使う順の点数: 起動回数 × 最近使ったかどうかの重み(Firefox の frecency の考え方を簡略化)
+fn frecency(e: *const Entry) i32 {
+    if (e.uses == 0) return 0;
+    const age = std.time.timestamp() - e.last_used;
+    const day: i64 = 86400;
+    const w: f32 = if (e.last_used == 0) 0.5 else if (age < day) 1.0 else if (age < 7 * day) 0.75 else if (age < 30 * day) 0.5 else 0.25;
+    return @intFromFloat(@min(@as(f32, @floatFromInt(e.uses)), 200) * w * 6);
+}
+
+fn favoritesPath(buf: []u8) ?[]const u8 {
+    if (std.posix.getenv("XDG_CONFIG_HOME")) |x| return std.fmt.bufPrint(buf, "{s}/ame-shell/favorites", .{x}) catch null;
+    const home = std.posix.getenv("HOME") orelse return null;
+    return std.fmt.bufPrint(buf, "{s}/.config/ame-shell/favorites", .{home}) catch null;
 }
