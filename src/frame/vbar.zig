@@ -151,7 +151,7 @@ pub const Bar = struct {
                 if (hv > 0.01) cv.rect(cx - 12, ty + 2, 24, SLOT - 4, 12, Color.hex(0xffffff).alpha(0.10 * hv));
                 if (occ > 0.02 or on > 0.02) {
                     var lab: [1]u8 = .{'1' + @as(u8, @intCast(i))};
-                    const col = if (urgent) Color.hex(0xff7a90) else Color.mix(Color.mix(sub, txt, occ), dark, on);
+                    const col = if (urgent) theme.danger(app) else Color.mix(Color.mix(sub, txt, occ), dark, on);
                     _ = cv.text(cx, ty + SLOT / 2 + 5, 13, col, lab[0..], .{ .bold = true, .alignment = .center });
                 } else {
                     // 空のタグは小さな点
@@ -166,13 +166,13 @@ pub const Bar = struct {
         {
             const hi = self.addHit(.power, 0, by - 34, 36);
             const hv = self.hov(hi);
-            cv.rect(cx - 15, by - 32, 30, 30, 15, Color.hex(0xff7a90).alpha(0.08 + 0.25 * hv));
-            _ = cv.text(cx, by - 11, 16, Color.mix(Color.hex(0xff8a9b), txt, 0.2), "\u{F0425}", .{ .alignment = .center });
+            cv.rect(cx - 15, by - 32, 30, 30, 15, theme.danger(app).alpha(0.08 + 0.25 * hv));
+            _ = cv.text(cx, by - 11, 16, Color.mix(theme.danger(app).lighten(0.18), txt, 0.2), "\u{F0425}", .{ .alignment = .center });
             by -= 44;
         }
         const st = &app.sys;
         const status = [_]struct { kind: HitKind, icon: []const u8, col: Color, show: bool }{
-            .{ .kind = .battery, .icon = barmod.batteryIconPub(st.battery), .col = if (st.battery.charging) Color.hex(0x7dffc4) else if (st.battery.percent <= 15) Color.hex(0xff7a90) else txt, .show = st.battery.present },
+            .{ .kind = .battery, .icon = barmod.batteryIconPub(st.battery), .col = if (st.battery.charging) theme.accent(app) else if (st.battery.percent <= 15) theme.danger(app) else txt, .show = st.battery.present },
             .{ .kind = .bluetooth, .icon = if (self.bt_on) "\u{F00AF}" else "\u{F00B2}", .col = if (self.bt_on) txt else sub, .show = true },
             .{ .kind = .network, .icon = switch (st.net.kind) {
                 .wifi => "\u{F0928}",

@@ -78,3 +78,14 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - 試験: 仮想キーボード `tools/vkbd.zig` を追加。ヘッドレスの River 0.5 で ame-session --river5 を丸ごと起動し、キー操作(起動・ワークスペース・フォーカス・入れ替え・閉じる・終了)、ランチャーの入力、開く/切替/閉じるの途中フレームをスクリーンショットで確認。
 - 直した不具合: 枠線の色の変換で f32 の精度により整数変換が範囲外(f64 で計算)。キーボード/マウスの capability が一度消えて戻ると古い wl_keyboard を使い続けてキー入力が届かなかった(作り直す)。
 - `ame-ctl workspace <1-9>`(River 0.3 / 0.5 両方)、`ame-ctl window close|fullscreen|float|focus-next|…`(0.5 のみ)。
+
+## 2026-10-27(追記 4)
+- ダッシュボード: 開くアニメーションより速くカーソルを下ろすと「外に出た」と判定されて閉じていた → 開いている間は開き切った大きさで判定し、入力領域も開き切った範囲にする。
+- ユーザーの写真: ~/.config/ame-shell/avatar(パス)→ ~/.face → AccountsService の順。ダッシュボードの丸をクリックすると ~/Pictures の写真をカードで選べる(壁紙ピッカーの写真モード)。ロック画面にも表示。
+- Super+L でロック(River 0.5 の内蔵 WM と River 0.3 の river.sh の両方)。配置の比率は Super+Ctrl+H / L へ。
+- 動画・GIF の壁紙(src/video.zig): libmpv を dlopen し、描画 API で FBO に描いて壁紙のシーンへ。新しいコマの通知が来たときだけ描く。サムネイルは ffmpeg で 1 コマ。注意: mpv に wl_display を渡すと VA-API のラウンドトリップとイベントループの読み込み準備が噛み合って固まる(渡さない → DRM 経由)。720p30 で CPU 約 4.7%、RSS は libmpv 分 +130MB(使うときだけ読み込む)。
+- ワークスペース欄にアプリのアイコンと名前: River 0.5 は内蔵 WM、River 0.3 は wlr-foreign-toplevel で窓を知り、タグは推測(開いた時のタグ・フォーカス時に見えているタグ・窓数の増減)。
+- 配色: アクセントは「一番多い色」ではなく「一番鮮やかな色」の色相から作り、見栄えの良い色相(コーラル・琥珀・ティール・空・青・ペリウィンクル・紫・ピンク)へ寄せる。黄緑〜緑は避ける。アルバムアートも同様(白地のジャケットで白くならない)。充電中の緑はアクセントに。
+- エラーは theme.danger()(はっきりした赤)。Wi-Fi/Bluetooth の操作失敗・緊急通知で枠の縁が赤く光る(theme.flashError)。
+- Bluetooth: 接続は data/bt-connect.sh(信頼 → 接続、失敗したら 1 回やり直し、profile-unavailable なら WirePlumber を再起動)→ イヤホンなら A2DP にして既定の出力にし、再生中の音も移す。実際には繋がっているのに bluetoothctl が失敗を出していた場合も成功扱い。AirPods の br-connection-refused 対策として session/bt-airpods-fix.sh(root: ControllerMode = bredr 等)。
+- River 0.5: ame-ctl restart の前に窓のタグを $XDG_RUNTIME_DIR/ame-wm-state-<ディスプレイ> に保存し、再起動後に River の窓識別子で戻す。セッション終了要求はどこから来たかをログに出す(06:51 に起動 3 秒で終了した件の調査用)。

@@ -115,6 +115,10 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
         // 試験用(AME_DEBUG が設定されているときだけ): 「アーティスト|曲名|長さ秒|位置秒」で再生中のふりをする
         if (std.posix.getenv("AME_DEBUG") == null) return "error: AME_DEBUG が必要です";
         app.media.debugFake(rest);
+    } else if (eq(u8, cmd, "debug-error")) {
+        // 試験用(AME_DEBUG のときだけ): 失敗時の赤い光
+        if (std.posix.getenv("AME_DEBUG") == null) return "error: AME_DEBUG が必要です";
+        theme.flashError(app);
     } else if (eq(u8, cmd, "wallpaper-picker")) {
         app.wallpick.toggle();
     } else if (eq(u8, cmd, "network") or eq(u8, cmd, "bluetooth")) {
@@ -182,6 +186,7 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
     } else if (eq(u8, cmd, "stats")) {
         return stats(app, out);
     } else if (eq(u8, cmd, "restart")) {
+        if (app.wm) |w| w.saveState(); // River 0.5: 窓のワークスペースを再起動後に戻す
         app.restart_requested = true;
         app.running = false;
     } else if (eq(u8, cmd, "quit")) {

@@ -153,6 +153,12 @@ fn onRead(ctx: *anyopaque, fd: c_int, _: u32) void {
     const j = st.running.?;
     st.running = null;
     finish(st, j, st.out[0..st.out_len]);
+    // 新しく失敗したら枠の縁を赤く光らせる
+    const action = switch (j.kind) {
+        .wifi_connect, .wifi_down, .bt_action, .bt_power => true,
+        else => false,
+    };
+    if (action and st.status_err) @import("../theme.zig").flashError(f.app);
     pump(st);
     f.schedule();
 }
@@ -258,8 +264,19 @@ fn finish(st: *State, j: Job, out: []const u8) void {
             if (failed) {
                 var msg: [160]u8 = undefined;
                 const line = firstLine(trimmed);
-                const pretty = if (std.mem.indexOf(u8, out, "Secrets were required") != null or std.mem.indexOf(u8, out, "802-11-wireless-security.psk") != null)
+                const has = struct {
+                    fn f(hay: []const u8, needle: []const u8) bool {
+                        return std.mem.indexOf(u8, hay, needle) != null;
+                    }
+                }.f;
+                const pretty = if (has(out, "Secrets were required") or has(out, "802-11-wireless-security.psk"))
                     "パスワードが違うか、必要です"
+                else if (has(out, "timeout") or has(out, "Timeout") or has(out, "page-timeout") or has(out, "Host is down"))
+                    "見つかりません。イヤホンはケースの蓋を開けて近くに置き、スマホとの接続を切ってから"
+                else if (has(out, "profile-unavailable"))
+                    "音声の受け口が準備できていません(PipeWire を確認)"
+                else if (has(out, "AuthenticationFailed") or has(out, "AuthenticationRejected"))
+                    "認証に失敗しました。ペアリングを削除(bluetoothctl remove)してやり直してください"
                 else
                     line;
                 setStatus(st, std.fmt.bufPrint(&msg, "失敗: {s}", .{pretty}) catch "失敗", true);
@@ -448,7 +465,7 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32, dt: f32) bool {
             const s2 = std.fmt.bufPrint(&sb, "{s}{s}{d}%", .{ if (e.active) "接続中 ・ " else if (e.saved) "保存済み ・ " else "", if (e.secure) "\u{F033E} " else "", e.signal }) catch "";
             _ = cv.text(58, y + 41, 11.5, if (e.active) acc else sub, s2, .{});
             const btn = if (e.active) "切断" else "接続";
-            cv.rect(w - 86, y + 12, 62, 26, 13, (if (e.active) Color.hex(0xff7a90) else acc).alpha(0.18 + 0.2 * hv));
+            cv.rect(w - 86, y + 12, 62, 26, 13, (if (e.active) theme.danger(app) else acc).alpha(0.18 + 0.2 * hv));
             _ = cv.text(w - 55, y + 30, 12.5, txt, btn, .{ .alignment = .center });
             if (editing) {
                 // パスワード入力欄(文字は伏せ字)
@@ -476,7 +493,7 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32, dt: f32) bool {
             _ = cv.text(58, y + 23, 14, col, d.name(), .{ .bold = d.connected, .max_w = w - 190 });
             _ = cv.text(58, y + 41, 11.5, if (d.connected) acc else sub, if (d.connected) "接続中" else if (d.paired) "ペア済み" else "未ペア", .{});
             const btn = if (d.connected) "切断" else if (d.paired) "接続" else "ペア";
-            cv.rect(w - 86, y + 12, 62, 26, 13, (if (d.connected) Color.hex(0xff7a90) else acc).alpha(0.18 + 0.2 * hv));
+            cv.rect(w - 86, y + 12, 62, 26, 13, (if (d.connected) theme.danger(app) else acc).alpha(0.18 + 0.2 * hv));
             _ = cv.text(w - 55, y + 30, 12.5, txt, btn, .{ .alignment = .center });
         }
         cv.restore();
@@ -486,7 +503,7 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32, dt: f32) bool {
 
     // ---- 状態表示 ----
     if (st.status_len > 0) {
-        _ = cv.text(22, h - 18, 12, if (st.status_err) Color.hex(0xff8a9b) else acc.lighten(0.2), st.status[0..st.status_len], .{ .max_w = w - 44 });
+        _ = cv.text(22, h - 18, 12, if (st.status_err) theme.danger(app).lighten(0.18) else acc.lighten(0.2), st.status[0..st.status_len], .{ .max_w = w - 44 });
     } else if (st.running != null) {
         _ = cv.text(22, h - 18, 12, sub, "更新中…", .{});
     }
@@ -585,12 +602,17 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
             setStatus(st, "切断しています…", false);
             push(st, makeJob(.bt_action, &.{ "bluetoothctl", "disconnect", mac }, std.fmt.bufPrint(&msg, "{s} を切断しました", .{d.name()}) catch "切断しました"));
         } else if (d.paired) {
-            setStatus(st, "接続しています…", false);
-            push(st, makeJob(.bt_action, &.{ "bluetoothctl", "connect", mac }, std.fmt.bufPrint(&msg, "{s} に接続しました", .{d.name()}) catch "接続しました"));
+            // 接続 + イヤホン・スピーカーなら音の出力先へ(data/bt-connect.sh)
+            setStatus(st, "接続しています…(イヤホンはケースの蓋を開けておく)", false);
+            var sb: [128]u8 = undefined;
+            const script = std.fmt.bufPrint(&sb, "{s}/bt-connect.sh", .{f.app.shareDir()}) catch "bt-connect.sh";
+            push(st, makeJob(.bt_action, &.{ "sh", script, mac }, std.fmt.bufPrint(&msg, "{s} に接続しました", .{d.name()}) catch "接続しました"));
         } else {
             // 未ペア: ペアリング → 信頼 → 接続 を順に(引数はシェル展開されない位置引数で渡す)
             setStatus(st, "ペアリングしています…", false);
-            push(st, makeJob(.bt_action, &.{ "sh", "-c", "bluetoothctl pair \"$1\" && bluetoothctl trust \"$1\" && bluetoothctl connect \"$1\"", "ame-bt", mac }, std.fmt.bufPrint(&msg, "{s} とペアリングしました", .{d.name()}) catch "ペアリングしました"));
+            var sb: [128]u8 = undefined;
+            const script = std.fmt.bufPrint(&sb, "{s}/bt-connect.sh", .{f.app.shareDir()}) catch "bt-connect.sh";
+            push(st, makeJob(.bt_action, &.{ "sh", "-c", "bluetoothctl pair \"$1\" && sh \"$2\" \"$1\"", "ame-bt", mac, script }, std.fmt.bufPrint(&msg, "{s} とペアリングしました", .{d.name()}) catch "ペアリングしました"));
         }
     }
     return true;

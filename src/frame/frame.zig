@@ -409,7 +409,9 @@ pub const Frame = struct {
             const d = &self.dash;
             const w = d.w.target;
             const x0 = self.BW() + (W - self.BW() - T_) / 2 - w / 2;
-            const reach = @max(T_, T_ + d.h.x * d.t.x) + 1;
+            // 開いている(開きかけを含む)間は、アニメーション途中の大きさではなく開き切った大きさで判定する。
+            // でないと、開くより速くカーソルを下ろしたときに「外に出た」と判定されて閉じてしまう
+            const reach = @max(T_, T_ + @max(d.h.x * d.t.x, if (d.open) d.h.target else 0)) + 1;
             const inside = self.ptr_in and y < reach and x >= x0 - R_ and x <= x0 + w + R_;
             if (inside and d.by_key) d.by_key = false;
             if (!d.by_key and inside != d.open) {
@@ -422,7 +424,7 @@ pub const Frame = struct {
             const d = &self.osd;
             const h = d.h.target;
             const right_off = self.side.w.x * self.side.t.x + self.session.w.x * self.session.t.x;
-            const inside = self.ptr_in and x > W - @max(T_, T_ + right_off + d.w.x * d.t.x) - 1 and y >= H / 2 - h / 2 - R_ and y <= H / 2 + h / 2 + R_;
+            const inside = self.ptr_in and x > W - @max(T_, T_ + right_off + @max(d.w.x * d.t.x, if (d.open) d.w.target else 0)) - 1 and y >= H / 2 - h / 2 - R_ and y <= H / 2 + h / 2 + R_;
             if (inside and d.by_key) d.by_key = false;
             if (!d.by_key and inside != d.open) {
                 if (inside) d.show(false) else d.hide();
@@ -433,7 +435,7 @@ pub const Frame = struct {
         {
             const d = &self.util;
             const w = d.w.target;
-            const reach = @max(T_, T_ + d.h.x * d.t.x) + R_;
+            const reach = @max(T_, T_ + @max(d.h.x * d.t.x, if (d.open) d.h.target else 0)) + R_;
             const inside = self.ptr_in and y > H - reach and x >= W - T_ - w - R_;
             if (inside and d.by_key) d.by_key = false;
             if (!d.by_key and inside != d.open) {
@@ -649,6 +651,12 @@ pub const Frame = struct {
         sh.tint = theme.tint(app);
         sh.tint.a = app.cfg.frame_opacity;
         sh.rim = g.rim;
+        // 失敗したとき: 縁が赤く光る
+        const err_lv = theme.errorLevel();
+        if (err_lv > 0) {
+            sh.rim = Color.mix(sh.rim, theme.danger(app), err_lv);
+            animating = true;
+        }
         sh.sheen = g.sheen;
         sh.sparkle = app.cfg.sparkle * 0.8;
         const kf = struct {
@@ -778,6 +786,12 @@ pub const Frame = struct {
         cv.frameBg(&sh);
         cv.save();
         cv.scaleAbout(0, 0, S_);
+        if (err_lv > 0) {
+            // 画面の内側の縁に沿った赤い光
+            const dz = theme.danger(app);
+            cv.rectBorder(BW_, T_, W - BW_ - T_, H - 2 * T_, R_, .{ .a = 0 }, dz.alpha(0.85 * err_lv), 2.5);
+            cv.rectBorder(BW_ + 2, T_ + 2, W - BW_ - T_ - 4, H - 2 * T_ - 4, R_ - 2, .{ .a = 0 }, dz.alpha(0.25 * err_lv), 9);
+        }
 
         // ---- バー ----
         if (self.bar.draw(self, cv, dt)) animating = true;
@@ -839,6 +853,12 @@ pub const Frame = struct {
                 rects[n] = d.vis;
                 n += 1;
             }
+        }
+        // 開きかけのダッシュボードは開き切った範囲を入力領域にする(カーソルが下の窓へ抜けて閉じないように)
+        if (self.dash.open and n < rects.len) {
+            const dw = self.dash.w.target;
+            rects[n] = .{ BW_ + (W - BW_ - T_) / 2 - dw / 2, T_, dw, self.dash.h.target };
+            n += 1;
         }
         for (rects[0..n]) |*r| {
             for (r) |*v| v.* *= S_;

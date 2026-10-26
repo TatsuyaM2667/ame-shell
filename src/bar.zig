@@ -250,7 +250,7 @@ pub const Bar = struct {
             var label: [2]u8 = .{ '1' + @as(u8, @intCast(i)), 0 };
             const occ = self.occupied[i].x;
             const col = Color.mix(Color.mix(sub.alpha(0.55), txt, occ), Color.hex(0x08101e), on);
-            const ucol = if (urgent) Color.hex(0xff7a90) else col;
+            const ucol = if (urgent) theme.danger(app) else col;
             _ = cv.text(cx, base, fs * 0.95, ucol, label[0..1], .{ .bold = occ > 0.5 or on > 0.5, .alignment = .center });
             // 占有ドット
             if (occ > 0.01) {
@@ -323,9 +323,9 @@ pub const Bar = struct {
         if (st.battery.present) {
             const hi = self.addHit(.battery, 0, x - gap / 2, w_bat + gap);
             const low = st.battery.percent <= 15 and !st.battery.charging;
-            const col = if (low) Color.hex(0xff7a90) else if (st.battery.charging) Color.hex(0x7dffc4) else Color.mix(txt, acc, self.hov(hi));
+            const col = if (low) theme.danger(app) else if (st.battery.charging) theme.accent(app) else Color.mix(txt, acc, self.hov(hi));
             const iw2 = cv.measure(bat_icon, icon_font, false);
-            _ = cv.text(x, base + 1, icon_font, col, bat_icon, .{ .glow = if (st.battery.charging) 3 else 0, .glow_color = Color.hex(0x7dffc4).alpha(0.5) });
+            _ = cv.text(x, base + 1, icon_font, col, bat_icon, .{ .glow = if (st.battery.charging) 3 else 0, .glow_color = theme.accent(app).alpha(0.5) });
             _ = cv.text(x + iw2 + 5, base, items_font, col, bat_txt, .{});
             x += w_bat + gap;
         }

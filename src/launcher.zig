@@ -28,6 +28,7 @@ const sys = @import("platform/sys.zig");
 const loop = @import("platform/loop.zig");
 const cfgmod = @import("config.zig");
 const icons = @import("icons.zig");
+const video = @import("video.zig");
 
 const SW: u32 = 720;
 const SH: u32 = 600;
@@ -58,7 +59,7 @@ pub const Entry = struct {
     icon_state: u8 = 0, // 0=読み込み中 1=無し 2=画素あり(icon_px)
     icon_px: ?[*]u8 = null, // 64x64 RGBA(c_allocator)
 
-    fn display(self: *const Entry) []const u8 {
+    pub fn display(self: *const Entry) []const u8 {
         return if (self.name_ja.len > 0) self.name_ja else self.name;
     }
 };
@@ -90,6 +91,8 @@ pub const Launcher = struct {
     arena: std.heap.ArenaAllocator,
     entries: std.ArrayList(Entry),
     walls: std.ArrayList(Wall),
+    /// ユーザーの写真を選ぶための画像(~/Pictures 以下)
+    photos: std.ArrayList(Wall),
     results: std.ArrayList(Result),
     surf: ?*Surface = null,
     out: ?*Output = null,
@@ -120,6 +123,7 @@ pub const Launcher = struct {
             .arena = std.heap.ArenaAllocator.init(app.alloc),
             .entries = std.ArrayList(Entry).init(app.alloc),
             .walls = std.ArrayList(Wall).init(app.alloc),
+            .photos = std.ArrayList(Wall).init(app.alloc),
             .results = std.ArrayList(Result).init(app.alloc),
         };
         self.icons = try IconWorker.create();
@@ -140,6 +144,11 @@ pub const Launcher = struct {
             if (w.tex != 0) c.glDeleteTextures(1, &w.tex);
             if (w.px) |p| std.c.free(p);
         }
+        for (self.photos.items) |w| {
+            if (w.tex != 0) c.glDeleteTextures(1, &w.tex);
+            if (w.px) |p| std.c.free(p);
+        }
+        self.photos.clearRetainingCapacity();
         self.entries.clearRetainingCapacity();
         self.walls.clearRetainingCapacity();
         _ = self.arena.reset(.retain_capacity);
@@ -175,6 +184,7 @@ pub const Launcher = struct {
             }
         }
         self.scanWalls();
+        self.scanPhotos();
         self.loadHistory();
         self.loadFavorites();
         self.scanned_ms = loop.nowMs();
@@ -196,12 +206,46 @@ pub const Launcher = struct {
             while (di.next() catch null) |ent| {
                 if (ent.kind != .file and ent.kind != .sym_link) continue;
                 const lower = std.ascii.allocLowerString(a, ent.name) catch continue;
-                if (!(std.mem.endsWith(u8, lower, ".jpg") or std.mem.endsWith(u8, lower, ".jpeg") or std.mem.endsWith(u8, lower, ".png"))) continue;
+                const is_img = std.mem.endsWith(u8, lower, ".jpg") or std.mem.endsWith(u8, lower, ".jpeg") or std.mem.endsWith(u8, lower, ".png");
+                // GIF・動画はライブ壁紙(libmpv で再生)
+                const is_vid = video.isVideoPath(lower);
+                if (!is_img and !is_vid) continue;
                 const full = std.fmt.allocPrint(a, "{s}/{s}", .{ p, ent.name }) catch continue;
-                const stem = a.dupe(u8, std.fs.path.stem(ent.name)) catch continue;
-                self.walls.append(.{ .name = stem, .path = full, .mode = .image }) catch {};
+                const stem = if (is_vid) std.fmt.allocPrint(a, "{s}(ライブ)", .{std.fs.path.stem(ent.name)}) catch continue else a.dupe(u8, std.fs.path.stem(ent.name)) catch continue;
+                self.walls.append(.{ .name = stem, .path = full, .mode = if (is_vid) .video else .image }) catch {};
             }
         }
+    }
+
+    /// ~/Pictures 以下(3 階層まで)の写真。ユーザーの写真のピッカー用
+    fn scanPhotos(self: *Launcher) void {
+        const a = self.arena.allocator();
+        const home = std.posix.getenv("HOME") orelse return;
+        const root = std.fmt.allocPrint(a, "{s}/Pictures", .{home}) catch return;
+        var dir = std.fs.cwd().openDir(root, .{ .iterate = true }) catch return;
+        defer dir.close();
+        var walker = dir.walk(a) catch return;
+        defer walker.deinit();
+        while (walker.next() catch null) |ent| {
+            if (self.photos.items.len >= 128) break;
+            if (ent.kind != .file and ent.kind != .sym_link) continue;
+            if (std.mem.count(u8, ent.path, "/") > 2) continue;
+            const lower = std.ascii.allocLowerString(a, ent.basename) catch continue;
+            if (!(std.mem.endsWith(u8, lower, ".jpg") or std.mem.endsWith(u8, lower, ".jpeg") or std.mem.endsWith(u8, lower, ".png"))) continue;
+            const full = std.fmt.allocPrint(a, "{s}/{s}", .{ root, ent.path }) catch continue;
+            const stem = a.dupe(u8, std.fs.path.stem(ent.basename)) catch continue;
+            self.photos.append(.{ .name = stem, .path = full, .mode = .image }) catch {};
+        }
+    }
+
+    pub fn photoTex(self: *Launcher, i: usize) c.GLuint {
+        const ph = &self.photos.items[i];
+        if (ph.tex == 0 and ph.state == 2) if (ph.px) |px| {
+            ph.tex = gfx.uploadImage(px, THUMB_W, THUMB_H);
+            std.c.free(px);
+            ph.px = null;
+        };
+        return ph.tex;
     }
 
     fn historyPath(buf: []u8) ?[]const u8 {
@@ -656,7 +700,7 @@ pub const Launcher = struct {
             .action => {
                 const a = actions[res.idx];
                 const armed = self.armed == a.a;
-                const col = if (armed) Color.hex(0xff7a90) else acc;
+                const col = if (armed) theme.danger(app) else acc;
                 cv.rect(ix, iy, 38, 38, 11, col.alpha(0.25));
                 _ = cv.text(ix + 19, iy + 27, 20, txt, a.icon, .{ .alignment = .center });
                 _ = cv.text(ix + 54, ry + 26, 16, txt, a.name, .{ .bold = true });
@@ -721,6 +765,30 @@ pub const Launcher = struct {
             wl.px = null;
         };
         return wl.tex;
+    }
+
+    /// ウィンドウの app_id から .desktop の項目を探す(名前・アイコンの表示用)。
+    /// 例: "firefox" → firefox.desktop、"org.gnome.Nautilus" → org.gnome.Nautilus.desktop、"foot" → foot.desktop
+    pub fn findApp(self: *Launcher, app_id: []const u8) ?*Entry {
+        if (app_id.len == 0) return null;
+        const eqi = std.ascii.eqlIgnoreCase;
+        var best: ?*Entry = null;
+        for (self.entries.items) |*e| {
+            const stem = if (std.mem.endsWith(u8, e.id, ".desktop")) e.id[0 .. e.id.len - 8] else e.id;
+            if (eqi(stem, app_id)) return e;
+            if (best != null) continue;
+            // 逆ドメイン名の最後の部分 / 実行ファイル名 / 表示名
+            const last = if (std.mem.lastIndexOfScalar(u8, stem, '.')) |i| stem[i + 1 ..] else stem;
+            var it = std.mem.tokenizeAny(u8, e.exec, " \t");
+            const exe = std.fs.path.basename(it.next() orelse "");
+            if (eqi(last, app_id) or eqi(exe, app_id) or eqi(e.name, app_id)) best = e;
+        }
+        return best;
+    }
+
+    pub fn entryIcon(_: *Launcher, e: *Entry) c.GLuint {
+        if (e.icon_state == 2 and e.icon_tex == 0) e.icon_tex = gfx.uploadImage(e.icon_px.?, ICON_PX, ICON_PX);
+        return e.icon_tex;
     }
 
     /// 一覧が無い/古ければ読み直す(壁紙ピッカーから)
@@ -1017,8 +1085,8 @@ fn parseDesktop(a: std.mem.Allocator, id: []const u8, data: []const u8) ?Entry {
 
 const ICON_PX = 64;
 
-const IconJob = struct { idx: u32, name: []u8, thumb: bool };
-const IconResult = struct { idx: u32, gen: u32, thumb: bool, px: ?[*]u8 };
+const IconJob = struct { idx: u32, name: []u8, thumb: bool, photo: bool = false };
+const IconResult = struct { idx: u32, gen: u32, thumb: bool, photo: bool = false, px: ?[*]u8 };
 
 const IconWorker = struct {
     mutex: std.Thread.Mutex = .{},
@@ -1041,7 +1109,10 @@ const IconWorker = struct {
             if (j.thumb) {
                 var zb: [600]u8 = undefined;
                 if (std.fmt.bufPrintZ(&zb, "{s}", .{j.name})) |p| {
-                    px = icons.decode(p, THUMB_W, THUMB_H, true);
+                    // 動画は ffmpeg で 1 コマ取り出した PNG から(GIF は stb_image で直接読める)
+                    var tb: [600]u8 = undefined;
+                    const src = if (video.isVideoPath(p) and !std.ascii.endsWithIgnoreCase(p, ".gif")) video.thumbnail(p, &tb) else p;
+                    if (src) |sp| px = icons.decode(sp, THUMB_W, THUMB_H, true);
                 } else |_| {}
             } else {
                 var buf: [600]u8 = undefined;
@@ -1049,7 +1120,7 @@ const IconWorker = struct {
             }
             a.free(j.name);
             self.mutex.lock();
-            self.results.append(.{ .idx = j.idx, .gen = gen, .thumb = j.thumb, .px = px }) catch if (px) |p| std.c.free(p);
+            self.results.append(.{ .idx = j.idx, .gen = gen, .thumb = j.thumb, .photo = j.photo, .px = px }) catch if (px) |p| std.c.free(p);
             self.mutex.unlock();
             // まとめて通知されても良い(読む側は全部取り出す)。満杯の EAGAIN は無視。
             _ = c.write(self.pipe_w, "i", 1);
@@ -1070,7 +1141,11 @@ fn onIconsReady(ctx: *anyopaque, fd: c_int, _: u32) void {
             const e = &self.entries.items[r.idx];
             e.icon_px = r.px;
             e.icon_state = if (r.px != null) 2 else 1;
-        } else if (r.gen == self.gen and r.thumb and r.idx < self.walls.items.len) {
+        } else if (r.gen == self.gen and r.photo and r.idx < self.photos.items.len) {
+            const ph = &self.photos.items[r.idx];
+            ph.px = r.px;
+            ph.state = if (r.px != null) 2 else 1;
+        } else if (r.gen == self.gen and r.thumb and !r.photo and r.idx < self.walls.items.len) {
             const wl = &self.walls.items[r.idx];
             wl.px = r.px;
             wl.state = if (r.px != null) 2 else 1;
@@ -1092,6 +1167,10 @@ fn startIconWorkerImpl(self: *Launcher) void {
         }
         const name = a.dupe(u8, wl.path) catch continue;
         jobs.append(.{ .idx = @intCast(i), .name = name, .thumb = true }) catch a.free(name);
+    }
+    for (self.photos.items, 0..) |ph, i| {
+        const name = a.dupe(u8, ph.path) catch continue;
+        jobs.append(.{ .idx = @intCast(i), .name = name, .thumb = true, .photo = true }) catch a.free(name);
     }
     for (self.entries.items, 0..) |e, i| {
         if (e.icon.len == 0) {

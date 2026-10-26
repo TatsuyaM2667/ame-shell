@@ -44,7 +44,10 @@ const fixed = [_]Bind{
     .{ .keysym = c.XKB_KEY_j, .mods = SUPER, .action = .focus_next },
     .{ .keysym = c.XKB_KEY_k, .mods = SUPER, .action = .focus_prev },
     .{ .keysym = c.XKB_KEY_h, .mods = SUPER, .action = .{ .ratio = -0.05 } },
-    .{ .keysym = c.XKB_KEY_l, .mods = SUPER, .action = .{ .ratio = 0.05 } },
+    // Super+L はロック(一時的に離席するとき)。配置の比率は Super+Ctrl+H / L
+    .{ .keysym = c.XKB_KEY_l, .mods = SUPER, .action = .{ .ame = "lock" } },
+    .{ .keysym = c.XKB_KEY_l, .mods = SUPER | CTRL, .action = .{ .ratio = 0.05 } },
+    .{ .keysym = c.XKB_KEY_h, .mods = SUPER | CTRL, .action = .{ .ratio = -0.05 } },
     .{ .keysym = c.XKB_KEY_j, .mods = SUPER | SHIFT, .action = .swap_next },
     .{ .keysym = c.XKB_KEY_k, .mods = SUPER | SHIFT, .action = .swap_prev },
     .{ .keysym = c.XKB_KEY_h, .mods = SUPER | SHIFT, .action = .swap_prev },

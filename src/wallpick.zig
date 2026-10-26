@@ -17,6 +17,7 @@ const Output = appmod.Output;
 const surface = @import("surface.zig");
 const Surface = surface.Surface;
 const wallpaper = @import("wallpaper.zig");
+const launcher = @import("launcher.zig");
 
 const SKEW: f32 = -0.35;
 const MAX_CARDS = 128;
@@ -38,6 +39,8 @@ pub const WallPick = struct {
     card_y: f32 = 0,
     card_h: f32 = 0,
     live_tex: [2]c.GLuint = .{ 0, 0 },
+    /// 壁紙を選ぶか、ユーザーの写真を選ぶか
+    kind: enum { wallpaper, avatar } = .wallpaper,
 
     pub fn create(app: *App) !*WallPick {
         const self = try app.alloc.create(WallPick);
@@ -45,12 +48,28 @@ pub const WallPick = struct {
         return self;
     }
 
+    fn list(self: *WallPick) []launcher.Wall {
+        return if (self.kind == .avatar) self.app.launcher.photos.items else self.app.launcher.walls.items;
+    }
+
     fn count(self: *WallPick) usize {
-        return @min(self.app.launcher.walls.items.len, MAX_CARDS);
+        return @min(self.list().len, MAX_CARDS);
+    }
+
+    /// ダッシュボードの写真から: ~/Pictures の画像を並べてユーザーの写真を選ぶ
+    pub fn openAvatar(self: *WallPick) void {
+        if (self.is_open) self.close();
+        self.kind = .avatar;
+        self.open();
     }
 
     pub fn toggle(self: *WallPick) void {
-        if (self.is_open) self.close() else self.open();
+        if (self.is_open) {
+            self.close();
+        } else {
+            self.kind = .wallpaper;
+            self.open();
+        }
     }
 
     pub fn open(self: *WallPick) void {
@@ -87,11 +106,12 @@ pub const WallPick = struct {
     }
 
     fn currentIndex(self: *WallPick) usize {
+        if (self.kind == .avatar) return 0;
         const o = self.app.activeOutput() orelse return 0;
         const w = o.wall orelse return 0;
-        for (self.app.launcher.walls.items[0..self.count()], 0..) |wl, i| {
+        for (self.list()[0..self.count()], 0..) |wl, i| {
             if (wl.mode != w.mode) continue;
-            if (wl.mode != .image) return i;
+            if (wl.mode != .image and wl.mode != .video) return i;
             if (std.mem.eql(u8, wl.path, w.img_path[0..w.img_path_len])) return i;
         }
         return 0;
@@ -138,7 +158,12 @@ pub const WallPick = struct {
 
     fn apply(self: *WallPick) void {
         const app = self.app;
-        const wl = app.launcher.walls.items[self.sel];
+        const wl = self.list()[self.sel];
+        if (self.kind == .avatar) {
+            app.avatar.set(wl.path);
+            self.close();
+            return;
+        }
         // 選んだカードの中心から切り替える
         const W: f32 = if (self.surf) |s| @floatFromInt(s.width) else 1;
         const H: f32 = if (self.surf) |s| @floatFromInt(s.height) else 1;
@@ -303,8 +328,8 @@ pub const WallPick = struct {
             if (cxp + bb / 2 < -50 or cxp - bb / 2 > W + 50) continue;
             const ap = self.appear[i].x;
             const y = cy + (1 - ap) * (H * 0.6);
-            const wl = &app.launcher.walls.items[i];
-            const tex = if (wl.mode == .image) app.launcher.wallTex(i) else self.liveTex(if (wl.mode == .aurora) 0 else 1);
+            const wl = &self.list()[i];
+            const tex = if (self.kind == .avatar) app.launcher.photoTex(i) else if (wl.mode == .image or wl.mode == .video) app.launcher.wallTex(i) else self.liveTex(if (wl.mode == .aurora) 0 else 1);
             const wd = self.wide[i].x;
             const hv: f32 = if (self.hover == i) 1 else 0;
             // 画像の見せる範囲: 縦横比を保って枠を埋める + 横位置に応じたパララックス
@@ -331,8 +356,11 @@ pub const WallPick = struct {
                 // サムネイル待ち
                 cv.rect(cxp - w / 2, y, w, ch, 16, Color.hex(0xffffff).alpha(0.06));
             }
-            if (wl.mode != .image and wd > 0.3) {
+            if ((wl.mode == .aurora or wl.mode == .rain) and wd > 0.3) {
                 _ = cv.text(cxp, y + ch / 2 + 16, 44 * wd, Color.hex(0xffffff).alpha(0.85 * wd), if (wl.mode == .rain) "\u{F0597}" else "\u{F0E09}", .{ .alignment = .center });
+            } else if (wl.mode == .video and wd > 0.3) {
+                // 動画・GIF の印(再生ボタン)
+                _ = cv.text(cxp, y + ch - 22, 26 * wd, Color.hex(0xffffff).alpha(0.9 * wd), "\u{F040A}", .{ .alignment = .center, .glow = 6, .glow_color = Color.hex(0x000000).alpha(0.6) });
             }
             cv.restore();
         }
@@ -340,12 +368,12 @@ pub const WallPick = struct {
         // 選択中の名前と位置
         cv.save();
         cv.opacity(t);
-        const wl = app.launcher.walls.items[self.sel];
+        const wl = self.list()[self.sel];
         const ny = cy + ch + 56;
         _ = cv.text(W / 2, ny, 22, txt, wl.name, .{ .bold = true, .alignment = .center, .max_w = W * 0.6, .glow = 4, .glow_color = acc.alpha(0.4) });
         var buf: [32]u8 = undefined;
         _ = cv.text(W / 2, ny + 28, 13, sub, std.fmt.bufPrint(&buf, "{d} / {d}", .{ self.sel + 1, n }) catch "", .{ .alignment = .center });
-        _ = cv.text(W / 2, cy - 40, 30, txt, "壁紙", .{ .bold = true, .alignment = .center });
+        _ = cv.text(W / 2, cy - 40, 30, txt, if (self.kind == .avatar) "ユーザーの写真" else "壁紙", .{ .bold = true, .alignment = .center });
         _ = cv.text(W / 2, H - 36, 13, sub, "← → / ホイールで選択   Enter・クリックで適用   Esc で閉じる", .{ .alignment = .center });
         cv.restore();
 

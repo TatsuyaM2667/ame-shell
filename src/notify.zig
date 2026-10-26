@@ -271,6 +271,8 @@ pub const Notifs = struct {
 
     fn postFull(self: *Notifs, app_name: []const u8, summary: []const u8, body: []const u8, replaces: u32, timeout: u32, urgency: u8, has_default: bool) u32 {
         var n = Notif{ .id = 0, .urgency = urgency, .has_default_action = has_default };
+        // 緊急の通知(電池切れ間近など)は枠の縁を赤く光らせる
+        if (urgency == 2) theme.flashError(self.app);
         copyTo(&n.app_name, &n.app_len, app_name);
         copyTo(&n.summary, &n.sum_len, summary);
         copyTo(&n.body, &n.body_len, body);
@@ -509,7 +511,7 @@ pub const Notifs = struct {
             const y = self.cardY(a);
             const h = a.height;
             const crit = a.urgency == 2;
-            const col = if (crit) Color.hex(0xff7a90) else acc;
+            const col = if (crit) theme.danger(app) else acc;
             cv.save();
             cv.translate(t * (CARD_W + 40), 0);
             cv.opacity(1 - t);

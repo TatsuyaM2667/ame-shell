@@ -327,6 +327,14 @@ pub const Lock = struct {
         const fh: f32 = 56;
         const fx = W / 2 - fw / 2 + self.shake.x;
         const fy = H * 0.58;
+        // ユーザーの写真(あれば)
+        const av = app.avatar.texture();
+        if (av != 0) {
+            const az: f32 = 64;
+            cv.shadow(W / 2 - az / 2, fy - az - 14, az, az, az / 2, 16, theme.shadow());
+            cv.image(av, W / 2 - az / 2, fy - az - 18, az, az, az / 2);
+            cv.rectBorder(W / 2 - az / 2 - 1, fy - az - 19, az + 2, az + 2, az / 2 + 1, .{ .a = 0 }, acc.alpha(0.8), 2);
+        }
         cv.shadow(fx, fy + 8, fw, fh, fh / 2, 22, theme.shadow());
         cv.glass(fx, fy, fw, fh, fh / 2, theme.glassStrong(app));
         if (self.busy) cv.rectBorder(fx, fy, fw, fh, fh / 2, .{ .a = 0 }, acc.alpha(0.8), 1.5);
@@ -348,7 +356,7 @@ pub const Lock = struct {
         }
         if (self.msg_len > 0) {
             const err = std.mem.startsWith(u8, self.msg[0..self.msg_len], "パスワードが違います");
-            _ = cv.text(W / 2, fy + fh + 34, 14, if (err) Color.hex(0xff8a9b) else sub, self.msg[0..self.msg_len], .{ .alignment = .center });
+            _ = cv.text(W / 2, fy + fh + 34, 14, if (err) theme.danger(app).lighten(0.18) else sub, self.msg[0..self.msg_len], .{ .alignment = .center });
         }
         cv.restore();
         return animating or self.busy;

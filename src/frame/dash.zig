@@ -25,7 +25,7 @@ const tabs = [_]struct { icon: []const u8, label: []const u8 }{
     .{ .icon = "\u{F0570}", .label = "ワークスペース" },
 };
 
-const Btn = enum(u8) { none, tab0, tab1, tab2, tab3, prev, play, next, big_prev, big_play, big_next, ws0, shuffle, loop };
+const Btn = enum(u8) { none, tab0, tab1, tab2, tab3, prev, play, next, big_prev, big_play, big_next, ws0, shuffle, loop, avatar };
 
 pub const View = struct {
     tab: usize = 0,
@@ -162,13 +162,25 @@ fn drawDash(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         const uw = left_w - ww - GAP;
         card(cv, ux, y0, uw, 100);
         const user = std.posix.getenv("USER") orelse "user";
+        // 写真(クリックで写真を選ぶ)。無ければ名前の頭文字
+        const av_hover = addBtn(v, .avatar, ux + 16, y0 + 18 + TAB_H, 64, 64);
         cv.shadow(ux + 16, y0 + 18, 64, 64, 32, 10, acc.alpha(0.5));
-        cv.rectGrad(ux + 16, y0 + 18, 64, 64, 32, acc.lighten(0.35), acc);
-        var ini: [4]u8 = undefined;
-        const n = std.unicode.utf8ByteSequenceLength(user[0]) catch 1;
-        @memcpy(ini[0..n], user[0..n]);
-        if (ini[0] >= 'a' and ini[0] <= 'z') ini[0] -= 32;
-        _ = cv.text(ux + 48, y0 + 61, 28, Color.hex(0x08101e), ini[0..n], .{ .bold = true, .alignment = .center });
+        const av = app.avatar.texture();
+        if (av != 0) {
+            cv.image(av, ux + 16, y0 + 18, 64, 64, 32);
+            cv.rectBorder(ux + 15, y0 + 17, 66, 66, 33, .{ .a = 0 }, acc.alpha(0.85), 2);
+        } else {
+            cv.rectGrad(ux + 16, y0 + 18, 64, 64, 32, acc.lighten(0.35), acc);
+            var ini: [4]u8 = undefined;
+            const n = std.unicode.utf8ByteSequenceLength(user[0]) catch 1;
+            @memcpy(ini[0..n], user[0..n]);
+            if (ini[0] >= 'a' and ini[0] <= 'z') ini[0] -= 32;
+            _ = cv.text(ux + 48, y0 + 61, 28, Color.hex(0x08101e), ini[0..n], .{ .bold = true, .alignment = .center });
+        }
+        if (av_hover > 0) {
+            cv.rect(ux + 16, y0 + 18, 64, 64, 32, Color.hex(0x000000).alpha(0.45));
+            _ = cv.text(ux + 48, y0 + 58, 22, Color.hex(0xffffff), "\u{F0100}", .{ .alignment = .center });
+        }
         var ob: [64]u8 = undefined;
         var ub: [64]u8 = undefined;
         // OS・機種・CPU・GPU(+ 起動からの時間)
@@ -223,7 +235,7 @@ fn drawDash(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
             const by = y1 + 22;
             const val = std.math.clamp(v.res_v[i].x, 0, 1);
             cv.rect(bx, by, 14, bh, 7, Color.hex(0xffffff).alpha(0.08));
-            const col = Color.mix(acc, Color.hex(0xff7a90), @max(0, (val - 0.75) / 0.25));
+            const col = Color.mix(acc, theme.danger(app), @max(0, (val - 0.75) / 0.25));
             cv.rectGrad(bx, by + bh * (1 - val), 14, @max(bh * val, 14), 7, col.lighten(0.3), col);
             _ = cv.text(bx + 7, by + bh + 26, 15, sub, icons[i], .{ .alignment = .center });
             _ = cv.text(bx + 7, by + bh + 46, 10.5, sub, std.fmt.bufPrint(&buf, "{d}", .{@as(u32, @intFromFloat(val * 100))}) catch "", .{ .alignment = .center });
@@ -518,7 +530,7 @@ fn drawPerf(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         const R: f32 = @min(84, cw / 2 - 18);
         const val = std.math.clamp(v.perf_v[i].x, 0, 1);
         // 使用率が高いほど赤寄りに
-        const col = Color.mix(acc, Color.hex(0xff7a90), @max(0, (val - 0.75) / 0.25));
+        const col = Color.mix(acc, theme.danger(app), @max(0, (val - 0.75) / 0.25));
         card(cv, cx - cw / 2 + 6, 56, cw - 12, 262);
         cv.shadow(cx - R, cy - R, R * 2, R * 2, R, 14, col.alpha(0.18 * val + 0.05));
         cv.arc(cx, cy, R, 12, val, col, Color.hex(0xffffff).alpha(0.07));
@@ -563,12 +575,58 @@ fn drawWorkspaces(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
             cv.rectGrad(x, y, tile_w, tile_h, 16, acc.lighten(0.25), acc);
         } else {
             cv.rect(x, y, tile_w, tile_h, 16, Color.hex(0xffffff).alpha(0.05 + 0.08 * hv));
-            cv.rectBorder(x, y, tile_w, tile_h, 16, .{ .a = 0 }, (if (urgent) Color.hex(0xff7a90) else Color.hex(0xffffff)).alpha(if (urgent) 0.8 else 0.08), 1);
+            cv.rectBorder(x, y, tile_w, tile_h, 16, .{ .a = 0 }, (if (urgent) theme.danger(app) else Color.hex(0xffffff)).alpha(if (urgent) 0.8 else 0.08), 1);
         }
         var lab: [1]u8 = .{'1' + @as(u8, @intCast(i))};
         const fg = if (focused) Color.hex(0x08101e) else if (occ) txt else sub;
         _ = cv.text(x + 22, y + tile_h / 2 + 10, 26, fg, lab[0..], .{ .bold = true });
-        _ = cv.text(x + tile_w - 16, y + tile_h / 2 + 6, 12, fg.alpha(0.8), if (focused) "表示中" else if (occ) "ウィンドウあり" else "空", .{ .alignment = .right });
+        // このワークスペースで開いているアプリ: アイコン(最大 4 つ)+ 名前
+        var apps: [12]@import("../app.zig").App.WsApp = undefined;
+        const na = app.workspaceApps(f.out, @intCast(i), &apps);
+        if (na == 0) {
+            _ = cv.text(x + tile_w - 16, y + tile_h / 2 + 6, 12, fg.alpha(0.8), if (occ) "ウィンドウあり" else "空", .{ .alignment = .right });
+            continue;
+        }
+        var names: [160]u8 = undefined;
+        var nl: usize = 0;
+        var shown: [4][]const u8 = undefined;
+        var ns: usize = 0;
+        var ix = x + 56;
+        for (apps[0..na]) |a| {
+            // 同じアプリは 1 回だけ
+            var dup = false;
+            for (shown[0..ns]) |s| if (std.mem.eql(u8, s, a.app_id)) {
+                dup = true;
+            };
+            if (dup) continue;
+            const e = app.launcher.findApp(a.app_id);
+            const label = if (e) |ee| ee.display() else if (a.app_id.len > 0) a.app_id else a.title;
+            if (ns < shown.len) {
+                shown[ns] = a.app_id;
+                ns += 1;
+                const tex = if (e) |ee| app.launcher.entryIcon(ee) else 0;
+                if (tex != 0) {
+                    cv.image(tex, ix, y + 11, 22, 22, 6);
+                } else {
+                    cv.rect(ix, y + 11, 22, 22, 6, fg.alpha(0.18));
+                    const n1 = if (label.len > 0) (std.unicode.utf8ByteSequenceLength(label[0]) catch 1) else 0;
+                    _ = cv.text(ix + 11, y + 27, 12, fg, label[0..@min(n1, label.len)], .{ .bold = true, .alignment = .center });
+                }
+                ix += 26;
+            }
+            const sep: []const u8 = if (nl > 0) " ・ " else "";
+            if (nl + sep.len + label.len < names.len) {
+                @memcpy(names[nl..][0..sep.len], sep);
+                nl += sep.len;
+                @memcpy(names[nl..][0..label.len], label);
+                nl += label.len;
+            }
+        }
+        if (na > ns) {
+            var cb: [8]u8 = undefined;
+            _ = cv.text(ix + 4, y + 27, 11, fg.alpha(0.8), std.fmt.bufPrint(&cb, "{d}窓", .{na}) catch "", .{});
+        }
+        _ = cv.text(x + 56, y + tile_h - 13, 11.5, fg.alpha(0.85), names[0..nl], .{ .max_w = tile_w - 70 });
     }
     return false;
 }
@@ -658,6 +716,10 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
             .next, .big_next => app.media.next(),
             .shuffle => app.media.toggleShufflePub(),
             .loop => app.media.cycleLoopPub(),
+            .avatar => {
+                f.closeAll();
+                app.wallpick.openAvatar();
+            },
             else => {},
         }
         redraw = true;

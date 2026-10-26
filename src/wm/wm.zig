@@ -75,6 +75,9 @@ pub const Window = struct {
     /// 最後にフォーカスされた順(ワークスペースに戻ったとき、そこで最後に使っていた窓へ)
     focus_serial: u64 = 0,
     border_sent: [4]u32 = .{ 1, 1, 1, 1 },
+    /// River が付ける窓の識別子(WM を再起動しても変わらない)。再起動前のタグを戻すのに使う
+    ident: [64]u8 = undefined,
+    ident_len: usize = 0,
     is_new: bool = true,
     shown: bool = true,
     /// Super+Q: 縮むアニメーションの後で close を送る
@@ -271,6 +274,11 @@ pub const Wm = struct {
             const o = self.focusedOutput();
             w.out = o;
             w.tags = if (o) |oo| oo.tags else 1;
+            // ame-shell の再起動前からある窓: 前のタグ・浮き状態に戻す
+            if (self.restored(w)) |r| {
+                w.tags = r.tags;
+                w.floating = r.floating;
+            }
             if (w.node == null) w.node = c.river_window_v1_get_node(w.obj);
             // タイル型なのでサーバー側の枠(タイトルバー無し)を使ってもらう
             c.river_window_v1_use_ssd(w.obj);
@@ -783,6 +791,8 @@ pub const Wm = struct {
         if (self.focusedOutput()) |o| if (o.ame) |ao| {
             app.focused_output = ao;
         };
+        // ワークスペース欄のアプリ名を更新
+        if (app.activeFrame()) |fr| if (fr.dash.open) fr.schedule();
     }
 
     // ---------------------------------------------------------------------
@@ -819,6 +829,79 @@ pub const Wm = struct {
             self.ptrbinds.append(pb) catch {};
         }
         std.log.info("wm: キーバインド {d} 個を登録", .{self.keybinds.items.len});
+    }
+
+    // ---------------------------------------------------------------------
+    // 再起動をまたいだ窓の状態($XDG_RUNTIME_DIR/ame-wm-state-<ディスプレイ>: 「識別子 タグ 浮き」の行)
+    // ---------------------------------------------------------------------
+
+    fn statePath(buf: []u8) ?[]const u8 {
+        const rd = std.posix.getenv("XDG_RUNTIME_DIR") orelse return null;
+        // ディスプレイごと(入れ子の試験用 River と実セッションが混ざらないように)
+        const disp = std.posix.getenv("WAYLAND_DISPLAY") orelse "wayland-0";
+        return std.fmt.bufPrint(buf, "{s}/ame-wm-state-{s}", .{ rd, disp }) catch null;
+    }
+
+    /// ame-ctl restart の直前に呼ぶ
+    pub fn saveState(self: *Wm) void {
+        var pb: [256]u8 = undefined;
+        const p = statePath(&pb) orelse return;
+        const f = std.fs.cwd().createFile(p, .{ .mode = 0o600 }) catch return;
+        defer f.close();
+        var bw = std.io.bufferedWriter(f.writer());
+        for (self.windows.items) |w| {
+            if (w.ident_len == 0) continue;
+            bw.writer().print("{s} {d} {d}\n", .{ w.ident[0..w.ident_len], w.tags, @intFromBool(w.floating) }) catch {};
+        }
+        if (self.focusedOutput()) |o| bw.writer().print("@tags {d}\n", .{o.tags}) catch {};
+        bw.flush() catch {};
+    }
+
+    fn savedTags() ?u32 {
+        var pb: [256]u8 = undefined;
+        const p = statePath(&pb) orelse return null;
+        var buf: [16384]u8 = undefined;
+        const data = std.fs.cwd().readFile(p, &buf) catch return null;
+        const i = std.mem.indexOf(u8, data, "@tags ") orelse return null;
+        const rest = data[i + 6 ..];
+        const end = std.mem.indexOfScalar(u8, rest, '\n') orelse rest.len;
+        const t = std.fmt.parseInt(u32, rest[0..end], 10) catch return null;
+        return if (t == 0) null else t;
+    }
+
+    const Restored = struct { tags: u32, floating: bool };
+
+    fn restored(self: *Wm, w: *Window) ?Restored {
+        _ = self;
+        if (w.ident_len == 0) return null;
+        var pb: [256]u8 = undefined;
+        const p = statePath(&pb) orelse return null;
+        var buf: [16384]u8 = undefined;
+        const data = std.fs.cwd().readFile(p, &buf) catch return null;
+        var lines = std.mem.splitScalar(u8, data, '\n');
+        while (lines.next()) |l| {
+            var it = std.mem.tokenizeScalar(u8, l, ' ');
+            const id = it.next() orelse continue;
+            if (!std.mem.eql(u8, id, w.ident[0..w.ident_len])) continue;
+            const tags = std.fmt.parseInt(u32, it.next() orelse continue, 10) catch continue;
+            const fl = std.mem.eql(u8, it.next() orelse "0", "1");
+            if (tags == 0) return null;
+            return .{ .tags = tags, .floating = fl };
+        }
+        return null;
+    }
+
+    /// ダッシュボードのワークスペース欄: そのタグにいる窓のアプリ
+    pub fn appsOnTag(self: *Wm, ao: *appmod.Output, tag: u5, buf: []App.WsApp) usize {
+        var n: usize = 0;
+        for (self.windows.items) |w| {
+            if (n >= buf.len) break;
+            const o = w.out orelse continue;
+            if (o.ame != ao or (w.tags >> tag) & 1 == 0 or w.closing) continue;
+            buf[n] = .{ .app_id = w.app_id[0..w.app_id_len], .title = w.titleStr() };
+            n += 1;
+        }
+        return n;
     }
 
     fn findWindow(self: *Wm, obj: ?*c.struct_river_window_v1) ?*Window {
@@ -864,6 +947,10 @@ fn mgrOutput(data: ?*anyopaque, _: ?*c.struct_river_window_manager_v1, obj: ?*c.
     const self: *Wm = @ptrCast(@alignCast(data.?));
     const o = self.app.alloc.create(WOut) catch return;
     o.* = .{ .wm = self, .obj = obj.? };
+    // 再起動前に見ていたワークスペースへ(最初の出力だけ)
+    if (self.outputs.items.len == 0) if (Wm.savedTags()) |t| {
+        o.tags = t;
+    };
     _ = c.river_output_v1_add_listener(obj, &output_listener, o);
     if (self.lsh) |l| {
         o.lsh = c.river_layer_shell_v1_get_output(l, obj);
@@ -967,7 +1054,12 @@ fn wFsExit(data: ?*anyopaque, _: ?*c.struct_river_window_v1) callconv(.C) void {
 }
 fn wPid(_: ?*anyopaque, _: ?*c.struct_river_window_v1, _: i32) callconv(.C) void {}
 fn wPres(_: ?*anyopaque, _: ?*c.struct_river_window_v1, _: u32) callconv(.C) void {}
-fn wIdent(_: ?*anyopaque, _: ?*c.struct_river_window_v1, _: [*c]const u8) callconv(.C) void {}
+fn wIdent(data: ?*anyopaque, _: ?*c.struct_river_window_v1, s: [*c]const u8) callconv(.C) void {
+    const w: *Window = @ptrCast(@alignCast(data.?));
+    const v = if (s != null) std.mem.sliceTo(s, 0) else "";
+    w.ident_len = @min(v.len, w.ident.len);
+    @memcpy(w.ident[0..w.ident_len], v[0..w.ident_len]);
+}
 fn wCap(_: ?*anyopaque, _: ?*c.struct_river_window_v1, _: u32) callconv(.C) void {}
 fn wTouchMove(_: ?*anyopaque, _: ?*c.struct_river_window_v1, _: ?*c.struct_river_seat_v1, _: i32) callconv(.C) void {}
 fn wTouchResize(_: ?*anyopaque, _: ?*c.struct_river_window_v1, _: ?*c.struct_river_seat_v1, _: i32, _: u32) callconv(.C) void {}
@@ -1126,6 +1218,7 @@ const seat_listener = c.struct_river_seat_v1_listener{
 // ---- bindings ----
 fn kbPressed(data: ?*anyopaque, _: ?*c.struct_river_xkb_binding_v1) callconv(.C) void {
     const kb: *KeyBind = @ptrCast(@alignCast(data.?));
+    if (kb.action == .exit) std.log.info("wm: セッション終了(Super+Shift+E)", .{});
     kb.wm.push(kb.action);
 }
 fn kbReleased(_: ?*anyopaque, _: ?*c.struct_river_xkb_binding_v1) callconv(.C) void {}

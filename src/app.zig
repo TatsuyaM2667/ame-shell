@@ -22,6 +22,8 @@ const Notifs = @import("notify.zig").Notifs;
 const Lock = @import("lock.zig").Lock;
 const Media = @import("media.zig").Media;
 const WallPick = @import("wallpick.zig").WallPick;
+const Avatar = @import("avatar.zig").Avatar;
+const Toplevels = @import("toplevels.zig").Toplevels;
 const ipc = @import("ipc.zig");
 const SuperTap = @import("platform/supertap.zig").SuperTap;
 const Wm = @import("wm/wm.zig").Wm;
@@ -115,6 +117,8 @@ pub const App = struct {
     wm: ?*Wm = null,
     wm_xkb: ?*c.struct_river_xkb_bindings_v1 = null,
     wm_lsh: ?*c.struct_river_layer_shell_v1 = null,
+    /// River 0.3: 開いているアプリの一覧(ワークスペースごとのアプリ名の推測用)
+    toplevels: ?*Toplevels = null,
     seat: ?*c.struct_wl_seat = null,
     seat_status: ?*c.struct_zriver_seat_status_v1 = null,
     pointer: ?*c.struct_wl_pointer = null,
@@ -177,6 +181,8 @@ pub const App = struct {
     lock: *Lock = undefined,
     media: *Media = undefined,
     wallpick: *WallPick = undefined,
+    /// ダッシュボードのユーザーの写真
+    avatar: *Avatar = undefined,
     ipc_server: ipc.Server = undefined,
     supertap: SuperTap = undefined,
     initialized: bool = false,
@@ -251,6 +257,7 @@ pub const App = struct {
         app.lock = try Lock.create(app);
         app.media = try Media.create(app);
         app.wallpick = try WallPick.create(app);
+        app.avatar = try Avatar.create(app);
         app.ipc_server = try ipc.Server.init(app);
         app.ipc_server.register();
         app.supertap = .{ .loop = &app.loop, .ctx = app, .on_tap = onSuperTap, .enabled = app.cfg.super_launcher };
@@ -644,7 +651,10 @@ pub const App = struct {
         if (self.wm) |w| {
             // River 0.5: riverctl の代わりに内蔵 WM へ
             const eq = std.mem.eql;
-            if (args.len >= 1 and eq(u8, args[0], "exit")) w.push(.exit);
+            if (args.len >= 1 and eq(u8, args[0], "exit")) {
+                std.log.info("wm: セッション終了(ログアウトボタン/ランチャーから)", .{});
+                w.push(.exit);
+            }
             if (args.len >= 2 and eq(u8, args[0], "toggle-focused-tags")) {
                 const m = std.fmt.parseInt(u32, args[1], 10) catch return;
                 w.push(.{ .toggle_tags = m });
@@ -663,6 +673,18 @@ pub const App = struct {
         var buf: [16]u8 = undefined;
         const s = std.fmt.bufPrintZ(&buf, "{d}", .{mask}) catch return;
         self.riverCommand(&.{ "set-focused-tags", s });
+    }
+
+    pub const WsApp = struct { app_id: []const u8, title: []const u8 };
+
+    /// ワークスペース(タグ)ごとの開いているアプリ。River 0.5 は内蔵 WM の正確な情報、0.3 は推測
+    pub fn workspaceApps(self: *App, out: *Output, tag: u5, buf: []WsApp) usize {
+        if (self.wm) |w| return w.appsOnTag(out, tag, buf);
+        const t = self.toplevels orelse return 0;
+        var tl: [32]*@import("toplevels.zig").Toplevel = undefined;
+        const n = t.onTag(out, tag, tl[0..@min(buf.len, tl.len)]);
+        for (tl[0..n], 0..) |x, i| buf[i] = .{ .app_id = x.appId(), .title = x.titleStr() };
+        return n;
     }
 
     pub fn spawn(self: *App, cmd: [:0]const u8) void {
@@ -712,6 +734,9 @@ fn onGlobal(data: ?*anyopaque, reg: ?*c.struct_wl_registry, name: u32, interface
             if (app.wm_xkb) |x| w.setXkb(x);
             if (app.wm_lsh) |l| w.setLayerShell(l);
         }
+    } else if (iface(interface, &c.zwlr_foreign_toplevel_manager_v1_interface)) {
+        const m: *c.struct_zwlr_foreign_toplevel_manager_v1 = @ptrCast(bind(reg, name, &c.zwlr_foreign_toplevel_manager_v1_interface, ver, 3) orelse return);
+        app.toplevels = Toplevels.create(app, m) catch null;
     } else if (iface(interface, &c.river_xkb_bindings_v1_interface)) {
         app.wm_xkb = @ptrCast(bind(reg, name, &c.river_xkb_bindings_v1_interface, ver, 3));
         if (app.wm) |w| w.setXkb(app.wm_xkb.?);
@@ -755,6 +780,9 @@ fn onGlobalRemove(data: ?*anyopaque, _: ?*c.struct_wl_registry, name: u32) callc
         if (o.wall) |w| w.destroy();
         if (o.river) |r| c.zriver_output_status_v1_destroy(r);
         if (app.focused_output == o) app.focused_output = null;
+        if (app.toplevels) |t| for (t.items.items) |x| {
+            if (x.out == o) x.out = null;
+        };
         app.dashboard.outputRemoved(o);
         app.launcher.outputRemoved(o);
         app.osd.outputRemoved(o);
@@ -815,6 +843,7 @@ fn rViewTags(data: ?*anyopaque, _: ?*c.struct_zriver_output_status_v1, arr: [*c]
         if (i < o.view_list.len) o.view_list[i] = items[i];
     }
     o.view_tags = mask;
+    if (o.app.toplevels) |t| t.viewTagsChanged(o);
     if (o.bar) |b| b.tagsChanged();
     if (o.frame) |f| f.bar.tagsChanged(f);
 }

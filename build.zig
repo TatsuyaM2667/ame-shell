@@ -22,6 +22,7 @@ const protocols = [_][]const u8{
     "protocol/river-window-management-v1.xml",
     "protocol/river-xkb-bindings-v1.xml",
     "protocol/river-layer-shell-v1.xml",
+    "protocol/wlr-foreign-toplevel-management-unstable-v1.xml",
 };
 
 pub fn build(b: *std.Build) void {

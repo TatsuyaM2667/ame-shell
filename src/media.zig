@@ -211,12 +211,10 @@ pub const Media = struct {
         _ = c.eglMakeCurrent(self.app.gpu.dpy, c.EGL_NO_SURFACE, c.EGL_NO_SURFACE, self.app.gpu.ctx);
         self.art_tex = gfx.uploadImage(px, w, h);
         if (self.app.cfg.media_accent) {
-            // Odin で主色抽出。大きい画像は間引いて(stride)計算量を抑える。
-            var work: [4096 * 4]u32 = undefined;
+            // ジャケットの中で一番鮮やかな色(白地のジャケットでも白にならない)。大きい画像は間引いて計算する
             const count = w * h;
             const stride = @max(1, @divTrunc(count, 40_000));
-            const rgb = anim.ame_dominant_color(px, count, stride, &work);
-            theme.setAccent(self.app, usable(Color.hex(rgb)));
+            theme.setAccent(self.app, theme.accentFromPixels(px, count, stride));
         }
         self.app.dashboard.dataChanged();
         self.app.redrawBars();

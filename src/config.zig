@@ -13,7 +13,7 @@
 // 未知のキーは警告して無視(古い設定でも起動できるように)。
 const std = @import("std");
 
-pub const WallMode = enum(c_int) { aurora = 0, rain = 1, image = 2 };
+pub const WallMode = enum(c_int) { aurora = 0, rain = 1, image = 2, video = 3 };
 pub const BarPos = enum { top, bottom };
 pub const Layout = enum { caelestia, classic };
 
@@ -282,7 +282,7 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
         } else ok = false;
     } else if (eq(u8, sec, "wallpaper")) {
         if (eq(u8, key, "mode")) {
-            cfg.wall_mode = if (eq(u8, val, "rain")) .rain else if (eq(u8, val, "image")) .image else .aurora;
+            cfg.wall_mode = if (eq(u8, val, "rain")) .rain else if (eq(u8, val, "image")) .image else if (eq(u8, val, "video")) .video else .aurora;
         } else if (eq(u8, key, "image")) {
             cfg.wall_image.set(val);
         } else if (eq(u8, key, "fps")) {

@@ -151,6 +151,7 @@ install_file "$HERE/ame-session" "$PREFIX/bin/ame-session" 755
 install_file "$HERE/ame-river-init" "$PREFIX/share/ame-shell/ame-river-init" 755
 install_file "$HERE/ame-river5-init" "$PREFIX/share/ame-shell/ame-river5-init" 755
 install_file "$OUT/share/ame-shell/config.ame" "$PREFIX/share/ame-shell/config.ame" 644
+install_file "$OUT/share/ame-shell/bt-connect.sh" "$PREFIX/share/ame-shell/bt-connect.sh" 755
 for w in "$OUT"/share/ame-shell/widgets/*.wasm; do
     [ -f "$w" ] || continue
     install_file "$w" "$PREFIX/share/ame-shell/widgets/$(basename "$w")" 644

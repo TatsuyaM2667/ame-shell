@@ -80,7 +80,7 @@ fn drawNotifs(f: *Frame, cv: *gfx.Canvas, w: f32) bool {
         if (t > 0.99) continue;
         const y = n.ypos.x;
         const crit = n.urgency == 2;
-        const col = if (crit) Color.hex(0xff7a90) else acc;
+        const col = if (crit) theme.danger(app) else acc;
         const hv: f32 = if (f.sidev.hover == @as(i32, @intCast(i))) 1 else 0;
         cv.save();
         cv.translate(t * (w + 20), 0);
@@ -256,7 +256,7 @@ fn drawSession(f: *Frame, cv: *gfx.Canvas, w: f32) bool {
         const hv: f32 = if (f.sidev.hover == @as(i32, @intCast(i)) or (f.session.by_key and f.sidev.sess_sel == i)) 1 else 0;
         const armed = f.sidev.confirm == it.a;
         const danger = it.a == .reboot or it.a == .poweroff;
-        const base = if (armed) Color.hex(0xff7a90) else if (danger) Color.mix(acc, Color.hex(0xff7a90), 0.4) else acc;
+        const base = if (armed) theme.danger(app) else if (danger) Color.mix(acc, theme.danger(app), 0.4) else acc;
         const s = 64 + 4 * hv;
         const x = w / 2 - s / 2 - 4;
         if (hv > 0 or armed) cv.shadow(x, y + 2, s, s, s * 0.32, 10, base.alpha(0.45));

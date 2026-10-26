@@ -70,7 +70,11 @@ pub fn setWallScheme(app: *App, s: ?Scheme) void {
 pub fn setAccent(app: *App, col: ?Color) void {
     media_from = accent(app);
     media_fading_out = col == null;
-    if (col) |cc| media_to = cc;
+    // アルバムアートの色も、くすんだ緑などはアクセント向きの色相へ寄せる
+    if (col) |cc| {
+        const hs = toHsl(cc);
+        media_to = if (hs[1] < 0.1) cc else fromHsl(accentHue(hs[0]), std.math.clamp(hs[1] * 1.15, 0.6, 0.9), 0.72);
+    }
     media_t0 = loop.nowMs();
     if (app.wm) |w| w.themeChanged();
 }
@@ -87,6 +91,32 @@ pub fn accent(app: *App) Color {
         return Color.mix(media_from, b, ease(t));
     }
     return Color.mix(media_from, media_to.?, ease(t));
+}
+
+// ---- エラーの色と、失敗したときの赤い光 ----
+var error_t0: u64 = 0;
+const ERROR_MS: f32 = 1400;
+
+/// エラー・危険な操作・電池残量わずか などの赤
+pub fn danger(app: *App) Color {
+    // テーマの色合いに少しだけ寄せた、はっきりした赤
+    return Color.mix(Color.hex(0xff4d6a), accent(app), 0.12);
+}
+
+/// 何かが失敗したとき(Wi-Fi の接続失敗、パスワード違い等)。枠の縁が一瞬赤く光る
+pub fn flashError(app: *App) void {
+    error_t0 = loop.nowMs();
+    if (app.activeFrame()) |f| f.schedule();
+}
+
+/// 赤い光の強さ(0〜1、時間とともに消える)
+pub fn errorLevel() f32 {
+    if (error_t0 == 0) return 0;
+    const t = @as(f32, @floatFromInt(loop.nowMs() -| error_t0)) / ERROR_MS;
+    if (t >= 1) return 0;
+    // 速く立ち上がってゆっくり消える
+    const up = std.math.clamp(t * 8, 0, 1);
+    return up * (1 - t) * (1 - t);
 }
 
 pub fn accentAnimating() bool {
@@ -155,14 +185,86 @@ pub fn schemeFromPixels(rgba: [*]const u8, w: c_int, h: c_int) Scheme {
         hsl[0] = 0.60;
         hsl[1] = 0.25;
     }
+    // ガラス・文字の色合いは「一番多い色」、アクセントは「一番鮮やかに目立つ色」から作る
     const hh = hsl[0];
     const s = hsl[1];
+    const ah = accentHue(vividHue(rgba, count, stride) orelse hh);
     return .{
-        .accent = fromHsl(hh, std.math.clamp(s * 1.1, 0.45, 0.85), 0.74),
+        .accent = fromHsl(ah, std.math.clamp(@max(s, 0.55) * 1.15, 0.62, 0.9), 0.72),
         .tint = fromHsl(hh, std.math.clamp(s * 0.6, 0.18, 0.45), 0.085),
         .text = fromHsl(hh, 0.40, 0.95),
         .subtext = fromHsl(hh, 0.22, 0.75),
     };
+}
+
+/// 画像(アルバムアート等)からアクセント色を作る。鮮やかな色が無ければ null(上書きしない)
+pub fn accentFromPixels(rgba: [*]const u8, count: c_int, stride: c_int) ?Color {
+    const h = vividHue(rgba, count, stride) orelse return null;
+    return fromHsl(accentHue(h), 0.78, 0.72);
+}
+
+/// 鮮やかさで重み付けした色相の分布の山(彩度・明るさの低い画素はほぼ数えない)
+fn vividHue(rgba: [*]const u8, count: c_int, stride: c_int) ?f32 {
+    const BINS = 36;
+    var hist = [_]f32{0} ** BINS;
+    var i: c_int = 0;
+    var total: f32 = 0;
+    while (i < count) : (i += stride) {
+        const p: usize = @intCast(i * 4);
+        const cc = Color{ .r = @as(f32, @floatFromInt(rgba[p])) / 255, .g = @as(f32, @floatFromInt(rgba[p + 1])) / 255, .b = @as(f32, @floatFromInt(rgba[p + 2])) / 255, .a = 1 };
+        const hs = toHsl(cc);
+        // 鮮やかで中くらいの明るさの画素ほど重い(暗部・白飛び・灰色は無視)
+        const wgt = hs[1] * hs[1] * (1 - @abs(hs[2] - 0.5) * 2);
+        if (wgt < 0.02) continue;
+        const b: usize = @min(BINS - 1, @as(usize, @intFromFloat(hs[0] * BINS)));
+        hist[b] += wgt;
+        total += wgt;
+    }
+    if (total < 1) return null;
+    // 隣のビンとならして山を探す
+    var best: usize = 0;
+    var best_v: f32 = 0;
+    for (0..BINS) |b| {
+        const v = hist[b] * 2 + hist[(b + 1) % BINS] + hist[(b + BINS - 1) % BINS];
+        if (v > best_v) {
+            best_v = v;
+            best = b;
+        }
+    }
+    return (@as(f32, @floatFromInt(best)) + 0.5) / BINS;
+}
+
+/// アクセントの色相を「アクセントとして見栄えの良い色相」に寄せる。
+/// 黄緑〜緑(くすみやすく、UI の「有効」表示が安っぽく見える)は避けて、近い青緑か琥珀へ逃がす
+pub fn accentHue(h: f32) f32 {
+    const anchors = [_]f32{
+        0.015, // コーラル
+        0.085, // 琥珀
+        0.49, // ティール
+        0.545, // スカイ
+        0.6, // ブルー
+        0.665, // ペリウィンクル
+        0.74, // バイオレット
+        0.83, // オーキッド
+        0.93, // ピンク
+    };
+    var best = anchors[0];
+    var bd: f32 = 2;
+    for (anchors) |a| {
+        var d = @abs(a - h);
+        d = @min(d, 1 - d);
+        if (d < bd) {
+            bd = d;
+            best = a;
+        }
+    }
+    // 近い「良い色相」へ 75% 寄せる(壁紙らしさは少し残す)。緑の帯からは完全に出す
+    var d = best - h;
+    if (d > 0.5) d -= 1;
+    if (d < -0.5) d += 1;
+    var out = h + d * 0.75;
+    if (h > 0.13 and h < 0.44) out = best;
+    return out - @floor(out);
 }
 
 fn toHsl(cc: Color) [3]f32 {

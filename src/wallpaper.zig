@@ -20,6 +20,7 @@ const cfgmod = @import("config.zig");
 const surface = @import("surface.zig");
 const Surface = surface.Surface;
 const loop = @import("platform/loop.zig");
+const video = @import("video.zig");
 
 pub const Image = struct {
     tex: c.GLuint = 0,
@@ -47,6 +48,11 @@ pub const Wallpaper = struct {
     img_path: [512]u8 = undefined,
     img_path_len: usize = 0,
     fx_origin: [2]f32 = .{ 0.5, 0.5 },
+    /// 動画・GIF の壁紙(mode == .video)。切り替え中は前の動画を prev_player に残す(前のコマを表示し続けるため)
+    player: ?*video.Player = null,
+    prev_player: ?*video.Player = null,
+    /// 動画の最初のコマから配色を作ったか
+    video_scheme_done: bool = false,
 
     pub fn create(app: *App, out: *Output) !*Wallpaper {
         const self = try app.alloc.create(Wallpaper);
@@ -76,13 +82,14 @@ pub const Wallpaper = struct {
         if (loadSaved(&sb)) |saved| {
             self.mode = saved.mode;
             self.prev_mode = saved.mode;
-            if (saved.mode == .image) self.loadImage(saved.path);
-        } else if (self.mode == .image) self.loadImage(app.cfg.wall_image.get());
+            if (saved.mode == .image or saved.mode == .video) self.loadMedia(saved.path);
+        } else if (self.mode == .image or self.mode == .video) self.loadMedia(app.cfg.wall_image.get());
         self.updateTimer();
         return self;
     }
 
     pub fn destroy(self: *Wallpaper) void {
+        self.dropPlayers();
         self.app.loop.remove(self.timer.fd);
         _ = c.close(self.timer.fd);
         self.surf.destroy();
@@ -98,7 +105,8 @@ pub const Wallpaper = struct {
     }
 
     fn animated(self: *Wallpaper) bool {
-        return self.app.cfg.wall_animate and self.mode != .image;
+        // 動画は mpv から「新しいコマ」の通知が来たときだけ描くので、タイマーは使わない
+        return self.app.cfg.wall_animate and self.mode != .image and self.mode != .video;
     }
 
     fn fps(self: *Wallpaper) f32 {
@@ -145,17 +153,98 @@ pub const Wallpaper = struct {
         // 円の演出は時間をかけた方が映えるので応答を遅めに
         self.trans.response = if (self.fx == 0) 1.6 else 1.25;
         // 前の画像テクスチャは捨てる(トランジション中なら途中のものも)
-        if (self.prev_img.tex != 0 and self.prev_img.tex != self.img.tex) c.glDeleteTextures(1, &self.prev_img.tex);
+        self.dropPrev();
         self.prev_img = self.img;
         self.img = .{};
+        self.prev_player = self.player;
+        self.player = null;
         self.prev_mode = self.mode;
         self.mode = mode;
-        if (mode == .image) self.loadImage(image_path) else theme.setWallScheme(self.app, null);
+        if (mode == .image or mode == .video) self.loadMedia(image_path) else theme.setWallScheme(self.app, null);
         self.trans.snap(0);
         self.trans.set(1);
         self.last_ms = 0;
         self.updateTimer();
         self.surf.schedule();
+    }
+
+    /// 画像か動画(GIF・MP4 等)かを拡張子で見分けて読み込む
+    fn loadMedia(self: *Wallpaper, path_in: []const u8) void {
+        if (!video.isVideoPath(path_in)) {
+            self.mode = .image;
+            self.loadImage(path_in);
+            return;
+        }
+        var buf: [600]u8 = undefined;
+        const path = if (std.mem.startsWith(u8, path_in, "~/"))
+            std.fmt.bufPrint(&buf, "{s}/{s}", .{ std.posix.getenv("HOME") orelse "", path_in[2..] }) catch return
+        else
+            path_in;
+        self.img_path_len = @min(path_in.len, self.img_path.len);
+        @memcpy(self.img_path[0..self.img_path_len], path_in[0..self.img_path_len]);
+        const app = self.app;
+        app.gpu.makeCurrent(self.surf.egl_surf);
+        const sz = self.out.logicalSize();
+        const sc: i32 = @max(self.out.scale, 1);
+        const max_w: c_int = @intCast(@as(i32, @intCast(sz[0])) * sc);
+        const max_h: c_int = @intCast(@as(i32, @intCast(sz[1])) * sc);
+        if (video.Player.create(app.alloc, path, max_w, max_h)) |p| {
+            self.player = p;
+            self.mode = .video;
+            self.video_scheme_done = false;
+            app.loop.add(p.pipe_r, c.EPOLLIN, self, onVideo) catch {};
+            return;
+        }
+        // libmpv が無い: GIF なら 1 コマ目を静止画として使う
+        if (std.ascii.endsWithIgnoreCase(path, ".gif")) {
+            self.mode = .image;
+            self.loadImage(path_in);
+        } else {
+            std.log.warn("動画の壁紙を再生できません: {s}(オーロラにフォールバック)", .{path});
+            self.mode = .aurora;
+        }
+    }
+
+    fn onVideo(ctx: *anyopaque, fd: c_int, _: u32) void {
+        const self: *Wallpaper = @ptrCast(@alignCast(ctx));
+        for ([_]?*video.Player{ self.player, self.prev_player }) |pp| if (pp) |p| if (p.pipe_r == fd) {
+            if (p.pump()) self.surf.schedule();
+        };
+    }
+
+    /// 切り替え前の壁紙(画像テクスチャまたは動画)を捨てる
+    fn dropPrev(self: *Wallpaper) void {
+        if (self.prev_player) |p| {
+            self.app.loop.remove(p.pipe_r);
+            p.destroy(self.app.alloc);
+            self.prev_player = null;
+        } else if (self.prev_img.tex != 0 and self.prev_img.tex != self.img.tex) {
+            c.glDeleteTextures(1, &self.prev_img.tex);
+        }
+        self.prev_img = .{};
+    }
+
+    fn dropPlayers(self: *Wallpaper) void {
+        self.dropPrev();
+        if (self.player) |p| {
+            self.app.loop.remove(p.pipe_r);
+            p.destroy(self.app.alloc);
+            self.player = null;
+        }
+    }
+
+    /// 動画の最初のコマから配色を作る(1 回だけ、FBO から読み戻す)
+    fn videoScheme(self: *Wallpaper, p: *video.Player) void {
+        const w = p.w;
+        const h = p.h;
+        if (w <= 0 or h <= 0) return;
+        const px = self.app.alloc.alloc(u8, @intCast(w * h * 4)) catch return;
+        defer self.app.alloc.free(px);
+        c.glBindFramebuffer(c.GL_FRAMEBUFFER, p.fbo);
+        c.glReadPixels(0, 0, w, h, c.GL_RGBA, c.GL_UNSIGNED_BYTE, px.ptr);
+        c.glBindFramebuffer(c.GL_FRAMEBUFFER, 0);
+        theme.setWallScheme(self.app, theme.schemeFromPixels(px.ptr, w, h));
+        self.video_scheme_done = true;
     }
 
     fn loadImage(self: *Wallpaper, path_in: []const u8) void {
@@ -204,13 +293,31 @@ pub const Wallpaper = struct {
         var scale = cfg.wall_scale;
         if (!app.sys.battery.on_ac) scale *= 0.75;
         // 画像は等倍で(縮小すると細部が潰れる)
-        if (self.mode == .image and !transitioning) scale = 1.0;
+        if ((self.mode == .image or self.mode == .video) and !transitioning) scale = 1.0;
+        // 動画: 新しいコマを描いてから、そのテクスチャを「画像」としてシーンに渡す
+        if (self.player != null or self.prev_player != null) app.gpu.makeCurrent(s.egl_surf);
+        if (self.player) |p| {
+            p.render();
+            if (p.tex != 0) {
+                self.img = .{ .tex = p.tex, .w = @floatFromInt(p.w), .h = @floatFromInt(p.h) };
+                if (!self.video_scheme_done) self.videoScheme(p);
+            }
+        }
+        if (self.prev_player) |p| {
+            p.render();
+            if (p.tex != 0) self.prev_img = .{ .tex = p.tex, .w = @floatFromInt(p.w), .h = @floatFromInt(p.h) };
+        }
+        const shader_mode = struct {
+            fn f(m: cfgmod.WallMode) c_int {
+                return if (m == .video) @intFromEnum(cfgmod.WallMode.image) else @intFromEnum(m);
+            }
+        }.f;
         const pw: c_int = @intFromFloat(@as(f32, @floatFromInt(s.width * @as(u32, @intCast(s.scale)))) * scale);
         const ph: c_int = @intFromFloat(@as(f32, @floatFromInt(s.height * @as(u32, @intCast(s.scale)))) * scale);
         self.out.backdrop.render(&app.gpu, pw, ph, .{
             .time = self.scene_time,
-            .mode = @intFromEnum(self.mode),
-            .prev_mode = @intFromEnum(self.prev_mode),
+            .mode = shader_mode(self.mode),
+            .prev_mode = shader_mode(self.prev_mode),
             .mix = self.trans.x,
             .trans = self.fx,
             .origin = self.fx_origin,
@@ -226,10 +333,7 @@ pub const Wallpaper = struct {
         }, cfg.blur);
         self.out.backdrop.blitTo(&app.gpu, @intCast(s.width * @as(u32, @intCast(s.scale))), @intCast(s.height * @as(u32, @intCast(s.scale))));
 
-        if (!transitioning and self.prev_img.tex != 0) {
-            c.glDeleteTextures(1, &self.prev_img.tex);
-            self.prev_img = .{};
-        }
+        if (!transitioning and (self.prev_img.tex != 0 or self.prev_player != null)) self.dropPrev();
         // ガラス面は壁紙が変わった直後だけ描き直す(ライブ壁紙の毎フレームでは描き直さない:
         // ブラーの微小な変化のためにバーを再描画するのは割に合わない)
         if (transitioning or self.first_frames < 2) {
@@ -269,8 +373,8 @@ fn loadSaved(buf: []u8) ?Saved {
     var it = std.mem.splitScalar(u8, buf[0..n], '\n');
     const m = it.next() orelse return null;
     const path = it.next() orelse "";
-    const mode: cfgmod.WallMode = if (std.mem.eql(u8, m, "rain")) .rain else if (std.mem.eql(u8, m, "image")) .image else if (std.mem.eql(u8, m, "aurora")) .aurora else return null;
+    const mode: cfgmod.WallMode = if (std.mem.eql(u8, m, "rain")) .rain else if (std.mem.eql(u8, m, "image")) .image else if (std.mem.eql(u8, m, "video")) .video else if (std.mem.eql(u8, m, "aurora")) .aurora else return null;
     // 画像が消えていたら保存内容は使わない
-    if (mode == .image and std.fs.cwd().access(path, .{}) == error.FileNotFound) return null;
+    if ((mode == .image or mode == .video) and std.fs.cwd().access(path, .{}) == error.FileNotFound) return null;
     return .{ .mode = mode, .path = path };
 }
