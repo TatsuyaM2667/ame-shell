@@ -9,7 +9,7 @@
 # FreeBSD では scripts/install-freebsd.sh(完全自動)に任せる。
 #
 # Linux で行うこと:
-#   1. 依存パッケージ(Chimera / Alpine の apk は自動。その他のディストリは足りないものを表示)
+#   1. 依存パッケージ(Chimera Linux の apk は自動。その他のディストリは足りないものを表示)
 #   2. Zig 0.13.0(無ければ公式の配布物を ~/.cache に)と Odin(無ければソースからビルド)
 #   3. River が無ければ River 0.5 をソースからビルド(Zig 0.16 + wlroots 0.20)
 #   4. ame-shell をビルドして、session/install-session.sh でインストール
@@ -97,14 +97,14 @@ fi
 
 # ---------------------------------------------------------------------------
 say "1/4 依存パッケージ"
-# ビルドに必要なもの / 動かすのに必要なもの / River 0.5 のビルドに必要なもの(Chimera / Alpine の名前)
+# ビルドに必要なもの / 動かすのに必要なもの / River 0.5 のビルドに必要なもの(Chimera Linux の名前)
 APK_BUILD="git curl bash clang llvm-devel pkgconf wayland-devel wayland-progs mesa-devel libxkbcommon-devel freetype-devel harfbuzz-devel fontconfig-devel dbus-devel"
 APK_RUN="sddm foot dbus playerctl cava pipewire wireplumber libpulse-progs mpv-libs ffmpeg grim slurp wl-clipboard swaylock brightnessctl networkmanager bluez xdg-desktop-portal-wlr fonts-noto-sans-cjk-otf fonts-nerd-jetbrains-mono"
 APK_RIVER="wlroots0.20-devel wayland-protocols libevdev-devel pixman-devel libinput-devel xwayland xwayland-devel"
 NEED_CMDS="git curl clang wayland-scanner pkg-config"
 if [ "$NO_DEPS" = 1 ]; then
     info "(--no-deps のため省略)"
-elif command -v apk >/dev/null 2>&1; then
+elif command -v apk >/dev/null 2>&1 && grep -q "^ID=chimera" /etc/os-release 2>/dev/null; then
     missing=""
     for p in $APK_BUILD $APK_RUN $APK_RIVER; do apk info -e "$p" >/dev/null 2>&1 || missing="$missing $p"; done
     if [ -z "$missing" ]; then

@@ -60,7 +60,7 @@ sh install.sh --user     # 自分だけ(~/.local)。root 不要。SDDM には出
 sh install.sh --uninstall [--user]
 ```
 
-`install.sh` が依存パッケージ(Chimera / Alpine は自動。他のディストリは足りないものを表示)、Zig 0.13、Odin、River(無ければ River 0.5 をソースから)、ame-shell のビルドとインストールまで行います。
+`install.sh` が依存パッケージ(Chimera Linux は自動。他のディストリは足りないものを表示)、Zig 0.13、Odin、River(無ければ River 0.5 をソースから)、ame-shell のビルドとインストールまで行います。
 どのユーザーが実行しても構いません。doas / sudo が使えない人は自動で `--user` になります。全ユーザー用では、自分でビルドした River 0.5(`~/.local/opt/river-0.5`)も `/usr/local/opt` にコピーされ、他のアカウントからも River 0.5 のセッションが使えます。
 
 ### FreeBSD(14 / 15、amd64)
