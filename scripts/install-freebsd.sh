@@ -88,24 +88,65 @@ say "1/5 パッケージ"
 export ASSUME_ALWAYS_YES=yes
 pkg -N >/dev/null 2>&1 || pkg bootstrap -y
 pkg update -q
-PKGS="
+# 必須: これが無いとビルドできない / セッションが動かない
+REQUIRED="
  git cmake ninja gmake bash pkgconf llvm18 wayland wayland-protocols
  mesa-libs mesa-dri libglvnd libxkbcommon xkeyboard-config freetype2 harfbuzz fontconfig dbus
  libepoll-shim libinotify
- river sddm xorg-minimal seatd foot
- curl playerctl cava swaylock grim slurp wl-clipboard mpv ffmpeg
+ river sddm xorg-minimal seatd foot curl
+"
+# あれば使う: 無ければ飛ばす(その機能だけ使えない)。"a|b" は「a が無ければ b」
+OPTIONAL="
+ playerctl cava swaylock grim slurp wl-clipboard mpv ffmpeg
  xdg-desktop-portal xdg-desktop-portal-wlr
  noto-sans-jp nerd-fonts-symbols
 "
-[ "$DO_JA" = 1 ] && PKGS="$PKGS fcitx5 fcitx5-qt6 fcitx5-gtk3 fcitx5-configtool ja-fcitx5-mozc"
-missing=""
-for p in $PKGS; do pkg info -e "$p" || missing="$missing $p"; done
-if [ -n "$missing" ]; then
-    info "インストール:$missing"
+# 日本語入力。fcitx5 用の Mozc は latest リポジトリにしか無いことがある(quarterly には無い)ので候補を順に試す
+[ "$DO_JA" = 1 ] && OPTIONAL="$OPTIONAL fcitx5 fcitx5-qt6 fcitx5-gtk3 fcitx5-configtool ja-fcitx5-mozc|ja-fcitx5-mozc3"
+
+# 候補("a|b")のうち、導入済みのもの → リポジトリにあるもの の順に 1 つ選ぶ。どれも無ければ空
+pick() {
+    old_ifs=$IFS; IFS='|'
+    for c in $1; do pkg info -e "$c" && { IFS=$old_ifs; echo "installed:$c"; return; }; done
+    for c in $1; do [ -n "$(pkg rquery '%n' "$c" 2>/dev/null)" ] && { IFS=$old_ifs; echo "available:$c"; return; }; done
+    IFS=$old_ifs
+}
+to_install=""
+absent_req=""
+skipped=""
+for spec in $REQUIRED; do
+    r=$(pick "$spec")
+    case "$r" in
+        installed:*) ;;
+        available:*) to_install="$to_install ${r#available:}" ;;
+        *) absent_req="$absent_req $spec" ;;
+    esac
+done
+for spec in $OPTIONAL; do
+    r=$(pick "$spec")
+    case "$r" in
+        installed:*) ;;
+        available:*) to_install="$to_install ${r#available:}" ;;
+        *) skipped="$skipped $spec" ;;
+    esac
+done
+if [ -n "$absent_req" ]; then
+    die "必須のパッケージがリポジトリにありません:$absent_req
+    (pkg -vv で使っているリポジトリを確認してください。/usr/local/etc/pkg/repos/FreeBSD.conf で
+     url を .../latest にすると新しいパッケージが使えます)"
+fi
+if [ -n "$to_install" ]; then
+    info "インストール:$to_install"
     # shellcheck disable=SC2086
-    pkg install -y $missing
+    pkg install -y $to_install
 else
-    info "すべて導入済み"
+    info "必要なパッケージはすべて導入済み"
+fi
+if [ -n "$skipped" ]; then
+    info "リポジトリに無いため飛ばしました:$skipped"
+    case "$skipped" in
+        *mozc*) info "  (fcitx5 用の Mozc は latest リポジトリか ports の japanese/fcitx5-mozc で入れられます。導入済みなら問題ありません)" ;;
+    esac
 fi
 river_ver=$(river -version 2>&1 || true)
 info "river: $river_ver"
@@ -122,13 +163,13 @@ if [ "$DO_GPU" = 1 ]; then
     vendors=$(pciconf -lv 2>/dev/null | awk '/^[a-z]/{cls=($0 ~ /class=0x03/)} cls && /vendor=/{print}' | grep -o ' vendor=0x[0-9a-f]*' | sort -u)
     case "$vendors" in
         *0x1002*)
-            pkg info -e drm-kmod || pkg install -y drm-kmod
+            pkg info -e drm-kmod || pkg install -y drm-kmod || info "drm-kmod を入れられませんでした(GPU ドライバは手動で設定してください)"
             add_kld amdgpu ;;
         *0x8086*)
-            pkg info -e drm-kmod || pkg install -y drm-kmod
+            pkg info -e drm-kmod || pkg install -y drm-kmod || info "drm-kmod を入れられませんでした(GPU ドライバは手動で設定してください)"
             add_kld i915kms ;;
         *0x10de*)
-            pkg info -e nvidia-drm-kmod || pkg install -y nvidia-drm-kmod
+            pkg info -e nvidia-drm-kmod || pkg install -y nvidia-drm-kmod || info "nvidia-drm-kmod を入れられませんでした(GPU ドライバは手動で設定してください)"
             add_kld nvidia-drm
             grep -q '^hw.nvidiadrm.modeset=' /boot/loader.conf 2>/dev/null || echo 'hw.nvidiadrm.modeset="1"' >> /boot/loader.conf ;;
         *)
