@@ -98,6 +98,9 @@ if [ "${AME_SESSION_NESTED:-0}" != "1" ]; then
         log "seat: elogind セッション $XDG_SESSION_ID を使用"
     elif [ -S /run/seatd.sock ] && [ -r /run/seatd.sock ] && [ -w /run/seatd.sock ]; then
         log "seat: seatd (/run/seatd.sock) を使用"
+    elif [ -S /var/run/seatd.sock ] && [ -r /var/run/seatd.sock ] && [ -w /var/run/seatd.sock ]; then
+        # FreeBSD(/run が無く /var/run)
+        log "seat: seatd (/var/run/seatd.sock) を使用"
     elif command -v seatd-launch >/dev/null 2>&1; then
         log "seat: seatd-launch 経由で起動します"
         SEAT_WRAP="seatd-launch --"
@@ -115,6 +118,18 @@ export AME_SAFE_MODE="$SAFE"
 
 if [ "${AME_SESSION_NESTED:-0}" != "1" ] && command -v dbus-update-activation-environment >/dev/null 2>&1; then
     dbus-update-activation-environment XDG_SESSION_TYPE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS PATH >/dev/null 2>&1
+fi
+
+# システムの river が 0.4 以降(FreeBSD の river パッケージなど)なら、River 0.3 用の init は動かない
+# (River 0.4 以降は riverctl の無い別物)。内蔵ウィンドウマネージャで起動する方法(--river5)に切り替える
+if [ "$RIVER5" = "0" ] && command -v river >/dev/null 2>&1; then
+    case "$(river -version 2>&1)" in
+        0.[4-9]*|[1-9]*)
+            log "river $(river -version 2>&1) は River 0.4 以降なので、内蔵ウィンドウマネージャで起動します"
+            RIVER5=1
+            SAFE=0
+            ;;
+    esac
 fi
 
 RIVER=river
@@ -138,7 +153,11 @@ if [ "$RIVER5" = "1" ]; then
     else
         INIT="$INIT5"
         # River 0.5 には riverctl keyboard-layout が無いので xkbcommon の環境変数で渡す。
-        # 未設定なら今の ~/.config/river/init の keyboard-layout を読んで合わせる(読むだけ)
+        # 未設定なら ~/.config/ame-shell/xkb-layout(1 行で "jp" など)→ ~/.config/river/init の keyboard-layout の順に読む
+        if [ -z "${XKB_DEFAULT_LAYOUT:-}" ] && [ -s "$HOME/.config/ame-shell/xkb-layout" ]; then
+            kl=$(head -n 1 "$HOME/.config/ame-shell/xkb-layout" | tr -d ' \t\r')
+            [ -n "$kl" ] && export XKB_DEFAULT_LAYOUT="$kl"
+        fi
         if [ -z "${XKB_DEFAULT_LAYOUT:-}" ] && [ -f "$HOME/.config/river/init" ]; then
             kl=$(awk '$1=="riverctl" && $2=="keyboard-layout" {print $NF}' "$HOME/.config/river/init" | tail -n 1 | tr -d '"'"'")
             [ -n "$kl" ] && export XKB_DEFAULT_LAYOUT="$kl"

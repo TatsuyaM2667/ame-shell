@@ -47,7 +47,10 @@ pub fn build(b: *std.Build) void {
     }
 
     // --- Odin: アニメーション/ファジー/主色抽出のコアをオブジェクトにする ---
-    const odin_target = switch (target.result.cpu.arch) {
+    const bsd = target.result.os.tag == .freebsd;
+    const odin_target = if (bsd)
+        (if (target.result.cpu.arch == .aarch64) "-target:freebsd_arm64" else "-target:freebsd_amd64")
+    else switch (target.result.cpu.arch) {
         .aarch64 => "-target:linux_arm64",
         else => "-target:linux_amd64",
     };
@@ -78,10 +81,24 @@ pub fn build(b: *std.Build) void {
     });
     exe.linkLibC();
     exe.addIncludePath(gen.getDirectory());
-    exe.addIncludePath(.{ .cwd_relative = "/usr/include/freetype2" });
-    exe.addIncludePath(.{ .cwd_relative = "/usr/include/harfbuzz" });
-    exe.addIncludePath(.{ .cwd_relative = "/usr/include/dbus-1.0" });
-    exe.addIncludePath(.{ .cwd_relative = "/usr/lib/dbus-1.0/include" });
+    // ライブラリのヘッダの場所: Linux は /usr、FreeBSD は /usr/local(パッケージ)。
+    // FreeBSD では epoll / timerfd / signalfd を libepoll-shim、inotify を libinotify で補う。
+    // --sysroot を付けると、その下の同じパスを使う(Linux から FreeBSD 向けに試しビルドするとき)
+    const sr = b.sysroot orelse "";
+    const pre = if (bsd) "/usr/local" else "/usr";
+    for ([_][]const u8{ "/include/freetype2", "/include/harfbuzz", "/include/dbus-1.0", "/lib/dbus-1.0/include" }) |p| {
+        exe.addIncludePath(.{ .cwd_relative = b.fmt("{s}{s}{s}", .{ sr, pre, p }) });
+    }
+    if (bsd) {
+        exe.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/local/include/libepoll-shim", .{sr}) });
+        exe.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/local/include", .{sr}) });
+        exe.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/local/lib", .{sr}) });
+        if (sr.len > 0) {
+            exe.addSystemIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{sr}) });
+            exe.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/lib", .{sr}) });
+            exe.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{sr}) });
+        }
+    }
     exe.addIncludePath(b.path("third_party/wasm3/source"));
     exe.addIncludePath(b.path("third_party"));
     for (proto_c.items) |c_file| {
@@ -98,7 +115,12 @@ pub fn build(b: *std.Build) void {
     exe.addCSourceFile(.{ .file = b.path("third_party/nanosvg_impl.c"), .flags = &.{ "-O2", "-fno-sanitize=undefined" } });
     exe.addObjectFile(anim_obj);
     for ([_][]const u8{ "wayland-client", "wayland-egl", "EGL", "GLESv2", "xkbcommon", "freetype", "harfbuzz", "fontconfig", "dbus-1" }) |lib| {
-        exe.linkSystemLibrary(lib);
+        // FreeBSD はパスを上で指定済みなので pkg-config を使わない(--sysroot の試しビルドで手元の Linux のライブラリを拾わないように)
+        if (bsd) exe.linkSystemLibrary2(lib, .{ .use_pkg_config = .no }) else exe.linkSystemLibrary(lib);
+    }
+    if (bsd) {
+        exe.linkSystemLibrary2("epoll-shim", .{ .use_pkg_config = .no });
+        exe.linkSystemLibrary2("inotify", .{ .use_pkg_config = .no });
     }
     b.installArtifact(exe);
 
@@ -127,6 +149,11 @@ pub fn build(b: *std.Build) void {
         .strip = optimize != .Debug,
     });
     ctl.linkLibC();
+    if (bsd and sr.len > 0) {
+        ctl.addSystemIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{sr}) });
+        ctl.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/lib", .{sr}) });
+        ctl.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{sr}) });
+    }
     b.installArtifact(ctl);
 
     // --- WASM ウィジェット(Zig → wasm32-freestanding) ---

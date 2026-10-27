@@ -5,6 +5,23 @@
 // コマンドが無い環境ではその機能だけ「不明」として扱い、シェルは動き続ける。
 const std = @import("std");
 const c = @import("../c.zig");
+const builtin = @import("builtin");
+/// FreeBSD では /proc・/sys の代わりに sysctl や FreeBSD のコマンドを使う(bsd.zig)
+const is_bsd = builtin.os.tag == .freebsd;
+const bsd = @import("bsd.zig");
+
+/// PATH にそのコマンドがあるか(nmcli・bluetoothctl の無い環境で、パネルに理由を出すため)
+pub fn hasCommand(name: []const u8) bool {
+    const path = std.posix.getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
+    var it = std.mem.splitScalar(u8, path, ':');
+    while (it.next()) |dir| {
+        if (dir.len == 0) continue;
+        var buf: [512]u8 = undefined;
+        const p = std.fmt.bufPrintZ(&buf, "{s}/{s}", .{ dir, name }) catch continue;
+        if (c.access(p.ptr, c.X_OK) == 0) return true;
+    }
+    return false;
+}
 
 /// 小さなファイルを読み、前後の空白を取った内容を buf に返す。
 pub fn readFile(path: [*:0]const u8, buf: []u8) ?[]const u8 {
@@ -32,6 +49,10 @@ pub const Battery = struct {
 };
 
 pub fn battery() Battery {
+    if (is_bsd) {
+        const x = bsd.battery();
+        return .{ .present = x.present, .percent = x.percent, .charging = x.charging, .on_ac = x.on_ac };
+    }
     var b = Battery{};
     const dir = c.opendir("/sys/class/power_supply") orelse return b;
     defer _ = c.closedir(dir);
@@ -65,6 +86,7 @@ pub fn battery() Battery {
 // ---------------- 明るさ ----------------
 
 pub fn brightness() ?f32 {
+    if (is_bsd) return bsd.backlight(run);
     const dir = c.opendir("/sys/class/backlight") orelse return null;
     defer _ = c.closedir(dir);
     while (c.readdir(dir)) |ent| {
@@ -87,6 +109,12 @@ pub fn setBrightnessDelta(percent: i32) void {
     else
         std.fmt.bufPrintZ(&arg, "{d}%-", .{-percent}) catch return;
     var out: [64]u8 = undefined;
+    if (is_bsd) {
+        var nb: [8]u8 = undefined;
+        const n = std.fmt.bufPrintZ(&nb, "{d}", .{@abs(percent)}) catch return;
+        _ = run(&.{ "backlight", if (percent >= 0) "incr" else "decr", n.ptr }, &out);
+        return;
+    }
     _ = run(&.{ "brightnessctl", "-q", "set", a.ptr }, &out);
 }
 
@@ -96,7 +124,11 @@ pub const Volume = struct { known: bool = false, level: f32 = 0, muted: bool = f
 
 pub fn volume() Volume {
     var out: [128]u8 = undefined;
-    const s = run(&.{ "wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@" }, &out) orelse return .{};
+    const s = run(&.{ "wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@" }, &out) orelse {
+        // FreeBSD で PipeWire が無いときは mixer(8)
+        if (is_bsd) if (bsd.mixerVolume(run)) |m| return .{ .known = true, .level = m.level, .muted = m.muted };
+        return .{};
+    };
     // 形式: "Volume: 0.45" または "Volume: 0.45 [MUTED]"
     var it = std.mem.tokenizeAny(u8, s, " \n");
     _ = it.next() orelse return .{};
@@ -113,19 +145,29 @@ pub fn setVolumeDelta(percent: i32) void {
         std.fmt.bufPrintZ(&arg, "{d}%-", .{-percent}) catch return;
     var out: [8]u8 = undefined;
     // -l 1.0 で 100% を超えないようにする(耳とスピーカーの保護)。
-    _ = run(&.{ "wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", a.ptr }, &out);
+    if (run(&.{ "wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", a.ptr }, &out) == null and is_bsd) {
+        var mb: [32]u8 = undefined;
+        const m = std.fmt.bufPrintZ(&mb, "vol.volume={s}{d:.2}", .{ if (percent >= 0) "+" else "-", @as(f32, @floatFromInt(@abs(percent))) / 100 }) catch return;
+        _ = run(&.{ "mixer", m.ptr }, &out);
+    }
 }
 
 pub fn setVolume(level: f32) void {
     var arg: [16]u8 = undefined;
     const a = std.fmt.bufPrintZ(&arg, "{d:.2}", .{std.math.clamp(level, 0, 1)}) catch return;
     var out: [8]u8 = undefined;
-    _ = run(&.{ "wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", a.ptr }, &out);
+    if (run(&.{ "wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", a.ptr }, &out) == null and is_bsd) {
+        var mb: [32]u8 = undefined;
+        const m = std.fmt.bufPrintZ(&mb, "vol.volume={d:.2}", .{std.math.clamp(level, 0, 1)}) catch return;
+        _ = run(&.{ "mixer", m.ptr }, &out);
+    }
 }
 
 pub fn toggleMute() void {
     var out: [8]u8 = undefined;
-    _ = run(&.{ "wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle" }, &out);
+    if (run(&.{ "wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle" }, &out) == null and is_bsd) {
+        _ = run(&.{ "mixer", "vol.mute=^" }, &out);
+    }
 }
 
 // ---------------- ネットワーク ----------------
@@ -135,6 +177,15 @@ pub const Net = struct { kind: NetKind = .none, name_buf: [64]u8 = undefined, na
 
 pub fn network() Net {
     var n = Net{};
+    if (is_bsd) {
+        const x = bsd.network(run);
+        if (x.connected) {
+            n.kind = if (x.wifi) .wifi else .wired;
+            n.name_len = x.name_len;
+            @memcpy(n.name_buf[0..x.name_len], x.name_buf[0..x.name_len]);
+        }
+        return n;
+    }
     const dir = c.opendir("/sys/class/net") orelse return n;
     defer _ = c.closedir(dir);
     while (c.readdir(dir)) |ent| {
@@ -178,6 +229,10 @@ pub fn network() Net {
 pub const CpuSample = struct { idle: u64 = 0, total: u64 = 0 };
 
 pub fn cpuSample() CpuSample {
+    if (is_bsd) {
+        const t = bsd.cpuTimes() orelse return .{};
+        return .{ .idle = t.idle, .total = t.total };
+    }
     var buf: [512]u8 = undefined;
     const s = readFile("/proc/stat", &buf) orelse return .{};
     var it = std.mem.tokenizeAny(u8, s, " \n");
@@ -195,6 +250,10 @@ pub fn cpuSample() CpuSample {
 }
 
 pub fn memUsage() f32 {
+    if (is_bsd) {
+        const m = bsd.memory() orelse return 0;
+        return if (m.total > 0) @floatCast(m.used / m.total) else 0;
+    }
     var buf: [2048]u8 = undefined;
     const s = readFile("/proc/meminfo", &buf) orelse return 0;
     var total: f32 = 0;
@@ -212,6 +271,7 @@ pub fn memUsage() f32 {
 }
 
 pub fn cpuTemp() ?f32 {
+    if (is_bsd) return bsd.cpuTemp();
     // thermal_zone の中から x86_pkg_temp / k10temp 相当を優先、無ければ最初のもの。
     var best: ?f32 = null;
     var i: usize = 0;

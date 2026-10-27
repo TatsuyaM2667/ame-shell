@@ -1,18 +1,23 @@
 #!/bin/sh
-# install-session.sh: Ame Shell を SDDM のセッションとしてインストール/アンインストールする。
-# root で実行する前提(--destdir 指定時は一般ユーザーでも可)。冪等。POSIX sh のみ。
+# install-session.sh: ame-shell をインストール/アンインストールする。冪等。POSIX sh のみ。
 #
-#   sh session/install-session.sh [--prefix /usr/local] [--destdir DIR] [--dry-run]
-#   sh session/install-session.sh --uninstall [--prefix /usr/local] [--destdir DIR]
+#   sh session/install-session.sh                 全ユーザー用(/usr/local)+ SDDM のセッション。
+#                                                 root でなければ doas / sudo で自動的に昇格する
+#   sh session/install-session.sh --user          自分だけ(~/.local)。root 不要。SDDM のセッションは作れない
+#   sh session/install-session.sh --uninstall [--user]
+#   その他: --prefix DIR / --destdir DIR(疑似 root への試験)/ --dry-run
 #
-# 入力は zig-out/ のビルド成果物とこのリポジトリ内のファイルだけ(ここではビルドしない)。
+# 入力は zig-out/ のビルド成果物とこのリポジトリ内のファイルだけ(ここではビルドしない。ビルドは install.sh)。
 # 追加したファイルは $PREFIX/share/ame-shell/installed-files に記録し、--uninstall はそれだけを消す。
+# Linux(Chimera など)と FreeBSD に対応。
 
 set -u
-PREFIX=/usr/local
+PREFIX=""
 DESTDIR=""
 UNINSTALL=0
 DRY=0
+USER_MODE=0
+ORIG_ARGS="$*"
 while [ $# -gt 0 ]; do
     case "$1" in
         --prefix) PREFIX="$2"; shift 2 ;;
@@ -21,10 +26,16 @@ while [ $# -gt 0 ]; do
         --destdir=*) DESTDIR="${1#*=}"; shift ;;
         --uninstall) UNINSTALL=1; shift ;;
         --dry-run) DRY=1; shift ;;
-        -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+        --user) USER_MODE=1; shift ;;
+        -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
+
+OS=$(uname -s)
+if [ -z "$PREFIX" ]; then
+    if [ "$USER_MODE" = 1 ]; then PREFIX="$HOME/.local"; else PREFIX=/usr/local; fi
+fi
 
 case "$0" in */*) HERE=$(cd "$(dirname "$0")" && pwd) ;; *) HERE=$(pwd) ;; esac
 ROOT=$(dirname "$HERE")
@@ -36,6 +47,28 @@ WARN=0
 say() { printf '%s\n' "$*"; }
 warn() { printf 'WARNING: %s\n' "$*" >&2; WARN=$((WARN + 1)); }
 run() { if [ "$DRY" = 1 ]; then say "  (dry-run) $*"; else "$@"; fi; }
+
+# ---------------------------------------------------------------------------
+# 権限: 全ユーザー用のインストールは root が必要。doas / sudo があれば自動で昇格し、
+# どちらも無ければ自分用(--user)に切り替える
+# ---------------------------------------------------------------------------
+if [ "$USER_MODE" = 0 ] && [ -z "$DESTDIR" ] && [ "$DRY" = 0 ] && [ "$(id -u)" -ne 0 ]; then
+    if command -v doas >/dev/null 2>&1; then
+        say "全ユーザー用にインストールするため doas で実行します(パスワードを聞かれます)"
+        # shellcheck disable=SC2086  # 引数は空白を含まない前提(パスは --prefix=… の形で渡す)
+        exec doas sh "$0" $ORIG_ARGS
+    elif command -v sudo >/dev/null 2>&1; then
+        say "全ユーザー用にインストールするため sudo で実行します(パスワードを聞かれます)"
+        # shellcheck disable=SC2086
+        exec sudo sh "$0" $ORIG_ARGS
+    else
+        say "doas / sudo が無いため、自分用(~/.local)にインストールします"
+        USER_MODE=1
+        PREFIX="$HOME/.local"
+        MANIFEST_REL="$PREFIX/share/ame-shell/installed-files"
+        MANIFEST="$MANIFEST_REL"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # アンインストール
@@ -60,7 +93,7 @@ if [ "$UNINSTALL" = 1 ]; then
     done < "$MANIFEST"
     run rm -f "$MANIFEST"
     # 自分で作った空ディレクトリだけ片付ける(他のファイルがあれば残る)
-    for d in "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell"; do
+    for d in "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell" "$DESTDIR$PREFIX/opt/river-0.5/bin" "$DESTDIR$PREFIX/opt/river-0.5"; do
         [ -d "$d" ] && run rmdir "$d" 2>/dev/null
     done
     say "完了しました。"
@@ -72,37 +105,51 @@ fi
 # ---------------------------------------------------------------------------
 for f in "$OUT/bin/ame-shell" "$OUT/bin/ame-ctl" "$OUT/share/ame-shell/config.ame" "$HERE/ame-session" "$HERE/ame-river-init" "$HERE/ame-river5-init"; do
     if [ ! -f "$f" ]; then
-        echo "ERROR: $f がありません。先に 'zig build -Doptimize=ReleaseFast' を実行してください。" >&2
+        echo "ERROR: $f がありません。先に 'sh install.sh'(または zig build -Doptimize=ReleaseFast)を実行してください。" >&2
         exit 1
     fi
 done
-if [ -z "$DESTDIR" ] && [ "$(id -u)" -ne 0 ] && [ "$DRY" = 0 ]; then
-    echo "ERROR: root で実行してください(例: doas sh $0)。試験なら --destdir を指定。" >&2
-    exit 1
+
+# インストールを頼んだ本人(doas / sudo 経由でも元のユーザー)
+U="${DOAS_USER:-${SUDO_USER:-$(id -un)}}"
+UHOME=$(eval echo "~$U")
+
+# システムの river が 0.4 以降か(FreeBSD の river パッケージなど)。0.4 以降は River 0.3 用の init が動かないので、
+# 内蔵ウィンドウマネージャで動くセッションだけを入れる
+NEW_RIVER=0
+if command -v river >/dev/null 2>&1; then
+    case "$(river -version 2>&1)" in 0.[4-9]*|[1-9]*) NEW_RIVER=1 ;; esac
 fi
 
 # ---- SDDM が読むセッションディレクトリ ----
-# 優先順位: /usr/lib/sddm/sddm.conf.d/* < /etc/sddm.conf.d/* < /etc/sddm.conf。後から読んだ値で上書き。
-SESS_DIRS=""
-for f in /usr/lib/sddm/sddm.conf.d/*.conf /etc/sddm.conf.d/*.conf /etc/sddm.conf; do
-    [ -f "$f" ] || continue
-    v=$(awk -F= '/^\[/{sec=$0} sec=="[Wayland]" && $1=="SessionDir"{print $2}' "$f" | tail -n 1)
-    [ -n "$v" ] && SESS_DIRS="$v"
-done
-[ -n "$SESS_DIRS" ] || SESS_DIRS="/usr/share/wayland-sessions"
+# 優先順位: 既定 < conf.d/* < sddm.conf。後から読んだ値で上書き。FreeBSD は /usr/local/etc 以下
 SESS_DIR=""
-old_ifs=$IFS; IFS=','
-for d in $SESS_DIRS; do
-    [ "$d" = "$PREFIX/share/wayland-sessions" ] && SESS_DIR="$d"
-done
-if [ -z "$SESS_DIR" ]; then
-    for d in $SESS_DIRS; do [ -z "$SESS_DIR" ] && [ "$d" = "/usr/share/wayland-sessions" ] && SESS_DIR="$d"; done
+if [ "$USER_MODE" = 0 ]; then
+    if [ "$OS" = FreeBSD ]; then
+        CONF_FILES="/usr/local/etc/sddm.conf.d/*.conf /usr/local/etc/sddm.conf"
+        SESS_DIRS="/usr/local/share/wayland-sessions"
+    else
+        CONF_FILES="/usr/lib/sddm/sddm.conf.d/*.conf /etc/sddm.conf.d/*.conf /etc/sddm.conf"
+        SESS_DIRS="/usr/share/wayland-sessions"
+    fi
+    for f in $CONF_FILES; do
+        [ -f "$f" ] || continue
+        v=$(awk -F= '/^\[/{sec=$0} sec=="[Wayland]" && $1=="SessionDir"{print $2}' "$f" | tail -n 1)
+        [ -n "$v" ] && SESS_DIRS="$v"
+    done
+    old_ifs=$IFS; IFS=','
+    for d in $SESS_DIRS; do
+        [ "$d" = "$PREFIX/share/wayland-sessions" ] && SESS_DIR="$d"
+    done
+    if [ -z "$SESS_DIR" ]; then
+        for d in $SESS_DIRS; do [ -z "$SESS_DIR" ] && [ "$d" = "/usr/share/wayland-sessions" ] && SESS_DIR="$d"; done
+    fi
+    if [ -z "$SESS_DIR" ]; then for d in $SESS_DIRS; do [ -z "$SESS_DIR" ] && SESS_DIR="$d"; done; fi
+    IFS=$old_ifs
+    say "SDDM の SessionDir: $SESS_DIRS → $SESS_DIR に配置"
 fi
-if [ -z "$SESS_DIR" ]; then for d in $SESS_DIRS; do [ -z "$SESS_DIR" ] && SESS_DIR="$d"; done; fi
-IFS=$old_ifs
-say "SDDM の SessionDir: $SESS_DIRS → $SESS_DIR に配置"
 
-# ---- PAM の置き場所 ----
+# ---- PAM の置き場所(Linux のみ。FreeBSD のロックは setuid の swaylock に任せるので不要) ----
 # Linux-PAM は /etc/pam.d/<svc> → /usr/lib/pam.d/<svc> の順に探す(vendordir 対応版)。
 # /etc/pam.d が無い環境で、libpam が /usr/lib/pam.d を知らない古い版だと /etc/pam.d を作った瞬間に
 # 他のサービスが読めなくなるので、その場合は /usr/lib/pam.d に置く。
@@ -144,7 +191,7 @@ install_file() {
     echo "$dst" >> "$TMP_MANIFEST"
 }
 
-say "インストール先: ${DESTDIR}${PREFIX}"
+say "インストール先: ${DESTDIR}${PREFIX}($( [ "$USER_MODE" = 1 ] && echo "自分用" || echo "全ユーザー用"))"
 install_file "$OUT/bin/ame-shell" "$PREFIX/bin/ame-shell" 755
 install_file "$OUT/bin/ame-ctl" "$PREFIX/bin/ame-ctl" 755
 install_file "$HERE/ame-session" "$PREFIX/bin/ame-session" 755
@@ -157,32 +204,57 @@ for w in "$OUT"/share/ame-shell/widgets/*.wasm; do
     install_file "$w" "$PREFIX/share/ame-shell/widgets/$(basename "$w")" 644
 done
 
-# .desktop: @PREFIX@ を実際のパスに置換(sed -i は使わない: BSD/GNU で書式が違うため)
-for d in ame-shell ame-shell-safe ame-shell-river5; do
-    tmp=$(mktemp "${TMPDIR:-/tmp}/ame-desktop.XXXXXX") || exit 1
-    sed "s|@PREFIX@|$PREFIX|g" "$HERE/$d.desktop" > "$tmp"
-    install_file "$tmp" "$SESS_DIR/$d.desktop" 644
-    rm -f "$tmp"
-done
-
-# PAM(ロック画面用)
-if [ -n "$PAM_SRC" ] || [ -n "$LOGIN_SRC" ]; then
-    tmp=$(mktemp "${TMPDIR:-/tmp}/ame-pam.XXXXXX") || exit 1
-    {
-        echo "# ame-shell のロック画面用(install-session.sh が作成)"
-        if [ -n "$PAM_SRC" ]; then
-            echo "# $PAM_SRC と同じ内容"
-            grep -v '^#' "$PAM_SRC" | grep -v '^[[:space:]]*$'
-        else
-            echo "# $LOGIN_SRC の auth/account を流用"
-            echo "auth include login"
-            echo "account include login"
+# River 0.5 を自分でビルドしている場合(~/.local/opt/river-0.5)、全ユーザーが使えるよう $PREFIX/opt へ
+if [ "$USER_MODE" = 0 ] && [ "$NEW_RIVER" = 0 ]; then
+    for r in "${AME_RIVER5:-}" "$UHOME/.local/opt/river-0.5/bin/river"; do
+        if [ -n "$r" ] && [ -x "$r" ]; then
+            install_file "$r" "$PREFIX/opt/river-0.5/bin/river" 755
+            break
         fi
-    } > "$tmp"
-    install_file "$tmp" "$PAM_DIR/ame-shell" 644
-    rm -f "$tmp"
-else
-    warn "swaylock も login の PAM 設定も見つからないため PAM サービス ame-shell を作りません(ロック画面は無効になります)"
+    done
+fi
+
+# .desktop: @PREFIX@ を実際のパスに置換(sed -i は使わない: BSD/GNU で書式が違うため)。
+# SDDM はホームの下を読まないので、自分用インストールでは作らない
+if [ "$USER_MODE" = 0 ]; then
+    if [ "$NEW_RIVER" = 1 ]; then
+        # River 0.4 以降しか無い: 内蔵 WM のセッションだけを「Ame Shell」として入れる
+        DESKTOPS="ame-shell-river5"
+    else
+        DESKTOPS="ame-shell ame-shell-safe ame-shell-river5"
+    fi
+    for d in $DESKTOPS; do
+        tmp=$(mktemp "${TMPDIR:-/tmp}/ame-desktop.XXXXXX") || exit 1
+        if [ "$NEW_RIVER" = 1 ]; then
+            sed -e "s|@PREFIX@|$PREFIX|g" -e 's|^Name=.*|Name=Ame Shell|' -e 's|^Name\[ja\]=.*|Name[ja]=Ame Shell(雨)|' "$HERE/$d.desktop" > "$tmp"
+        else
+            sed "s|@PREFIX@|$PREFIX|g" "$HERE/$d.desktop" > "$tmp"
+        fi
+        install_file "$tmp" "$SESS_DIR/$d.desktop" 644
+        rm -f "$tmp"
+    done
+fi
+
+# PAM(ロック画面用。Linux の全ユーザー用インストールのみ)
+if [ "$USER_MODE" = 0 ] && [ "$OS" != FreeBSD ]; then
+    if [ -n "$PAM_SRC" ] || [ -n "$LOGIN_SRC" ]; then
+        tmp=$(mktemp "${TMPDIR:-/tmp}/ame-pam.XXXXXX") || exit 1
+        {
+            echo "# ame-shell のロック画面用(install-session.sh が作成)"
+            if [ -n "$PAM_SRC" ]; then
+                echo "# $PAM_SRC と同じ内容"
+                grep -v '^#' "$PAM_SRC" | grep -v '^[[:space:]]*$'
+            else
+                echo "# $LOGIN_SRC の auth/account を流用"
+                echo "auth include login"
+                echo "account include login"
+            fi
+        } > "$tmp"
+        install_file "$tmp" "$PAM_DIR/ame-shell" 644
+        rm -f "$tmp"
+    else
+        warn "swaylock も login の PAM 設定も見つからないため PAM サービス ame-shell を作りません(ロック画面は無効になります)"
+    fi
 fi
 
 # 記録(前回分とマージして重複を除く)
@@ -198,21 +270,26 @@ fi
 # ---------------------------------------------------------------------------
 say ""
 say "== 前提チェック =="
-U="${DOAS_USER:-${SUDO_USER:-$(id -un)}}"
+if [ "$OS" = FreeBSD ]; then PKG="pkg install"; else PKG="apk add"; fi
 chk() { if command -v "$1" >/dev/null 2>&1; then say "  [ok] $1"; else warn "$1 がありません ($2)"; fi; }
-chk river "doas apk add river"
-chk sddm "doas apk add sddm"
-chk foot "doas apk add foot"
-chk rivertile "river に同梱"
-if [ -x "$(eval echo ~$U)/.local/opt/river-0.5/bin/river" ]; then say "  [ok] River 0.5 (~/.local/opt/river-0.5)"; else warn "River 0.5 が ~/.local/opt/river-0.5 にありません(「Ame Shell (River 0.5)」は River 0.3 で起動します)"; fi
-chk dbus-run-session "doas apk add dbus"
-chk wpctl "音量表示に必要: doas apk add wireplumber"
-chk playerctl "メディア表示に必要: doas apk add playerctl"
-if ! command -v dinitctl >/dev/null 2>&1; then
-    say "  (dinit が無いためサービス確認を省略)"
-elif [ "$(id -u)" -ne 0 ]; then
-    say "  (root でないため dinit のシステムサービスは確認できません。root で実行すると確認します)"
+chk river "$PKG river"
+[ "$USER_MODE" = 0 ] && chk sddm "$PKG sddm"
+chk foot "$PKG foot"
+chk dbus-run-session "$PKG dbus"
+chk playerctl "メディア表示に必要: $PKG playerctl"
+if [ "$NEW_RIVER" = 1 ]; then
+    say "  [ok] river $(river -version 2>&1)(ame-shell がウィンドウマネージャを兼ねます)"
+elif [ -x "$UHOME/.local/opt/river-0.5/bin/river" ] || [ -x "$DESTDIR$PREFIX/opt/river-0.5/bin/river" ]; then
+    say "  [ok] River 0.5(ウィンドウアニメーションつきのセッションが使えます)"
 else
+    say "  (River 0.5 が無いため「Ame Shell (River 0.5)」は River 0.3 で起動します)"
+fi
+if [ "$OS" = FreeBSD ]; then
+    for svc in dbus seatd sddm; do
+        if [ "$(sysrc -n "${svc}_enable" 2>/dev/null)" = YES ]; then say "  [ok] ${svc}_enable=YES"; else warn "${svc} が有効になっていません(例: sysrc ${svc}_enable=YES)"; fi
+    done
+    chk swaylock "ロックに必要: pkg install swaylock"
+elif command -v dinitctl >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
     for svc in sddm dbus; do
         if dinitctl --system status "$svc" 2>/dev/null | grep -q STARTED; then
             say "  [ok] dinit: $svc は起動中"
@@ -232,16 +309,22 @@ else
         warn "elogind も seatd も起動していません(例: doas dinitctl enable elogind)"
     fi
 fi
-if grep -qs pam_turnstile /etc/pam.d/system-login /usr/lib/pam.d/system-login; then
-    say "  [ok] PAM に pam_turnstile があります(XDG_RUNTIME_DIR が用意されます)"
-else
-    warn "PAM に pam_turnstile が見当たりません(XDG_RUNTIME_DIR は ame-session が代替を作ります)"
-fi
 for g in video input; do
-    if id -Gn "$U" 2>/dev/null | tr ' ' '\n' | grep -qx "$g"; then say "  [ok] $U は $g グループ所属"; else warn "$U は $g グループに未所属(明るさ変更などに必要な場合あり)"; fi
+    if id -Gn "$U" 2>/dev/null | tr ' ' '\n' | grep -qx "$g"; then say "  [ok] $U は $g グループ所属"; else warn "$U は $g グループに未所属(明るさ変更・Super 単独のランチャーに必要な場合あり)"; fi
 done
 
 say ""
-say "インストール完了(警告 $WARN 件)。SDDM で \"Ame Shell (Safe Mode)\" → \"Ame Shell\" の順に試してください。"
-say "元に戻す: doas sh $0 --uninstall --prefix $PREFIX"
+if [ "$USER_MODE" = 1 ]; then
+    say "インストール完了(自分用、警告 $WARN 件)。"
+    say "  起動: TTY でログインして  $PREFIX/bin/ame-session --river5"
+    say "  (SDDM の一覧に出すには、全ユーザー用のインストールが必要です: sh $0)"
+    say "元に戻す: sh $0 --uninstall --user"
+else
+    if [ "$NEW_RIVER" = 1 ]; then
+        say "インストール完了(警告 $WARN 件)。SDDM で \"Ame Shell\" を選んでください。"
+    else
+        say "インストール完了(警告 $WARN 件)。SDDM で \"Ame Shell (Safe Mode)\" → \"Ame Shell\" の順に試してください。"
+    fi
+    say "元に戻す: sh $0 --uninstall"
+fi
 exit 0

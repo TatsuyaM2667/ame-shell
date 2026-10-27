@@ -99,3 +99,10 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - メディアのジャケット(レコードのラベル)の回転を 1 周 6 秒 → 24 秒に。レコードの溝は同心円なので回転が目に入るのはジャケットだけだった。
 - 同期歌詞の行をクリックするとその時間へシーク(playerctl position)。カーソルが乗った行に帯と時刻を表示。
 - アクセントの候補から赤(コーラル)を外した(エラーの赤と紛らわしい。赤いジャケットではピンクか琥珀に)。
+
+## 2026-10-27(追記 7)インストーラと FreeBSD
+- `install.sh`: 依存パッケージ(apk は自動)・Zig 0.13(公式配布物を ~/.cache へ)・Odin(無ければ dev-2026-08 をソースから)・River(無ければ 0.5 をソースから)・ビルド・インストールを全自動。全ユーザー用は doas / sudo で自動昇格、無ければ `--user`(~/.local)。
+- `session/install-session.sh`: `--user` モード、自動昇格、FreeBSD のパス(/usr/local/etc の sddm.conf、/usr/local/share/wayland-sessions)、River 0.4 以降しか無ければ内蔵 WM のセッションだけを「Ame Shell」として入れる、自分でビルドした River 0.5 を /usr/local/opt にコピー(全ユーザーが使える)。
+- `scripts/install-freebsd.sh`: pkg・GPU ドライバ(pciconf で判別)・dbus/seatd/sddm・video グループ・入力デバイスの devfs 規則・Zig 0.13 と Odin のソースビルド(LLVM 18)・ビルドとインストールを全自動。
+- FreeBSD 対応のコード: platform/bsd.zig、statvfs の並び、EVIOCGBIT の ioctl 番号(FreeBSD は IOC_OUT = 1<<30)、ioctl の request の型、ロックは swaylock(pam_unix が root 必須のため)、nmcli / bluetoothctl / pactl が無いときはパネルに表示。
+- 検証: FreeBSD 14.5 の base.txz と pkg のパッケージ(wayland・mesa・libglvnd・xkbcommon・freetype・harfbuzz・fontconfig・dbus・libepoll-shim・libinotify と依存)で sysroot を作り、x86_64-freebsd 向けにビルド・リンクが通ることを確認(ELF FreeBSD 14.5、必要なライブラリは libepoll-shim / libinotify を含めて解決)。FreeBSD の実機での実行は未確認。

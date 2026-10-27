@@ -347,6 +347,10 @@ fn restartAppear(st: *State) void {
 }
 
 pub fn refreshWifi(st: *State, rescan: bool) void {
+    if (!sys.hasCommand("nmcli")) {
+        setStatus(st, "Wi-Fi の設定には NetworkManager(nmcli)が必要です", false);
+        return;
+    }
     push(st, makeJob(.wifi_radio, &.{ "nmcli", "radio", "wifi" }, ""));
     push(st, makeJob(.wifi_saved, &.{ "nmcli", "-t", "-f", "NAME,TYPE", "connection", "show" }, ""));
     push(st, makeJob(.wifi_list, &.{ "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", if (rescan) "yes" else "auto" }, ""));
@@ -354,6 +358,10 @@ pub fn refreshWifi(st: *State, rescan: bool) void {
 }
 
 pub fn refreshBt(st: *State) void {
+    if (!sys.hasCommand("bluetoothctl")) {
+        setStatus(st, "Bluetooth の設定には BlueZ(bluetoothctl)が必要です", false);
+        return;
+    }
     push(st, makeJob(.bt_show, &.{ "bluetoothctl", "show" }, ""));
     push(st, makeJob(.bt_all, &.{ "bluetoothctl", "devices" }, ""));
     push(st, makeJob(.bt_paired, &.{ "bluetoothctl", "devices", "Paired" }, ""));

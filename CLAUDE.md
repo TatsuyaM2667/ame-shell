@@ -26,3 +26,9 @@ WAYLAND_DISPLAY=wayland-N grim shot.png; WAYLAND_DISPLAY=wayland-N zig-out/bin/a
 
 ## セッション
 `session/`: ame-session / ame-river-init / *.desktop / install-session.sh。River 0.5 用は `ame-session --river5` + `ame-river5-init`(ame-shell が WM を兼ねる、`src/wm/`)。River 0.5 は "riverctl" の文字列を含む init を拒否する。キー操作の試験は `zig build tools` の vkbd。検証は `sh -n`、`--destdir` で疑似 root、`AME_SESSION_NESTED=1`。全部合格したときだけ `session/.ready`。
+
+## FreeBSD
+`src/platform/bsd.zig`(sysctl / kenv / ifconfig / mixer / backlight)を sys.zig・data.zig が `builtin.os.tag == .freebsd` のときだけ使う。epoll / timerfd は libepoll-shim、inotify は libinotify(build.zig が FreeBSD のとき /usr/local から)。
+試しビルド(実行はできない): FreeBSD の base.txz と pkg のパッケージを展開した sysroot を作り、
+`zig build -Dtarget=x86_64-freebsd --sysroot <root> --libc <libc.txt> --prefix <別の出力先>`(zig-out を上書きしないよう必ず --prefix)。
+インストーラ: `install.sh`(Linux、FreeBSD なら scripts/install-freebsd.sh へ)。FreeBSD の river パッケージは 0.4 以降なので内蔵 WM のセッションのみ。

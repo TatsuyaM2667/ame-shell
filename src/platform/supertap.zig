@@ -26,7 +26,9 @@ const InputEvent = extern struct { sec: i64, usec: i64, type: u16, code: u16, va
 
 /// EVIOCGBIT(EV_KEY, len) = _IOC(_IOC_READ, 'E', 0x20 + EV_KEY, len)
 fn eviocgbitKey(len: u32) u32 {
-    return (2 << 30) | (len << 16) | ('E' << 8) | (0x20 + 1);
+    // EVIOCGBIT(EV_KEY, len)。ioctl 番号の作り方は OS で違う(Linux の _IOC_READ は 2<<30、FreeBSD の IOC_OUT は 1<<30)
+    const dir: u32 = if (@import("builtin").os.tag == .freebsd) 1 << 30 else 2 << 30;
+    return dir | ((len & 0x1fff) << 16) | ('E' << 8) | (0x20 + 1);
 }
 
 pub const SuperTap = struct {
@@ -73,8 +75,10 @@ pub const SuperTap = struct {
             if (fd < 0) continue;
             opened += 1;
             var bits: [96]u8 = [_]u8{0} ** 96;
-            // musl の ioctl は request が int なので、ビット列としてそのまま渡す
-            const ok = c.ioctl(fd, @as(c_int, @bitCast(eviocgbitKey(bits.len))), &bits) >= 0;
+            // ioctl の request の型は libc で違う(musl は int、FreeBSD は unsigned long)ので、その型へビット列のまま変換する
+            const Req = @typeInfo(@TypeOf(c.ioctl)).Fn.params[1].type.?;
+            const req: Req = if (@typeInfo(Req).Int.signedness == .signed) @bitCast(eviocgbitKey(bits.len)) else eviocgbitKey(bits.len);
+            const ok = c.ioctl(fd, req, &bits) >= 0;
             // キーボード(A と Super を持つ)とマウス(左ボタンを持つ)だけを見る
             const keyboard = ok and hasBit(&bits, KEY_A) and hasBit(&bits, KEY_LEFTMETA);
             const mouse = ok and hasBit(&bits, BTN_LEFT);

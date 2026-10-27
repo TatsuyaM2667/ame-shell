@@ -48,6 +48,8 @@ pub const Audio = struct {
     new_sinks: List = .{},
     new_sources: List = .{},
     fresh: bool = false,
+    /// pactl(pipewire-pulse)が無い環境では一覧を出せない
+    unavailable: bool = false,
     busy: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     pipe_r: c_int,
     pipe_w: c_int,
@@ -67,6 +69,8 @@ pub const Audio = struct {
 
     /// 一覧を読み直す(表示する直前に呼ぶ)
     pub fn refresh(self: *Audio) void {
+        self.unavailable = !sys.hasCommand("pactl");
+        if (self.unavailable) return;
         self.start(false);
     }
 

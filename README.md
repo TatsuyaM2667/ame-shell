@@ -51,32 +51,58 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
 - WASM ウィジェット(保存すると状態を保ったままホットリロード)
 - `ame-ctl` でシェルを操作(キーバインドやスクリプトから)
 
-## ビルド
+## インストール
 
-必要: Zig 0.13、Odin、wayland-scanner、wayland / EGL / GLESv2 / xkbcommon / freetype / harfbuzz / fontconfig / dbus の開発ファイル(詳細は `docs/deps.md`)。
+```sh
+git clone https://github.com/TatsuyaM2667/ame-shell && cd ame-shell
+sh install.sh            # 全ユーザー用(/usr/local + SDDM のセッション)。root 権限は doas / sudo で自動的に
+sh install.sh --user     # 自分だけ(~/.local)。root 不要。SDDM には出ないので TTY から ame-session --river5 で起動
+sh install.sh --uninstall [--user]
+```
+
+`install.sh` が依存パッケージ(Chimera / Alpine は自動。他のディストリは足りないものを表示)、Zig 0.13、Odin、River(無ければ River 0.5 をソースから)、ame-shell のビルドとインストールまで行います。
+どのユーザーが実行しても構いません。doas / sudo が使えない人は自動で `--user` になります。全ユーザー用では、自分でビルドした River 0.5(`~/.local/opt/river-0.5`)も `/usr/local/opt` にコピーされ、他のアカウントからも River 0.5 のセッションが使えます。
+
+### FreeBSD(14 / 15、amd64)
+
+```sh
+pkg install -y git && git clone https://github.com/TatsuyaM2667/ame-shell && cd ame-shell
+sh install.sh            # = sh scripts/install-freebsd.sh(完全自動)
+```
+
+パッケージ(River・SDDM・Xorg・Wayland・フォント・日本語入力)、GPU ドライバ(amdgpu / i915kms / nvidia-drm を自動判別)、dbus / seatd / sddm の有効化、video グループ、
+Zig 0.13 と Odin のソースからのビルド(FreeBSD 向けの配布物が無いため、30 分〜1 時間ほど)、ame-shell のビルドとインストールまで行います。終わったら再起動すると SDDM に「Ame Shell」が出ます。
+オプション: `--no-gpu`・`--no-ja`・`--no-super-tap`・`--jobs N`・`--yes`(`sh scripts/install-freebsd.sh --help`)。
+
+FreeBSD での違い:
+- FreeBSD の `river` パッケージは 0.4 以降なので、ame-shell がウィンドウマネージャを兼ねるセッション(ウィンドウアニメーションつき)だけになります
+- 電池・CPU・メモリ・温度は sysctl、音量は PipeWire が無ければ `mixer(8)`、明るさは `backlight(8)`、機種名は SMBIOS(kenv)から
+- ロックは setuid で入る `swaylock` を使います(FreeBSD の pam_unix は root でないとパスワードを照合できないため)
+- Wi-Fi / Bluetooth の設定パネルは NetworkManager / BlueZ が無いので使えません(パネルにその旨を表示)
+
+### 手動でビルドする
+
+必要: Zig 0.13、Odin、wayland-scanner、wayland / EGL / GLESv2 / xkbcommon / freetype / harfbuzz / fontconfig / dbus の開発ファイル(FreeBSD は加えて libepoll-shim・libinotify)。
 実行時に使うもの: `playerctl`・`wpctl` / `pactl`(PipeWire)・`nmcli`・`bluetoothctl`・`curl`・`cava`(任意)・`libmpv`(動画壁紙、任意)・`ffmpeg`(動画のサムネイル、任意)。
 
 ```sh
 zig build -Doptimize=ReleaseFast     # zig-out/bin/{ame-shell,ame-ctl}, zig-out/share/ame-shell/
 zig build test
+sh session/install-session.sh        # インストールだけ(--user / --dry-run / --destdir DIR も可)
+# Linux から FreeBSD 向けに試しビルド: zig build -Dtarget=x86_64-freebsd --sysroot <FreeBSD の root> --libc <libc.txt>
 ```
 
-## インストール(SDDM セッション)
+### セッション
 
-```sh
-zig build -Doptimize=ReleaseFast
-doas sh session/install-session.sh --prefix /usr/local     # --dry-run で内容確認だけもできる
-```
-
-SDDM に 3 つのセッションが追加されます:
+SDDM に 3 つのセッションが追加されます(River 0.4 以降しか無いシステムでは「Ame Shell」1 つ):
 
 | セッション | 内容 |
 |---|---|
-| **Ame Shell (River 0.5)** | ame-shell がウィンドウマネージャを兼ねる。ウィンドウアニメーションあり。River 0.5 が必要(`~/.local/opt/river-0.5` か PATH)|
+| **Ame Shell (River 0.5)** | ame-shell がウィンドウマネージャを兼ねる。ウィンドウアニメーションあり。River 0.5(`/usr/local/opt/river-0.5`・`~/.local/opt/river-0.5`・PATH の River 0.4 以降)|
 | **Ame Shell** | River 0.3 + ame-shell |
 | **Ame Shell (Safe Mode)** | River 0.3 + foot だけ(問題が起きたときの脱出口)|
 
-入るものは `/usr/local/share/ame-shell/installed-files` に記録され、元に戻すのは `doas sh session/install-session.sh --uninstall --prefix /usr/local`。
+入るものは `/usr/local/share/ame-shell/installed-files`(自分用は `~/.local/share/ame-shell/installed-files`)に記録され、`sh install.sh --uninstall` で元に戻せます。
 ログは `~/.local/state/ame-shell/session.log`。起動直後に 3 回続けて落ちると、次回は自動でセーフモードになります。
 
 インストールせずに試す(今のセッションの中にウィンドウとして開く):

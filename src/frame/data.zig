@@ -8,6 +8,8 @@ const c = @import("../c.zig");
 const sys = @import("../platform/sys.zig");
 const loop = @import("../platform/loop.zig");
 const App = @import("../app.zig").App;
+const is_bsd = @import("builtin").os.tag == .freebsd;
+const bsd = @import("../platform/bsd.zig");
 
 fn readHwmon(name: []const u8, file: []const u8) ?f32 {
     var i: usize = 0;
@@ -53,15 +55,24 @@ pub const Perf = struct {
         self.gpu_temp = readHwmon("amdgpu", "temp1_input");
         // CPU: AMD は k10temp、Intel は coretemp。無ければ thermal_zone の最大値
         self.cpu_temp = readHwmon("k10temp", "temp1_input") orelse readHwmon("coretemp", "temp1_input") orelse sys.cpuTemp();
-        // musl の struct statvfs は translate-c で不透明型になるので、先頭 5 項目(64bit では
-        // glibc・musl とも bsize, frsize, blocks, bfree, bavail の u64)だけを読む。
+        // musl の struct statvfs は translate-c で不透明型になるので、u64 の並びとして読む。
+        // 64bit の並び: Linux(glibc・musl)は bsize, frsize, blocks, bfree, bavail …、
+        // FreeBSD は bavail, bfree, blocks, favail, ffree, files, bsize, flag, frsize …
+        const I = if (is_bsd) .{ .frsize = 8, .blocks = 2, .bavail = 0 } else .{ .frsize = 1, .blocks = 2, .bavail = 4 };
         var vfs: [32]u64 = undefined;
         if (statvfs_raw("/", &vfs) == 0) {
-            const bs: f64 = @floatFromInt(vfs[1]);
-            const total = @as(f64, @floatFromInt(vfs[2])) * bs;
-            const avail = @as(f64, @floatFromInt(vfs[4])) * bs;
+            const bs: f64 = @floatFromInt(vfs[I.frsize]);
+            const total = @as(f64, @floatFromInt(vfs[I.blocks])) * bs;
+            const avail = @as(f64, @floatFromInt(vfs[I.bavail])) * bs;
             self.disk_total = @floatCast(total / (1 << 30));
             self.disk_used = @floatCast((total - avail) / (1 << 30));
+        }
+        if (is_bsd) {
+            if (bsd.memory()) |m| {
+                self.mem_total = @floatCast(m.total / (1 << 30));
+                self.mem_used = @floatCast(m.used / (1 << 30));
+            }
+            return;
         }
         var mb: [2048]u8 = undefined;
         if (sys.readFile("/proc/meminfo", &mb)) |s| {
@@ -82,10 +93,12 @@ pub const Perf = struct {
 };
 
 pub fn uptime(buf: []u8) []const u8 {
-    var b: [64]u8 = undefined;
-    const s = sys.readFile("/proc/uptime", &b) orelse return "";
-    var it = std.mem.tokenizeScalar(u8, s, ' ');
-    const secs: u64 = @intFromFloat(std.fmt.parseFloat(f64, it.next() orelse "0") catch 0);
+    const secs: u64 = if (is_bsd) bsd.uptimeSecs() orelse return "" else blk: {
+        var b: [64]u8 = undefined;
+        const s = sys.readFile("/proc/uptime", &b) orelse return "";
+        var it = std.mem.tokenizeScalar(u8, s, ' ');
+        break :blk @intFromFloat(std.fmt.parseFloat(f64, it.next() orelse "0") catch 0);
+    };
     const h = secs / 3600;
     const m = (secs % 3600) / 60;
     if (h > 0) return std.fmt.bufPrint(buf, "起動から {d}時間{d}分", .{ h, m }) catch "";
@@ -94,7 +107,8 @@ pub fn uptime(buf: []u8) []const u8 {
 
 pub fn osName(buf: []u8) []const u8 {
     var b: [1024]u8 = undefined;
-    const s = sys.readFile("/etc/os-release", &b) orelse return "Linux";
+    const fallback = if (is_bsd) "FreeBSD" else "Linux";
+    const s = sys.readFile("/etc/os-release", &b) orelse return fallback;
     var lines = std.mem.splitScalar(u8, s, '\n');
     while (lines.next()) |l| {
         if (std.mem.startsWith(u8, l, "PRETTY_NAME=")) {
@@ -104,7 +118,7 @@ pub fn osName(buf: []u8) []const u8 {
             return buf[0..n];
         }
     }
-    return "Linux";
+    return fallback;
 }
 
 // ---------------------------------------------------------------------------
@@ -351,7 +365,24 @@ pub const HwInfo = struct {
     pub fn load(self: *HwInfo, gl_renderer: []const u8) void {
         // CPU: /proc/cpuinfo の model name("… with Radeon Graphics" の飾りは除く)
         var b: [8192]u8 = undefined;
-        if (sys.readFile("/proc/cpuinfo", &b)) |s| {
+        if (is_bsd) {
+            // FreeBSD: CPU は hw.model、機種はローダが DMI から入れる smbios.* (kenv)
+            if (bsd.str("hw.model", &b)) |v0| {
+                var v = v0;
+                if (std.mem.indexOf(u8, v, " with ")) |i| v = v[0..i];
+                put(&self.cpu, &self.cpu_len, v);
+            }
+            var vb: [96]u8 = undefined;
+            var pb: [96]u8 = undefined;
+            const vendor = bsd.kenvGet("smbios.system.maker", &vb) orelse "";
+            var product = bsd.kenvGet("smbios.system.version", &pb) orelse "";
+            if (product.len == 0 or std.mem.indexOf(u8, product, "Default") != null or std.mem.eql(u8, product, "None")) {
+                product = bsd.kenvGet("smbios.system.product", &pb) orelse "";
+            }
+            var mb: [192]u8 = undefined;
+            put(&self.model, &self.model_len, std.fmt.bufPrint(&mb, "{s} {s}", .{ vendor, product }) catch product);
+        }
+        if (!is_bsd) if (sys.readFile("/proc/cpuinfo", &b)) |s| {
             var lines = std.mem.splitScalar(u8, s, '\n');
             while (lines.next()) |l| {
                 if (self.cpu_len == 0 and std.mem.startsWith(u8, l, "model name")) {
@@ -362,7 +393,7 @@ pub const HwInfo = struct {
                     put(&self.cpu, &self.cpu_len, v);
                 }
             }
-        }
+        };
         // /proc/cpuinfo は全スレッド分あって大きいので、論理 CPU 数は OS に聞く
         self.cores = @intCast(std.Thread.getCpuCount() catch 0);
         var g = gl_renderer;
@@ -377,7 +408,7 @@ pub const HwInfo = struct {
             product = sys.readFile("/sys/class/dmi/id/product_name", &pb) orelse "";
         }
         var mb: [192]u8 = undefined;
-        put(&self.model, &self.model_len, std.fmt.bufPrint(&mb, "{s} {s}", .{ vendor, product }) catch product);
+        if (!is_bsd) put(&self.model, &self.model_len, std.fmt.bufPrint(&mb, "{s} {s}", .{ vendor, product }) catch product);
         // ディスク: 最初の nvme / sd の型番
         for ([_][:0]const u8{ "/sys/block/nvme0n1/device/model", "/sys/block/sda/device/model", "/sys/block/vda/device/model" }) |p| {
             var db: [96]u8 = undefined;

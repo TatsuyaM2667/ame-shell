@@ -363,7 +363,7 @@ fn drawDevList(f: *Frame, cv: *gfx.Canvas, w: f32, y0: f32, kind: audio.Kind) f3
     _ = cv.text(18, y0 + 14, 12, acc, if (kind == .sink) "出力先" else "入力先", .{ .bold = true });
     var y = y0 + 22;
     if (l.n == 0) {
-        _ = cv.text(30, y + 20, 12.5, sub, "読み込み中…", .{});
+        _ = cv.text(30, y + 20, 12.5, sub, if (app.audio.unavailable) "pactl(pipewire-pulse)がありません" else "読み込み中…", .{});
         return y + ROW_A;
     }
     for (0..l.n) |i| {

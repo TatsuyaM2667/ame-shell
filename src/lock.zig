@@ -113,6 +113,17 @@ pub const Lock = struct {
 
     pub fn lock(self: *Lock) []const u8 {
         if (self.locked) return "ok (already locked)";
+        // FreeBSD の pam_unix は root でないとパスワードを照合できない(Linux の unix_chkpwd に当たる補助が無い)。
+        // FreeBSD の swaylock パッケージは setuid で入るので、ロックはそれに任せる
+        if (@import("builtin").os.tag == .freebsd) {
+            if (!@import("platform/sys.zig").hasCommand("swaylock")) {
+                const why = "FreeBSD ではロックに swaylock が必要です(pkg install swaylock)";
+                self.app.osd.info(why);
+                return "error: swaylock not found";
+            }
+            @import("platform/sys.zig").spawnDetached("swaylock -f -c 0b1020");
+            return "ok (swaylock)";
+        }
         if (self.preflight()) |why| {
             std.log.warn("lock: {s}", .{why});
             self.app.osd.info(why);
