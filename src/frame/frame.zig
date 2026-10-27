@@ -278,6 +278,20 @@ pub const Frame = struct {
         if (self.dash.open and self.app.launcher.is_open) self.app.launcher.close();
         self.afterOpenChange();
     }
+    /// ダッシュボードを指定のタブで開く(ame-ctl dashboard media など)
+    pub fn openDashTab(self: *Frame, tab: usize) void {
+        if (self.dashv.tab != tab) {
+            self.dashv.tab = tab;
+            self.dashv.fade.snap(0);
+            self.dashv.fade.set(1);
+            if (tab == 2) self.perf.sample();
+        }
+        if (!self.dash.open) {
+            self.dash.show(true);
+            if (self.app.launcher.is_open) self.app.launcher.close();
+        }
+        self.afterOpenChange();
+    }
     pub fn toggleSession(self: *Frame) void {
         self.session.toggle();
         self.sidev.confirm = null;

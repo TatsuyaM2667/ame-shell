@@ -1,51 +1,64 @@
 # ame-shell(雨)
 
-River(Wayland コンポジタ)の上で動く、アニメーション重視のガラス調デスクトップシェル。
-Quickshell / QML / Qt / Python / C++ を使わず、**Zig・Odin・C・WebAssembly** だけで書いています。
-Chimera Linux(musl + dinit)向け。SDDM から選んでログインできるセッションつき。
+[River](https://isaacfreund.com/software/river/)(Wayland コンポジタ)の上で動く、アニメーション重視のガラス調デスクトップシェル。
+caelestia-shell・end-4・ilyamiro の雰囲気を目指しつつ、Quickshell / QML / Qt / Python / C++ を使わず **Zig・Odin・C・WebAssembly** だけで書いています。
+Chimera Linux(musl + dinit)向け。SDDM から選べるセッションつき。
+
+![ame-shell](docs/screenshots/hero.png)
 
 | | |
 |---|---|
-| ![ランチャーと通知](docs/screenshots/launcher-notify.png) | ![ダッシュボード](docs/screenshots/dashboard.png) |
-| ![ロック画面](docs/screenshots/lock.png) | ![液体のように伸びるタグ表示](docs/screenshots/liquid-tags.png) |
+| ![ダッシュボード](docs/screenshots/dashboard.png) | ![メディアと同期歌詞](docs/screenshots/media.png) |
+| ![パフォーマンス](docs/screenshots/performance.png) | ![ワークスペースとアプリ](docs/screenshots/workspaces.png) |
+| ![ランチャー](docs/screenshots/launcher.png) | ![壁紙ピッカー](docs/screenshots/wallpaper-picker.png) |
+| ![壁紙から作る配色](docs/screenshots/theme-from-wallpaper.png) | ![ロック画面](docs/screenshots/lock.png) |
 
-## 何が入っているか
+## 特徴
 
-**レイアウトは 2 種類**(`shell { layout caelestia | classic }`、既定は caelestia):
-- **caelestia**: 画面のふちを細い枠が囲み、左に縦バー。枠の縁にマウスを乗せると、そこからドロワーが「ニョキッ」と生えてくる(枠とドロワーは 1 つの SDF で smooth-min 融合しているので、付け根に丸みのある首ができる)。
-  - 上の縁(中央): ダッシュボード(ダッシュボード / メディア(cava のスペクトラム)/ パフォーマンス / ワークスペース のタブ)
-  - 下の縁: ランチャー(Super+D、または下の縁から上へドラッグ)。`>` でアクション、`>壁紙` で壁紙ピッカー
-  - 右上: 通知 / 右の縁(中央): 音量・明るさの縦スライダー(OSD)/ 右下の角: ユーティリティ(Wi-Fi・Bluetooth・通知停止・スリープ防止・録画・スクショ・電源プロファイル)
-  - 右: セッション(Super+Escape / 電源ボタン / 右の縁を左へドラッグ)、サイドバー=通知センター(Super+N / 右の縁を大きく左へドラッグ)
-  - 縦バーの項目(時計・音量・ネット・Bluetooth・電池・ウィンドウ名)に乗せると、右へポップアウトが生える
-- **classic**: 画面上部に浮かぶ横バーと、独立したパネル群(以下の説明)。
+### 画面のふちから生えるドロワー(caelestia 風)
+画面を細い枠が囲み、左に縦バー。枠の縁にカーソルを乗せると、そこからドロワーが「ニョキッ」と生えてきます(枠とドロワーは 1 つの SDF シェーダで smooth-min 融合しているので、付け根に丸みのある首ができる)。
 
-- **バー**: River のタグ 1〜9。選択インジケータは 2 本のスプリングで両端を動かし、移動中は液体のように伸びる。ウィンドウタイトルのクロスフェード、ネット/音量/バッテリー/時計。クリック・ホイールで操作。
-- **ライブ壁紙**: シェーダで描くオーロラ / 雨(街のボケ + 雨筋 + 水たまりの波紋)/ 画像。切り替えは中心から広がる波紋のトランジション。バッテリー時は自動で FPS と解像度を下げる。
-- **ガラス**: 壁紙を dual Kawase でぼかし、パネルは真後ろをサンプル。縁で屈折・色収差・ハイライト、微細なノイズとスパークル。
-- **ランチャー**(Super+D): .desktop を Odin 製ファジーマッチで検索、結果は連鎖スプリングで順に出現。`>` で始めるとコマンド実行。よく使うアプリが上に来る。
-- **通知**: `org.freedesktop.Notifications` を内蔵(他のデーモンが動いていれば譲る)。右上にカードが積まれ、ホバー中は消えない。
-- **ダッシュボード**(Super+A / 時計クリック): **WASM ウィジェット**(時計・メディア・音量/明るさ/Wi-Fi/Bluetooth/通知停止・CPU/メモリ/温度・カレンダー)+ 通知センター。ウィジェットは保存すると状態を保ったままホットリロード。
-- **メディア**: MPRIS。アルバムアートから Odin で主色を抽出し、テーマのアクセント色がその色へなめらかに変わる。
-- **OSD**: 音量・明るさ。
-- **ロック画面**(Super+L): ext-session-lock-v1 + PAM。認証できない構成ではロックしない(閉じ込め防止)。
-- **ame-ctl**: Unix ソケットでシェルを操作する CLI。
+- **上: ダッシュボード** — 4 つのタブ
+  - ダッシュボード: 天気・機種/CPU/GPU 名・ユーザーの写真(クリックで選べる)・カレンダー・メディア
+  - メディア: 回るレコードと cava のスペクトラム、トーンアーム、**同期歌詞**(LRCLIB から自動取得、カラオケ風に塗られる、**行をクリックするとその時間へ**)
+  - パフォーマンス: CPU / GPU / メモリ / ストレージの円グラフ(CPU・GPU は温度つき)
+  - ワークスペース: 1〜9 と、それぞれで**開いているアプリのアイコンと名前**
+- **下: ランチャー** — Super 単独・Super+D。ファジー検索、よく使う順、お気に入りの固定、全アイコンテーマ + SVG。`>` でアクション、`>壁紙` で壁紙
+- **右: 音量・明るさ(OSD)/ 通知 / ユーティリティ / セッション / 通知センター**
+- **縦バー** — タグ(液体のように伸びるインジケータ)・時計・音量・ネット・Bluetooth・電池。乗せると右にポップアウト
+  - 音量のポップアウトで **出力先・入力先を切り替え**(再生中の音も移る)
+  - ネット / Bluetooth をクリックすると **Wi-Fi・Bluetooth の設定パネル**(接続・切断・パスワード・スキャン。外側をクリックで閉じる)。イヤホンは接続すると自動で音の出力先になる
 
-**その後に追加したもの**:
-- **River 0.5 セッション「Ame Shell (River 0.5)」**: ame-shell がウィンドウマネージャ(river-window-management-v1)を兼ねる。Hyprland の dwindle 配置、ワークスペース 1〜9、窓の開閉・移動・ワークスペース切替・閉じるのアニメーション(`src/wm/`)。River 0.3 のセッションもそのまま使える。
-- **壁紙から配色を自動生成**: 壁紙の一番鮮やかな色からアクセント(くすんだ緑は避ける)、ガラス・文字色も合わせて滑らかに遷移。エラーは赤で、失敗したときは枠の縁が赤く光る。
-- **ライブ壁紙に GIF / MP4**: libmpv を実行時に読み込み(dlopen)、ハードウェア復号した動画を壁紙に。
-- **Wi-Fi / Bluetooth の設定パネル**、音量のポップアウトで**出力先・入力先の切り替え**。Bluetooth のイヤホンは接続すると自動で音の出力先になる。
-- **ダッシュボード**: 機種・CPU・GPU 名、ユーザーの写真(クリックで選択)、同期歌詞つきのメディア、CPU/GPU/メモリ/ストレージの円グラフ、ワークスペースごとのアプリ名。
-- **ランチャー**: よく使う順・お気に入りの固定、アイコンは全アイコンテーマ + SVG。
+### River 0.5 では本物のウィンドウアニメーション
+River 0.5 は「描画は River、配置はウィンドウマネージャ」という分担です。ame-shell がそのウィンドウマネージャを兼ねます(`src/wm/`)。
+- Hyprland の **dwindle** 配置、ワークスペース 1〜9、新しい窓はフォーカス中の窓の次へ
+- **開く**: 中心から広がる / **移動・並べ替え**: なめらかに動く / **ワークスペース切替**: 横にスライド / **閉じる**: 縮んでから閉じる(すべてスプリング)
+- 動いているときだけ毎フレーム更新し、止まっていれば River との通信も 0
+- ame-shell を再起動しても窓のワークスペースは保たれる
+
+River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ランチャーなど)はそのまま使えます。
+
+### 壁紙と配色
+- **ライブ壁紙**: シェーダで描くオーロラ / 雨、**GIF・MP4 などの動画**(libmpv を実行時に読み込み、ハードウェア復号)、画像
+- **壁紙ピッカー**(Super+Shift+W): 斜めのカードが並び、決定するとカードの位置から円・斜めワイプ・短冊で切り替わる
+- **配色は壁紙から自動**: 壁紙の一番鮮やかな色からアクセント、ガラス・文字色も合わせてなめらかに遷移。再生中はアルバムアートの色に。くすんだ緑や、エラーと紛らわしい赤は避ける
+- **エラーは赤**: Wi-Fi の接続失敗などでは枠の縁が一瞬赤く光る
+- **ガラス**: 壁紙を dual Kawase でぼかし、パネルは真後ろをサンプル(屈折・色収差・ハイライト)
+
+### そのほか
+- 通知サーバ内蔵(`org.freedesktop.Notifications`。他のデーモンが動いていれば譲る)
+- ロック画面(Super+L、ext-session-lock + PAM)
+- WASM ウィジェット(保存すると状態を保ったままホットリロード)
+- `ame-ctl` でシェルを操作(キーバインドやスクリプトから)
 
 ## ビルド
 
-必要: zig 0.13、odin、wayland-scanner、wayland / EGL / GLESv2 / xkbcommon / freetype / harfbuzz / fontconfig / dbus の開発ファイル(詳細は `docs/deps.md`)。
+必要: Zig 0.13、Odin、wayland-scanner、wayland / EGL / GLESv2 / xkbcommon / freetype / harfbuzz / fontconfig / dbus の開発ファイル(詳細は `docs/deps.md`)。
+実行時に使うもの: `playerctl`・`wpctl` / `pactl`(PipeWire)・`nmcli`・`bluetoothctl`・`curl`・`cava`(任意)・`libmpv`(動画壁紙、任意)・`ffmpeg`(動画のサムネイル、任意)。
 
 ```sh
 zig build -Doptimize=ReleaseFast     # zig-out/bin/{ame-shell,ame-ctl}, zig-out/share/ame-shell/
-zig build test                       # スプリング・ファジー・主色抽出・設定パーサのテスト
+zig build test
 ```
 
 ## インストール(SDDM セッション)
@@ -55,87 +68,71 @@ zig build -Doptimize=ReleaseFast
 doas sh session/install-session.sh --prefix /usr/local     # --dry-run で内容確認だけもできる
 ```
 
-入るもの(全て `/usr/local/share/ame-shell/installed-files` に記録):
-`/usr/local/bin/{ame-shell,ame-ctl,ame-session}`、`/usr/local/share/ame-shell/`(ウィジェット・既定設定・River 用 init)、
-`/usr/local/share/wayland-sessions/ame-shell{,-safe}.desktop`(SDDM の SessionDir を読んで決定)、`/etc/pam.d/ame-shell`(ロック画面用)。
-既存ファイルを上書きする場合は `.ame-bak` に退避します。
+SDDM に 3 つのセッションが追加されます:
 
-元に戻す:
+| セッション | 内容 |
+|---|---|
+| **Ame Shell (River 0.5)** | ame-shell がウィンドウマネージャを兼ねる。ウィンドウアニメーションあり。River 0.5 が必要(`~/.local/opt/river-0.5` か PATH)|
+| **Ame Shell** | River 0.3 + ame-shell |
+| **Ame Shell (Safe Mode)** | River 0.3 + foot だけ(問題が起きたときの脱出口)|
+
+入るものは `/usr/local/share/ame-shell/installed-files` に記録され、元に戻すのは `doas sh session/install-session.sh --uninstall --prefix /usr/local`。
+ログは `~/.local/state/ame-shell/session.log`。起動直後に 3 回続けて落ちると、次回は自動でセーフモードになります。
+
+インストールせずに試す(今のセッションの中にウィンドウとして開く):
 ```sh
-doas sh session/install-session.sh --uninstall --prefix /usr/local
+PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5
 ```
 
-### システム前提(Chimera)
-- `sddm`・`dbus`・`elogind`(または `seatd`)の dinit サービスが有効: `doas dinitctl enable sddm` など
-- PAM の `system-login` に `pam_turnstile`(XDG_RUNTIME_DIR)と `pam_elogind` がある(Chimera の既定)
-- seatd を使う場合はユーザーを `_seatd` グループへ
-- River がシステムにインストールされていること(`river -version`)
+### Bluetooth イヤホン(AirPods など)が繋がらないとき
+`br-connection-refused` で繋がらない・すぐ切れる場合は、`doas sh session/bt-airpods-fix.sh` で BlueZ を従来の Bluetooth(BR/EDR)接続に切り替えてから、ペアリングし直してください(`--undo` で元に戻せます)。
 
-## SDDM での初回ログイン手順
-
-1. SDDM のセッション選択で **「Ame Shell (Safe Mode)」** を選んでログイン → River と foot だけが起動することを確認(ame-shell は起動しない)。
-2. Super+Shift+E で River を終了して SDDM に戻る。
-3. **「Ame Shell」** を選んでログイン → バーと壁紙が出れば成功。
-4. うまくいかない場合: Ctrl+Alt+F2 などで TTY に切り替えてログを確認し、必要なら `--uninstall` で元に戻す。
-
-ログ: `~/.local/state/ame-shell/session.log`(River と ame-shell の出力、各プロセスの終了コードと時間)。
-起動直後に 3 回続けて落ちると `~/.local/state/ame-shell/crashloop` が作られ、次回は自動でセーフモードになります(正常に 60 秒以上動けば解除、手動なら `rm` で)。
-
-インストールせずに試す(今のセッション内にウィンドウとして開く):
-```sh
-PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session
-```
-
-## River のキーバインド(`session/ame-river-init`)
+## キー操作(River 0.5 セッション)
 
 | キー | 動作 |
 |---|---|
-| Super+Return | foot |
-| Super+D | ランチャー(`ame-ctl launcher toggle`) |
-| Super+A | ダッシュボード |
-| Super+Escape | セッション(ロック/ログアウト/スリープ/再起動/電源オフ。危険な操作は 2 回押し)|
-| Super+U | ユーティリティ |
-| Super(単独で押して離す)| ランチャー(evdev で判定。`shell { super-launcher off }` で無効)|
-| Super+Shift+W | 壁紙ピッカー(斜めのカード。決定するとカードの位置から円・斜めワイプ・短冊のいずれかで切り替え)|
-| Super+N | 通知センター |
-| Super+Q | ウィンドウを閉じる |
-| Super+L | ロック(River 0.5 / river.sh では比率の変更は Super+Ctrl+H/L) |
-| Super+Shift+E | River を終了(脱出口) |
-| Super+Shift+R | ame-shell を再起動 |
-| Super+1..9 / Super+Shift+1..9 / Super+Ctrl+1..9 | タグ切替 / ウィンドウを移動 / タグの表示を足す |
-| Super+J/K, Super+Shift+J/K | フォーカス / 入れ替え |
-| Super+F / Super+Space | 全画面 / フロート |
-| 音量・明るさ・メディアキー | OSD 付き(ロック中も有効) |
+| Super(単独で押して離す)/ Super+D | ランチャー |
+| Super+Return / Super+T | foot |
+| Super+A / Super+N / Super+U | ダッシュボード / 通知センター / ユーティリティ |
+| Super+Escape | セッション(ロック・ログアウト・再起動・電源オフ。危険な操作は 2 回押し)|
+| Super+L | ロック |
+| Super+Shift+W | 壁紙ピッカー |
+| Super+Q / Super+F / Super+Space | 閉じる / 全画面 / フロート |
+| Super+J・K / Super+Shift+J・K | フォーカス / 入れ替え |
+| Super+Ctrl+H・L | 左右の比率 |
+| Super+1〜9 / Super+Shift+1〜9 / Super+Alt+1〜9 | ワークスペース切替 / 窓を移動 / 窓を移動して自分も移る |
+| Super+Ctrl+1〜9 | ワークスペースの表示を足す |
+| Super+P / Super+Shift+P | スクラッチパッド |
+| Super+ドラッグ(左 / 右)/ Super+中クリック | 移動 / 大きさ変更 / フロート |
+| Print / Shift+Print | 範囲 / 全画面のスクリーンショット(~/Pictures/Screenshots + クリップボード)|
+| 音量・明るさ・メディアキー | OSD つき |
+| Super+Shift+E | セッションを終了 |
 
-自分用の追加設定は `~/.config/ame-shell/river-extra.sh`(あれば最後に読み込まれます)。
-今使っている River 用のキーバインドから呼ぶ例:
-```sh
-riverctl map normal Super D spawn "ame-ctl launcher toggle"
-riverctl map normal None XF86AudioRaiseVolume spawn "ame-ctl volume up"
-```
+River 0.3 セッションのキーは `session/ame-river-init`(追加設定は `~/.config/ame-shell/river-extra.sh`)。
 
 ## 設定
 
 `~/.config/ame-shell/config.ame`(無ければ `share/ame-shell/config.ame`)。**保存した瞬間に反映**されます。
 
 ```
-theme {
-  accent #7ab8ff
-  tint-strength 0.42
-  radius 18
-  blur 3
-  sparkle 0.7
-  anim-speed 1.0
-  media-accent on
+shell {
+  layout caelestia              // caelestia | classic(上部の横バー)
+  ui-scale 1.25
+  super-launcher on
+  weather-location "Sapporo"    // 省略すると IP アドレスから推定
 }
-bar { height 38; position top; show-seconds off }
+theme {
+  auto-color on                 // 壁紙から配色を作る
+  media-accent on               // 再生中はアルバムアートの色に
+  blur 3
+}
 wallpaper {
-  mode rain                 // aurora | rain | image
-  // image "~/Pictures/wall.jpg"
+  mode aurora                   // aurora | rain | image
+  // image "~/Videos/rain.mp4"  // 画像・GIF・動画
+  transition random             // ripple | circle | slant | shards | random
   fps 30
   battery-fps 12
 }
-font { ui "Noto Sans CJK JP" }
 ```
 全項目は `data/config.ame` を参照。
 
@@ -143,10 +140,12 @@ font { ui "Noto Sans CJK JP" }
 
 ```
 ame-ctl launcher toggle|open [検索語]|close
-ame-ctl dashboard toggle
+ame-ctl dashboard toggle|open|close|dashboard|media|performance|workspaces
+ame-ctl network | bluetooth | wallpaper-picker | session | sidebar | utilities | close-all
 ame-ctl volume up|down|mute|<0-100>      ame-ctl brightness up|down
-ame-ctl wallpaper aurora|rain|<画像パス>  ame-ctl accent '#ff88aa'|reset
-ame-ctl notify <テキスト>                  ame-ctl notifications toggle|clear
+ame-ctl wallpaper aurora|rain|<画像・GIF・動画のパス>
+ame-ctl accent '#ff88aa'|reset           ame-ctl notify <テキスト>
+ame-ctl workspace <1-9>                  ame-ctl window close|fullscreen|float|focus-next|…(River 0.5)
 ame-ctl lock | reload | widgets reload | stats | restart | quit
 ```
 
@@ -156,15 +155,17 @@ ame-ctl lock | reload | widgets reload | stats | restart | quit
 
 ## 既知の問題
 
-- ウィンドウの開閉アニメは River 0.5 セッションのみ(River 0.3 には外部から窓を動かす手段が無い)。ウィンドウ越しのガラスは未対応。
-- ランチャーの日本語入力(IME)未対応。トレイ未実装。
-- 動画壁紙は再生中 CPU 約 5%(720p)・メモリ +130MB 程度。
-- RSS は約 130MB(うち約 70MB は Mesa/LLVM の共有ライブラリ。PSS は約 75MB)。
+- ウィンドウの開閉アニメーションは River 0.5 セッションのみ(River 0.3 には外から窓を動かす手段が無い)。ウィンドウ越しのガラスは未対応。
+- River 0.3 では、ワークスペースごとのアプリ名は推測(River 0.3 は窓とタグの対応を外に出さない)。
+- ランチャーの日本語入力(IME)とトレイは未対応。
+- 動画壁紙は再生中に CPU 約 5%(720p)・メモリ +130MB 程度を使う。
 - 詳細は `docs/blockers.md`、計測値は `docs/perf.md`。
 
 ## ドキュメント
+
 `docs/architecture.md`(構成)・`docs/decisions.md`(設計判断と理由)・`docs/perf.md`(実測)・`docs/reference-analysis.md`(参考シェルの分析)・`docs/progress.md`(進捗)
 
 ## ライセンス
 
 GPL-3.0(`LICENSE`)。同梱のサードパーティ: wasm3(MIT、`third_party/wasm3/LICENSE`)、stb_image(MIT / パブリックドメイン)、nanosvg(zlib)。`protocol/` の XML は各プロトコルのライセンスに従います。
+スクリーンショットの壁紙はシェーダと ffmpeg で生成したもの、歌詞は説明用に書いたオリジナルです。

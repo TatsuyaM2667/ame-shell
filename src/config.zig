@@ -40,6 +40,8 @@ pub const Config = struct {
     frame_opacity: f32 = 0.82,
     ui_scale: f32 = 1.25,
     super_launcher: bool = true,
+    /// 天気の場所(空 = IP アドレスから推定)。例: "Sapporo"、"Osaka"
+    weather_location: Str = .{},
     // bar
     bar_height: f32 = 38,
     bar_margin: f32 = 8,
@@ -263,6 +265,8 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             if (num(val)) |n| cfg.frame_bar_width = std.math.clamp(n, 30, 80) else ok = false;
         } else if (eq(u8, key, "ui-scale")) {
             if (num(val)) |n| cfg.ui_scale = std.math.clamp(n, 0.75, 2.5) else ok = false;
+        } else if (eq(u8, key, "weather-location")) {
+            cfg.weather_location.set(val);
         } else if (eq(u8, key, "super-launcher")) {
             cfg.super_launcher = boolean(val) orelse true;
         } else if (eq(u8, key, "frame-opacity")) {

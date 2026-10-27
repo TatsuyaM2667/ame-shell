@@ -1,6 +1,13 @@
 // ame-shell 既定設定。~/.config/ame-shell/config.ame にコピーして編集すると、保存した瞬間に反映されます。
 // 文法: セクション { キー 値 }   値は数値 / "文字列" / 単語 / #RRGGBB / on|off
 
+shell {
+  layout caelestia          // caelestia(枠とドロワー)| classic(横バー)
+  ui-scale 1.25
+  super-launcher on         // Super を単独で押して離すとランチャー
+  // weather-location "Sapporo"  // 天気の場所(省略すると IP アドレスから推定)
+}
+
 theme {
   accent #7ab8ff          // アクセント色
   tint #0b1730            // ガラスの色

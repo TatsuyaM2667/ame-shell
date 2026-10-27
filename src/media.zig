@@ -311,7 +311,7 @@ pub fn debugFakeImpl(self: *Media, spec: []const u8) void {
     self.status = .playing;
     Media.set(&self.artist, &self.artist_len, artist);
     Media.set(&self.title, &self.title_len, title);
-    Media.set(&self.player, &self.player_len, "debug");
+    Media.set(&self.player, &self.player_len, "demo");
     self.length_s = len;
     self.pos_s = pos;
     self.pos_at_ms = loop.nowMs();

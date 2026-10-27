@@ -135,8 +135,24 @@ pub const Weather = struct {
         if (self.fd >= 0) return;
         if (self.fetched_ms != 0 and loop.nowMs() - self.fetched_ms < 30 * 60 * 1000) return;
         self.len = 0;
-        // %t 気温 / %C 天気(日本語)/ %x 天気記号(アイコン選択用)/ %l 場所(IP から推定)
-        const fd = sys.spawnReader(&.{ "curl", "-sf", "--max-time", "8", "https://wttr.in/?format=%t|%C|%x|%l&lang=ja" }, &self.pid) orelse return;
+        // %t 気温 / %C 天気(日本語)/ %x 天気記号(アイコン選択用)/ %l 場所。
+        // 場所は shell { weather-location "Sapporo" } で指定でき、無ければ IP アドレスから推定
+        var ub: [256]u8 = undefined;
+        var lb: [96]u8 = undefined;
+        var ln: usize = 0;
+        for (self.app.cfg.weather_location.get()) |ch| {
+            if (ln >= lb.len) break;
+            // URL に入れられない文字は落とし、空白は + に(wttr.in の書式)
+            if (std.ascii.isAlphanumeric(ch) or ch == '-' or ch == ',' or ch >= 0x80) {
+                lb[ln] = ch;
+                ln += 1;
+            } else if (ch == ' ') {
+                lb[ln] = '+';
+                ln += 1;
+            }
+        }
+        const url = std.fmt.bufPrintZ(&ub, "https://wttr.in/{s}?format=%t|%C|%x|%l&lang=ja", .{lb[0..ln]}) catch return;
+        const fd = sys.spawnReader(&.{ "curl", "-sf", "--max-time", "8", url.ptr }, &self.pid) orelse return;
         self.fd = fd;
         self.app.loop.add(fd, c.EPOLLIN | c.EPOLLHUP, self, onRead) catch {};
     }

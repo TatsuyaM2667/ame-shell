@@ -66,11 +66,11 @@ pub const Server = struct {
 const help =
     \\commands:
     \\  launcher toggle|open|close
-    \\  dashboard toggle|open|close
+    \\  dashboard toggle|open|close|dashboard|media|performance|workspaces
     \\  volume up|down|mute|<0-100>
     \\  brightness up|down
     \\  osd volume|brightness
-    \\  wallpaper aurora|rain|<image path>
+    \\  wallpaper aurora|rain|<画像・GIF・動画のパス>
     \\  accent <#rrggbb>|reset
     \\  notify <text>          (テスト用の通知)
     \\  notifications toggle|clear
@@ -107,6 +107,12 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
             if (q.len > 0) app.launcher.setQuery(q);
         } else if (eq(u8, arg, "close")) app.launcher.close() else app.launcher.toggle();
     } else if (eq(u8, cmd, "dashboard")) {
+        // caelestia: dashboard dashboard|media|performance|workspaces で、そのタブを開く
+        const tabs = [_][]const u8{ "dashboard", "media", "performance", "workspaces" };
+        if (app.activeFrame()) |f| for (tabs, 0..) |t, i| if (eq(u8, arg, t)) {
+            f.openDashTab(i);
+            return "ok";
+        };
         if (eq(u8, arg, "open")) app.dashboard.open() else if (eq(u8, arg, "close")) app.dashboard.close() else app.dashboard.toggle();
     } else if (eq(u8, cmd, "session") or eq(u8, cmd, "sidebar") or eq(u8, cmd, "utilities")) {
         const f = app.activeFrame() orelse return "error: caelestia レイアウト(shell { layout caelestia })でのみ使えます";
