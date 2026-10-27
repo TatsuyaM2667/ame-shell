@@ -552,7 +552,21 @@ pub const Frame = struct {
             return true;
         }
         if (x < self.BW()) {
+            // パネルが開いている: バーの Wi-Fi・Bluetooth 以外を押したら閉じる(押した項目の操作はそのまま行う)
+            if (self.net.open and ev.kind == .press) {
+                const k = self.bar.popoutAt(y).kind;
+                if (k != .network and k != .bluetooth) {
+                    self.net.hide();
+                    self.afterOpenChange();
+                }
+            }
             return self.bar.pointer(self, ev, x, y);
+        }
+        // Wi-Fi / Bluetooth のパネル: 外側(空いているところ)をクリックしたら閉じる
+        if (self.net.open and ev.kind == .press and !self.net.contains(x, y, 0)) {
+            self.net.hide();
+            self.afterOpenChange();
+            return true;
         }
         _ = self.bar.pointer(self, .{ .kind = .leave, .x = 0, .y = 0 }, -1, -1);
         const D = struct { d: *Drawer, which: side.Which };
@@ -855,6 +869,12 @@ pub const Frame = struct {
                 rects[n] = d.vis;
                 n += 1;
             }
+        }
+        // Wi-Fi / Bluetooth のパネルが開いている間は画面全体を受け取る(外側のクリックで閉じるため。
+        // そのクリックは下の窓には届かない = 普通のポップアップメニューと同じ)
+        if (self.net.open and n < rects.len) {
+            rects[n] = .{ 0, 0, W, H };
+            n += 1;
         }
         // 開きかけのダッシュボードは開き切った範囲を入力領域にする(カーソルが下の窓へ抜けて閉じないように)
         if (self.dash.open and n < rects.len) {
