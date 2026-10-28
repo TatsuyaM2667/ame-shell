@@ -28,6 +28,8 @@ pub const Media = struct {
     title_len: usize = 0,
     artist: [160]u8 = undefined,
     artist_len: usize = 0,
+    album: [160]u8 = undefined,
+    album_len: usize = 0,
     art_url: [512]u8 = undefined,
     art_len: usize = 0,
     length_s: f32 = 0,
@@ -62,7 +64,7 @@ pub const Media = struct {
 
     fn start(self: *Media) void {
         // \t 区切りで1行1イベント。position はイベント時点の値(以降は時間で外挿)
-        const fmt = "{{status}}\t{{playerName}}\t{{artist}}\t{{title}}\t{{mpris:artUrl}}\t{{mpris:length}}\t{{position}}";
+        const fmt = "{{status}}\t{{playerName}}\t{{artist}}\t{{title}}\t{{mpris:artUrl}}\t{{mpris:length}}\t{{position}}\t{{xesam:album}}";
         const fd = sys.spawnReader(&.{ "playerctl", "--follow", "metadata", "--format", fmt }, &self.pid) orelse {
             std.log.info("media: playerctl が無いのでメディア表示は無効", .{});
             return;
@@ -118,11 +120,13 @@ pub const Media = struct {
         const art = f.next() orelse "";
         const len_us = f.next() orelse "";
         const pos_us = f.next() orelse "";
+        const album = f.next() orelse "";
         const prev_status = self.status;
         self.status = if (std.mem.eql(u8, status, "Playing")) .playing else if (std.mem.eql(u8, status, "Paused")) .paused else .none;
         set(&self.player, &self.player_len, player);
         set(&self.artist, &self.artist_len, artist);
         set(&self.title, &self.title_len, title);
+        set(&self.album, &self.album_len, album);
         self.length_s = (std.fmt.parseFloat(f32, len_us) catch 0) / 1e6;
         // ライブ配信などは長さが無意味な値(数日以上)になるので「不明」扱いにする
         if (self.length_s > 86400) self.length_s = 0;
@@ -134,6 +138,8 @@ pub const Media = struct {
         }
         // 曲が変わったら歌詞を取りに行く(同じ曲なら何もしない)
         if (self.status != .none) self.lyrics.request(self.artist[0..self.artist_len], self.title[0..self.title_len], self.length_s);
+        // 再生アプリ自身の歌詞ファイル(music-tui)があればそちらを優先
+        if (self.status != .none) self.lyrics.trySidecar(self.player[0..self.player_len]);
         if (self.status == .none and prev_status != .none) {
             self.dropArt();
             if (self.app.cfg.media_accent) theme.setAccent(self.app, null);
@@ -308,14 +314,17 @@ pub fn debugFakeImpl(self: *Media, spec: []const u8) void {
     const title = it.next() orelse return;
     const len = std.fmt.parseFloat(f32, it.next() orelse "0") catch 0;
     const pos = std.fmt.parseFloat(f32, it.next() orelse "0") catch 0;
+    const album = it.next() orelse "";
     self.status = .playing;
     Media.set(&self.artist, &self.artist_len, artist);
     Media.set(&self.title, &self.title_len, title);
     Media.set(&self.player, &self.player_len, "demo");
+    Media.set(&self.album, &self.album_len, album);
     self.length_s = len;
     self.pos_s = pos;
     self.pos_at_ms = loop.nowMs();
     self.last_resync_ms = loop.nowMs() + 3_600_000; // 本物の playerctl で上書きしない
     self.lyrics.request(artist, title, len);
+    self.lyrics.trySidecar("demo");
     self.app.dashboard.dataChanged();
 }

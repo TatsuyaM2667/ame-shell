@@ -287,7 +287,10 @@ fn drawMediaSmall(f: *Frame, cv: *gfx.Canvas, x: f32, y: f32, w: f32, h: f32) bo
         return false;
     }
     _ = cv.text(cx, y + 222, 15, txt, m.title[0..m.title_len], .{ .bold = true, .alignment = .center, .max_w = w - 30 });
-    _ = cv.text(cx, y + 244, 12.5, sub, m.artist[0..m.artist_len], .{ .alignment = .center, .max_w = w - 30 });
+    // アーティスト ・ アルバム(1 行に)
+    var ab: [340]u8 = undefined;
+    const byline = if (m.album_len > 0) std.fmt.bufPrint(&ab, "{s} ・ {s}", .{ m.artist[0..m.artist_len], m.album[0..m.album_len] }) catch m.artist[0..m.artist_len] else m.artist[0..m.artist_len];
+    _ = cv.text(cx, y + 244, 12.5, sub, byline, .{ .alignment = .center, .max_w = w - 30 });
     // 同期歌詞があれば、プレイヤー名の代わりに今の一節を出す
     const cur = m.lyrics.current(m.position());
     if (cur.idx) |li| {
@@ -401,7 +404,12 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
     cv.rect(tx, 40, cv.measure(m.player[0..m.player_len], 11.5, true) + 20, 22, 11, acc.alpha(0.25));
     _ = cv.text(tx + 10, 56, 11.5, acc.lighten(0.3), m.player[0..m.player_len], .{ .bold = true });
     cv.textWrap(tx, 100, 25, txt, m.title[0..m.title_len], tw, 2, 31);
-    _ = cv.text(tx, 166, 16, sub, m.artist[0..m.artist_len], .{ .max_w = tw });
+    _ = cv.text(tx, 160, 16, sub, m.artist[0..m.artist_len], .{ .max_w = tw });
+    // アルバム名(あれば。アイコンつき)
+    if (m.album_len > 0) {
+        _ = cv.text(tx, 183, 12.5, acc.lighten(0.25), "\u{F0025}", .{});
+        _ = cv.text(tx + 18, 183, 12.5, sub.alpha(0.9), m.album[0..m.album_len], .{ .max_w = tw - 18 });
+    }
     if (m.length_s > 0) {
         const p = std.math.clamp(m.position() / m.length_s, 0, 1);
         cv.rect(tx, 200, tw, 6, 3, Color.hex(0xffffff).alpha(0.12));

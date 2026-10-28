@@ -119,3 +119,9 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - foot: ame-shell の半透明の foot.ini(data/xdg/foot/foot.ini)を ame-session が XDG_CONFIG_DIRS の先頭に置く。ユーザー自身の foot.ini があればそちらが優先。入れ子のセッションで確認。
 - ame-update: パッケージ(pkg / apk)→ git pull → ビルド → この ame-update が入っている場所へ再インストール → ame-ctl restart。--check / --no-pkg / --no-self / --force / --debug。インストーラがソースの場所を share/ame-shell/source に記録。ランチャーの「アップデート」からも。
 - 電源操作: loginctl の無い FreeBSD では ConsoleKit2(D-Bus)で再起動・電源オフ・スリープ。
+
+## 2026-10-28(追記 2)壁紙・AirPods・メディア
+- 壁紙: スキャン先に ~/.local/share/ame-shell/wallpapers と <prefix>/share/ame-shell/wallpapers を追加、同じファイル名は 1 つに。追加の壁紙は非公開リポジトリ(著作物のため公開リポジトリには入れない)から scripts/fetch-wallpapers.sh が取る(install.sh / install-freebsd.sh / ame-update)。未ログインなら案内のみ。
+- AirPods の音がガサガサ: WirePlumber がマイクを開くアプリに反応して HFP に自動で切り替えていた。bt-connect.sh が bluetooth.autoswitch-to-headset-profile を false にして保存。
+- メディア: MPRIS の xesam:album を取り、メディアタブとダッシュボードのカードにアルバム名。歌詞は $XDG_RUNTIME_DIR/lyrics/<プレーヤー名>.lrc があれば([ti:] / [ar:] が今の曲と一致するときだけ)LRCLIB より優先。入れ子のセッションで確認。
+- music-tui 側(別リポジトリ): 位置と長さを MPRIS に出す(進まなかった歌詞が進む)、アルバムアートを曲ごとの別ファイルに、歌詞を上の場所に書き出し、SetPosition / Seek に対応。

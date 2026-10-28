@@ -198,9 +198,18 @@ pub const Launcher = struct {
         self.walls.append(.{ .name = "オーロラ(ライブ)", .path = "", .mode = .aurora }) catch {};
         self.walls.append(.{ .name = "雨(ライブ)", .path = "", .mode = .rain }) catch {};
         const home = std.posix.getenv("HOME") orelse return;
-        const dirs = [_][]const u8{ "Pictures/wallpapers", "Pictures/Wallpapers", ".config/ame-shell/wallpapers" };
-        for (dirs) |rel| {
-            const p = std.fmt.allocPrint(a, "{s}/{s}", .{ home, rel }) catch continue;
+        // 自分の壁紙のフォルダ → 既定の壁紙(ame-wallpapers を取得した場所・インストール先)の順。
+        // 同じ名前のファイルは最初に見つけたものだけ(Pictures と既定の両方にある場合など)
+        const dirs = [_][]const u8{
+            std.fmt.allocPrint(a, "{s}/Pictures/wallpapers", .{home}) catch "",
+            std.fmt.allocPrint(a, "{s}/Pictures/Wallpapers", .{home}) catch "",
+            std.fmt.allocPrint(a, "{s}/.config/ame-shell/wallpapers", .{home}) catch "",
+            std.fmt.allocPrint(a, "{s}/.local/share/ame-shell/wallpapers", .{home}) catch "",
+            std.fmt.allocPrint(a, "{s}/wallpapers", .{self.app.shareDir()}) catch "",
+        };
+        var seen = std.StringHashMap(void).init(a);
+        for (dirs) |p| {
+            if (p.len == 0) continue;
             var dir = std.fs.cwd().openDir(p, .{ .iterate = true }) catch continue;
             defer dir.close();
             var di = dir.iterate();
@@ -211,6 +220,8 @@ pub const Launcher = struct {
                 // GIF・動画はライブ壁紙(libmpv で再生)
                 const is_vid = video.isVideoPath(lower);
                 if (!is_img and !is_vid) continue;
+                if (seen.contains(lower)) continue;
+                seen.put(lower, {}) catch {};
                 const full = std.fmt.allocPrint(a, "{s}/{s}", .{ p, ent.name }) catch continue;
                 const stem = if (is_vid) std.fmt.allocPrint(a, "{s}(ライブ)", .{std.fs.path.stem(ent.name)}) catch continue else a.dupe(u8, std.fs.path.stem(ent.name)) catch continue;
                 self.walls.append(.{ .name = stem, .path = full, .mode = if (is_vid) .video else .image }) catch {};

@@ -139,6 +139,8 @@ if [ "$DO_SELF" = 1 ]; then
             UPDATED=1
         fi
     fi
+    # 追加の壁紙(非公開リポジトリ。GitHub にログインしていなければ案内だけ)
+    [ "$CHECK" = 0 ] && [ -f "$SRC/scripts/fetch-wallpapers.sh" ] && sh "$SRC/scripts/fetch-wallpapers.sh"
 fi
 
 # ---------------------------------------------------------------------------

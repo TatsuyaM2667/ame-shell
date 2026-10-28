@@ -257,6 +257,9 @@ su -m "$TARGET_USER" -c "cd '$REPO' && env HOME='$UHOME' PATH='$TOOLS/zig-$ZIG_V
     die "ame-shell のビルドに失敗しました"
 sh "$REPO/session/install-session.sh" --prefix /usr/local
 
+# 追加の壁紙(非公開リポジトリ。GitHub にログインしていなければ案内だけ)
+su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_DATA_HOME= sh '$REPO/scripts/fetch-wallpapers.sh'"
+
 # キーボード配列: コンソールの keymap(rc.conf の keymap="jp.kbd" など)と同じ配列を Wayland でも使う
 kbd=$(sysrc -n keymap 2>/dev/null || true)
 if [ -n "$kbd" ] && [ ! -f "$UHOME/.config/ame-shell/xkb-layout" ]; then

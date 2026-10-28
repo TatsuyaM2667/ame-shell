@@ -62,6 +62,11 @@ if ! wait_card && command -v dinitctl >/dev/null 2>&1; then
     wait_card
 fi
 if pactl list short cards 2>/dev/null | grep -q "$card"; then
+    # WirePlumber の既定では、どれかのアプリがマイクを開いた瞬間にイヤホンが通話用(HFP: モノラル 16kHz 以下)に
+    # 切り替わり、電話のようなガサガサの音になる。自動の切り替えを止める(保存されるので 1 回でよい)
+    if command -v wpctl >/dev/null 2>&1 && ! wpctl settings bluetooth.autoswitch-to-headset-profile 2>/dev/null | grep -q 'Saved: false'; then
+        wpctl settings --save bluetooth.autoswitch-to-headset-profile false >/dev/null 2>&1
+    fi
     # 通話用(HFP)ではなく音楽用の高音質プロファイルに(AirPods は AAC になる)
     pactl set-card-profile "$card" a2dp-sink >/dev/null 2>&1
     sink=""

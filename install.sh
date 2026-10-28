@@ -193,3 +193,6 @@ else
     # install-session.sh が自分で doas / sudo を使う(River 0.5 も全ユーザー用にコピーされる)
     sh "$REPO/session/install-session.sh"
 fi
+
+# 追加の壁紙(非公開リポジトリ。GitHub にログインしていなければ案内だけ)
+sh "$REPO/scripts/fetch-wallpapers.sh"

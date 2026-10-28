@@ -29,6 +29,8 @@ pub const Lyrics = struct {
     title: [160]u8 = undefined,
     title_len: usize = 0,
     duration: f32 = 0,
+    /// 再生アプリが置いた歌詞ファイルの更新時刻(同じなら読み直さない。曲が変わったら 0 に戻す)
+    sidecar_mtime: i128 = 0,
     on_change: ?*const fn (ctx: *anyopaque) void = null,
     ctx: *anyopaque = undefined,
 
@@ -62,6 +64,7 @@ pub const Lyrics = struct {
         const key = h.final();
         if (key == self.key) return;
         self.key = key;
+        self.sidecar_mtime = 0;
         self.cancel();
         self.reset(.fetching);
         self.artist_len = @min(artist.len, self.artist.len);
@@ -189,6 +192,46 @@ pub const Lyrics = struct {
             } else |_| {};
             self.state = .none;
         }
+        self.changed();
+    }
+
+    /// 再生アプリ自身が置いた、この曲の同期歌詞($XDG_RUNTIME_DIR/lyrics/<MPRIS のプレイヤー名>.lrc)を使う。
+    /// LRC の [ti:](曲名)と [ar:](アーティスト)が今の曲と一致したときだけ、LRCLIB の結果より優先する。
+    /// music-tui が書く。ネットで探すより確実(その曲そのものの歌詞)。曲の情報が届くたびに呼ばれ、
+    /// ファイルの更新時刻が変わっていなければ何もしない
+    pub fn trySidecar(self: *Lyrics, player: []const u8) void {
+        if (player.len == 0 or self.title_len == 0) return;
+        for (player) |ch| if (!(std.ascii.isAlphanumeric(ch) or ch == '_' or ch == '-' or ch == '.')) return;
+        const rd = std.posix.getenv("XDG_RUNTIME_DIR") orelse return;
+        var pb: [512]u8 = undefined;
+        const p = std.fmt.bufPrint(&pb, "{s}/lyrics/{s}.lrc", .{ rd, player }) catch return;
+        const st = std.fs.cwd().statFile(p) catch return;
+        if (st.mtime == self.sidecar_mtime) return;
+        var head: [1024]u8 = undefined;
+        const f = std.fs.cwd().openFile(p, .{}) catch return;
+        const n = f.readAll(&head) catch 0;
+        f.close();
+        // [ti:] / [ar:] のタグが今の曲か
+        var ti: []const u8 = "";
+        var ar: []const u8 = "";
+        var it = std.mem.splitScalar(u8, head[0..n], '\n');
+        while (it.next()) |raw| {
+            const l = std.mem.trim(u8, raw, " \r\t");
+            if (std.mem.startsWith(u8, l, "[ti:") and std.mem.endsWith(u8, l, "]")) ti = std.mem.trim(u8, l[4 .. l.len - 1], " ");
+            if (std.mem.startsWith(u8, l, "[ar:") and std.mem.endsWith(u8, l, "]")) ar = std.mem.trim(u8, l[4 .. l.len - 1], " ");
+        }
+        const eqi = std.ascii.eqlIgnoreCase;
+        const title = std.mem.trim(u8, self.title[0..self.title_len], " ");
+        const artist = std.mem.trim(u8, self.artist[0..self.artist_len], " ");
+        if (!eqi(ti, title)) return;
+        if (ar.len > 0 and artist.len > 0 and !eqi(ar, artist)) return;
+        // 一致: LRCLIB の問い合わせをやめて、こちらを使う
+        self.cancel();
+        self.reset(.idle);
+        const data = std.fs.cwd().readFileAlloc(self.arena.allocator(), p, 1 << 20) catch return;
+        self.parse(data);
+        self.sidecar_mtime = st.mtime;
+        std.log.info("lyrics: {s} の歌詞ファイルを使用 / using lyrics from {s}", .{ player, p });
         self.changed();
     }
 
