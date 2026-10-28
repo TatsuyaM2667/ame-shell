@@ -24,7 +24,7 @@ pub const Server = struct {
         var addr = std.mem.zeroes(c.struct_sockaddr_un);
         addr.sun_family = c.AF_UNIX;
         @memcpy(addr.sun_path[0..p.len], p);
-        if (c.bind(fd, @ptrCast(&addr), @sizeOf(c.struct_sockaddr_un)) != 0) return error.Bind;
+        if (c.bind(fd, .{ .__sockaddr__ = @ptrCast(&addr) }, @as(c.socklen_t, @sizeOf(c.struct_sockaddr_un))) != 0) return error.Bind;
         _ = c.chmod(p.ptr, 0o600);
         if (c.listen(fd, 8) != 0) return error.Listen;
         s.fd = fd;
