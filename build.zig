@@ -4,6 +4,7 @@
 //   zig-out/bin/ame-shell   … シェル本体(デーモン)
 //   zig-out/bin/ame-ctl     … 制御CLI(Unixソケット経由)
 //   zig-out/share/ame-shell/widgets/*.wasm … WASMウィジェット
+//   zig-out/share/icons/ame/              … マウスカーソルのテーマ(tools/cursorgen.zig)
 //
 // 外部ツール: wayland-scanner(プロトコルXML→C), odin(アニメーションコア)。
 const std = @import("std");
@@ -239,6 +240,17 @@ pub fn build(b: *std.Build) void {
 
     // 既定設定・テーマを share に配置
     b.installDirectory(.{ .source_dir = b.path("data"), .install_dir = .{ .custom = "share/ame-shell" }, .install_subdir = "" });
+
+    // --- マウスカーソルのテーマ "ame"(tools/cursorgen.zig が SVG を nanosvg で描いて Xcursor を書く)---
+    // 古い名前は同じファイルへのシンボリックリンクなので、installDirectory(リンクを実体にして写す)を通さず
+    // 生成器が share/icons/ame に直接書く(0.2 秒ほど。毎回作り直す)
+    const cursorgen = b.addExecutable(.{ .name = "cursorgen", .root_source_file = b.path("tools/cursorgen.zig"), .target = b.graph.host, .optimize = .ReleaseFast });
+    cursorgen.linkLibC();
+    cursorgen.addIncludePath(b.path("third_party"));
+    cursorgen.addCSourceFile(.{ .file = b.path("third_party/nanosvg_impl.c"), .flags = &.{ "-O2", "-fno-sanitize=undefined" } });
+    const cursor_run = b.addRunArtifact(cursorgen);
+    cursor_run.addArg(b.getInstallPath(.prefix, "share/icons/ame"));
+    b.getInstallStep().dependOn(&cursor_run.step);
 
     // --- 実行とテスト ---
     const run = b.addRunArtifact(exe);

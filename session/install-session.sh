@@ -93,7 +93,7 @@ if [ "$UNINSTALL" = 1 ]; then
     done < "$MANIFEST"
     run rm -f "$MANIFEST"
     # 自分で作った空ディレクトリだけ片付ける(他のファイルがあれば残る)
-    for d in "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell/xdg/foot" "$DESTDIR$PREFIX/share/ame-shell/xdg/fastfetch" "$DESTDIR$PREFIX/share/ame-shell/xdg" "$DESTDIR$PREFIX/share/ame-shell" "$DESTDIR$PREFIX/opt/river-0.5/bin" "$DESTDIR$PREFIX/opt/river-0.5"; do
+    for d in "$DESTDIR$PREFIX/share/icons/ame/cursors" "$DESTDIR$PREFIX/share/icons/ame" "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell/xdg/foot" "$DESTDIR$PREFIX/share/ame-shell/xdg/fastfetch" "$DESTDIR$PREFIX/share/ame-shell/xdg" "$DESTDIR$PREFIX/share/ame-shell" "$DESTDIR$PREFIX/opt/river-0.5/bin" "$DESTDIR$PREFIX/opt/river-0.5"; do
         [ -d "$d" ] && run rmdir "$d" 2>/dev/null
     done
     say "完了しました。"
@@ -191,6 +191,15 @@ install_file() {
     echo "$dst" >> "$TMP_MANIFEST"
 }
 
+# install_link <リンク先> <dst(DESTDIR抜き)>: シンボリックリンク(カーソルの古い名前など)
+install_link() {
+    tgt=$1; dst=$2; t="$DESTDIR$dst"
+    run mkdir -p "$(dirname "$t")"
+    say "  link $dst -> $tgt"
+    run rm -f "$t" && run ln -s "$tgt" "$t"
+    echo "$dst" >> "$TMP_MANIFEST"
+}
+
 say "インストール先: ${DESTDIR}${PREFIX}($( [ "$USER_MODE" = 1 ] && echo "自分用" || echo "全ユーザー用"))"
 install_file "$OUT/bin/ame-shell" "$PREFIX/bin/ame-shell" 755
 install_file "$OUT/bin/ame-ctl" "$PREFIX/bin/ame-ctl" 755
@@ -216,6 +225,18 @@ for w in "$OUT"/share/ame-shell/widgets/*.wasm; do
     [ -f "$w" ] || continue
     install_file "$w" "$PREFIX/share/ame-shell/widgets/$(basename "$w")" 644
 done
+# マウスカーソルのテーマ "ame"(古い名前・ハッシュの名前は同じファイルへのシンボリックリンク)
+if [ -d "$OUT/share/icons/ame/cursors" ]; then
+    for f in "$OUT"/share/icons/ame/cursors/*; do
+        n=$(basename "$f")
+        if [ -L "$f" ]; then
+            install_link "$(readlink "$f")" "$PREFIX/share/icons/ame/cursors/$n"
+        else
+            install_file "$f" "$PREFIX/share/icons/ame/cursors/$n" 644
+        fi
+    done
+    install_file "$OUT/share/icons/ame/index.theme" "$PREFIX/share/icons/ame/index.theme" 644
+fi
 
 # River 0.5 を自分でビルドしている場合(~/.local/opt/river-0.5)、全ユーザーが使えるよう $PREFIX/opt へ
 if [ "$USER_MODE" = 0 ] && [ "$NEW_RIVER" = 0 ]; then

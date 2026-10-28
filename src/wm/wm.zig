@@ -133,6 +133,8 @@ pub const WSeat = struct {
     op_dx: i32 = 0,
     op_dy: i32 = 0,
     op_end_pending: bool = false,
+    /// River にカーソルのテーマ(XCURSOR_THEME / XCURSOR_SIZE)をまだ伝えていない
+    cursor_pending: bool = true,
     enter_pending: bool = false,
     ptr_moved: bool = false,
 };
@@ -266,6 +268,11 @@ pub const Wm = struct {
         self.in_manage = true;
         self.dirty_sent = false;
         defer self.in_manage = false;
+        // カーソルのテーマ: River 0.5 は環境変数を読まず、WM が seat ごとに伝える(river_seat_v1 の版 2 から)
+        for (self.seats.items) |st| if (st.cursor_pending) {
+            st.cursor_pending = false;
+            setCursorTheme(st.obj);
+        };
         const s = self.seat();
 
         // 1. 新しいウィンドウ: 出力とタグを決め、フォーカス中の窓の次に並べる
@@ -959,6 +966,17 @@ fn mgrOutput(data: ?*anyopaque, _: ?*c.struct_river_window_manager_v1, obj: ?*c.
     }
     self.outputs.append(o) catch {};
 }
+/// 環境変数のカーソルのテーマを River の seat に伝える(ame-session が XCURSOR_THEME=ame などを入れている)
+fn setCursorTheme(obj: *c.struct_river_seat_v1) void {
+    if (c.wl_proxy_get_version(@ptrCast(obj)) < 2) return;
+    const name = std.posix.getenv("XCURSOR_THEME") orelse return;
+    const size = std.fmt.parseInt(u32, std.posix.getenv("XCURSOR_SIZE") orelse "24", 10) catch 24;
+    var tb: [128]u8 = undefined;
+    const tz = std.fmt.bufPrintZ(&tb, "{s}", .{name}) catch return;
+    c.river_seat_v1_set_xcursor_theme(obj, tz.ptr, size);
+    std.log.info("カーソル: {s}({d}px)", .{ name, size });
+}
+
 fn mgrSeat(data: ?*anyopaque, _: ?*c.struct_river_window_manager_v1, obj: ?*c.struct_river_seat_v1) callconv(.C) void {
     const self: *Wm = @ptrCast(@alignCast(data.?));
     const s = self.app.alloc.create(WSeat) catch return;

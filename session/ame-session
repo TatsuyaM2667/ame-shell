@@ -50,6 +50,16 @@ export _JAVA_AWT_WM_NONREPARENTING=1
 export ELECTRON_OZONE_PLATFORM_HINT=auto
 # カーソルの大きさ(未設定のときだけ。GNOME の既定と同じ 24)
 export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
+# カーソルのテーマ: ame-shell のもの(share/icons/ame)。無ければ Adwaita。XCURSOR_THEME を自分で決めていればそのまま
+for d in "$PREFIX_DIR/share/icons" "$SELF_DIR/../zig-out/share/icons"; do
+    if [ -d "$d/ame/cursors" ]; then
+        d=$(cd "$d" && pwd)
+        # /usr/local/share/icons は Xcursor の既定の探す場所に入っていないことがあるので足す
+        export XCURSOR_PATH="$d:${XCURSOR_PATH:-$HOME/.local/share/icons:$HOME/.icons:/usr/share/icons:/usr/local/share/icons:/usr/share/pixmaps}"
+        [ -n "${XCURSOR_THEME:-}" ] || export XCURSOR_THEME=ame
+        break
+    fi
+done
 if [ -z "${XCURSOR_THEME:-}" ] && { [ -d /usr/share/icons/Adwaita/cursors ] || [ -d /usr/local/share/icons/Adwaita/cursors ]; }; then
     export XCURSOR_THEME=Adwaita
 fi
