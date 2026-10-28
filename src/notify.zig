@@ -265,6 +265,11 @@ pub const Notifs = struct {
     }
 
     /// ローカルから通知を出す(ame-ctl notify、ロック不可の警告など)
+    /// ame-shell 自身の通知(緊急度つき)。urgency 2 は消すまで残り、通知停止中でも出る。返り値の ID で置き換え・消去できる
+    pub fn postUrgency(self: *Notifs, app_name: []const u8, summary: []const u8, body: []const u8, replaces: u32, urgency: u8) u32 {
+        return self.postFull(app_name, summary, body, replaces, if (urgency == 2) 0 else self.app.cfg.notify_timeout_ms, urgency, false);
+    }
+
     pub fn post(self: *Notifs, app_name: []const u8, summary: []const u8, body: []const u8, replaces: u32) void {
         _ = self.postFull(app_name, summary, body, replaces, self.app.cfg.notify_timeout_ms, 1, false);
     }

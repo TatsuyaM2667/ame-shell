@@ -162,7 +162,11 @@ pub const Dashboard = struct {
             // 切り替えは待たずに(アダプタの電源を入れるのに 1 秒近くかかることがある)表示だけ先に変える。
             // 実際の状態は syswatch が NetworkManager / BlueZ のシグナルで受け取って直す
             .toggle_wifi => {
-                sys.spawnDetached(if (self.store.wifi_on != 0) "nmcli radio wifi off" else "nmcli radio wifi on");
+                if (@import("builtin").os.tag == .freebsd)
+                    // wpa_supplicant: 切断して自動接続も止める / 再接続
+                    sys.spawnDetached(if (self.store.wifi_on != 0) "wpa_cli disconnect" else "wpa_cli reconnect")
+                else
+                    sys.spawnDetached(if (self.store.wifi_on != 0) "nmcli radio wifi off" else "nmcli radio wifi on");
                 self.store.wifi_on ^= 1;
             },
             .toggle_bt => if (app.syswatch.bluezRunning()) {
@@ -181,8 +185,7 @@ pub const Dashboard = struct {
 
     /// Wi-Fi / Bluetooth の状態(開いたときと切り替え後だけ問い合わせる)
     fn queryRadios(self: *Dashboard) void {
-        var out: [256]u8 = undefined;
-        if (sys.run(&.{ "nmcli", "radio", "wifi" }, &out)) |s| self.store.wifi_on = @intFromBool(std.mem.startsWith(u8, s, "enabled"));
+        if (self.app.syswatch.wifiEnabled()) |on| self.store.wifi_on = @intFromBool(on);
         self.store.bt_on = @intFromBool(self.app.syswatch.btPowered());
     }
 

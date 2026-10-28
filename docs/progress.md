@@ -173,3 +173,11 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - 設定: lyrics { music-tui on|off|<URL> / lrclib on|off / netease on|off }。
 - music-tui(music-tui-bsd): TUI の表示中は stderr を $XDG_STATE_HOME/music-tui/stderr.log へ(ALSA / PipeWire の underrun などのメッセージが画面に重なって残っていた)。外部 mpv の出力も捨てる。
 - 確認: 入れ子の River 0.5(XDG_CACHE_HOME・XDG_RUNTIME_DIR・セッションバスを分離)で、music-tui の歌詞サーバ(快晴・104Hz)、NetEase(夜に駆ける、music-tui と LRCLIB を切って)、LRCLIB(Pretender)から取れることをログと画面で確認。
+
+## 2026-10-28(追記 9)バッテリー・USB の通知、FreeBSD の Wi-Fi / Bluetooth
+- バッテリー: 放電中に残りが 20% / 10% / 5% を下回ったら 1 回ずつ通知(20% は通常、10% 以下は消すまで残る緊急の通知で、通知停止中でも出る)。残り時間も添える。電源につなぐと通知を消して数え直す。設定 notifications { battery on|off }。
+- USB: 機器を挿した・抜いたら通知(Linux は uevent の usb_device、名前は sysfs の manufacturer / product、種類は最初のインターフェースのクラス)。ハブと内蔵の機器(removable = fixed。カメラ・内蔵 Bluetooth)は出さない。起動時に挿さっている機器も覚え、抜いたときに名前を出す。FreeBSD は devd のソケット(/var/run/devd.seqpacket.pipe)の USB ATTACH / DETACH、名前は usbconfig。設定 notifications { usb on|off }。
+- FreeBSD の電源・ネットワークも devd の ACPI(ACAD / CMBAT)・IFNET の知らせで即時に読み直す(以前は 20 秒ごとだけ)。
+- FreeBSD の Wi-Fi のパネル: nmcli の代わりに wpa_cli(status / list_networks / scan_results / scan / select_network、新しいネットワークは add_network → set_network ssid・psk(または key_mgmt NONE)→ select_network → save_config、disconnect / reconnect)。スキャンや接続の完了の知らせが無いので、数秒後に読み直す。scripts/freebsd-wifi.sh(root)が wpa_supplicant.conf に ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=network と update_config=1 を入れ(元は .ame-bak)、使う人を network グループに入れる。wlan0 が無ければ net.wlan.devices から作る。install-freebsd.sh と ame-update(wpa_cli が使えないとき)から呼ぶ。
+- FreeBSD の Bluetooth のパネル: アダプタ(dev.ubt.0)の有無と、/etc/bluetooth/hosts の登録済みの機器を表示。「スキャン」は端末で doas bluetooth-config scan を開く(検索・ペアリングは root の対話的な操作のため)。マウス・キーボードは bthidd が自動で接続。オン/オフは root の操作が要るので案内だけ。
+- 確認: Linux は入れ子の River 0.5 で ame-ctl debug-usb(実機の Logitech の受信機の sysfs、内蔵の Bluetooth は出ないこと)と debug-battery(19% → 18% は重ねて出さない → 9% で緊急に置き換え → 電源で消える)を撮影。freebsd-wifi.sh は偽のコマンドと試験用の設定ファイルで 2 回実行(2 回目は何も変えない)。FreeBSD はクロスビルドと、Linux のシステムコール命令が 0 個であることのみ確認(FreeBSD の実機では未確認)。

@@ -15,6 +15,8 @@ const surface = @import("../surface.zig");
 const sys = @import("../platform/sys.zig");
 const loop = @import("../platform/loop.zig");
 const Frame = @import("frame.zig").Frame;
+/// FreeBSD: Wi-Fi は wpa_supplicant(wpa_cli)、Bluetooth は netgraph + hcsecd(機器の追加は root の bluetooth-config)
+const is_bsd = @import("builtin").os.tag == .freebsd;
 
 const MAX_ITEMS = 40;
 const ROW_H: f32 = 50;
@@ -45,7 +47,7 @@ const BtDev = struct {
     }
 };
 
-const JobKind = enum { wifi_list, wifi_rescan, wifi_saved, wifi_connect, wifi_down, wifi_radio, bt_show, bt_all, bt_paired, bt_connected, bt_scan, bt_action, bt_power };
+const JobKind = enum { wifi_list, wifi_rescan, wifi_saved, wifi_connect, wifi_down, wifi_radio, bt_show, bt_all, bt_paired, bt_connected, bt_scan, bt_action, bt_power, bsd_wifi_status, bsd_wifi_add };
 
 const Job = struct {
     kind: JobKind,
@@ -68,6 +70,18 @@ pub const State = struct {
     n_devs: usize = 0,
     saved: [32][64]u8 = undefined,
     saved_len: [32]usize = undefined,
+    /// FreeBSD: wpa_supplicant の保存済みネットワークの番号(saved と同じ並び)
+    saved_id: [32]u32 = undefined,
+    /// FreeBSD: 無線の IF(wlan0 など)・今つながっている SSID・追加中のネットワーク
+    wlan_if: [16]u8 = undefined,
+    wlan_if_len: usize = 0,
+    cur_ssid: [64]u8 = undefined,
+    cur_ssid_len: usize = 0,
+    pend_ssid: [64]u8 = undefined,
+    pend_ssid_len: usize = 0,
+    pend_pw: [128]u8 = undefined,
+    pend_pw_len: usize = 0,
+    pend_secure: bool = false,
     n_saved: usize = 0,
     // 非同期ジョブ
     queue: [8]Job = undefined,
@@ -202,6 +216,7 @@ fn isSaved(st: *const State, ssid: []const u8) bool {
 }
 
 fn finish(st: *State, j: Job, out: []const u8) void {
+    if (is_bsd) return finishBsd(st, j, out);
     const trimmed = std.mem.trim(u8, out, " \n");
     switch (j.kind) {
         // スキャンを頼めなかった(直前にスキャンした等): 待っても NetworkManager のシグナルは来ないので、覚えている一覧を出す
@@ -337,6 +352,7 @@ fn finish(st: *State, j: Job, out: []const u8) void {
                 }.lt);
             }
         },
+        .bsd_wifi_status, .bsd_wifi_add => {}, // FreeBSD 専用(finishBsd)
         .bt_scan => {
             st.busy_scan = false;
             refreshBt(st);
@@ -364,8 +380,9 @@ fn onScanRead(ctx: *anyopaque, fd: c_int, _: u32) void {
     _ = c.close(fd);
     st.scan_fd = -1;
     st.busy_scan = false;
-    st.status_len = 0;
-    refreshBt(st);
+    if (!is_bsd) st.status_len = 0;
+    // Bluetooth のスキャンが終わった / FreeBSD は待ち時間が過ぎた: 一覧を読み直す
+    if (st.tab == 0) refreshWifi(st, false) else refreshBt(st);
     f.schedule();
 }
 
@@ -379,6 +396,7 @@ fn restartAppear(st: *State) void {
 }
 
 pub fn refreshWifi(st: *State, rescan: bool) void {
+    if (is_bsd) return refreshWifiBsd(st, rescan);
     if (!sys.hasCommand("nmcli")) {
         setStatus(st, "Wi-Fi の設定には NetworkManager(nmcli)が必要です", false);
         return;
@@ -399,6 +417,7 @@ pub fn refreshWifi(st: *State, rescan: bool) void {
 }
 
 pub fn refreshBt(st: *State) void {
+    if (is_bsd) return refreshBtBsd(st);
     if (!sys.hasCommand("bluetoothctl")) {
         setStatus(st, "Bluetooth の設定には BlueZ(bluetoothctl)が必要です", false);
         return;
@@ -419,6 +438,11 @@ pub fn onOpen(f: *Frame) void {
     st.frame = f;
     st.status_len = 0;
     st.editing = null;
+    if (is_bsd) {
+        // 覚えている一覧をすぐ出し、裏でスキャン(数秒後に読み直す)
+        if (st.tab == 0) refreshWifiBsd(st, true) else refreshBtBsd(st);
+        return;
+    }
     if (st.tab == 0) {
         refreshWifi(st, false);
         // 古い一覧を出したまま、裏で新しくスキャンしてもらう(終われば syswatch が一覧を読み直す)
@@ -427,6 +451,7 @@ pub fn onOpen(f: *Frame) void {
 }
 
 fn connectWifi(st: *State, i: usize, with_pw: bool) void {
+    if (is_bsd) return connectWifiBsd(st, i, with_pw);
     const n = &st.nets[i];
     var msg: [96]u8 = undefined;
     const ok = std.fmt.bufPrint(&msg, "{s} に接続しました", .{n.name()}) catch "接続しました";
@@ -440,6 +465,270 @@ fn connectWifi(st: *State, i: usize, with_pw: bool) void {
     } else {
         push(st, makeJob(.wifi_connect, &.{ "nmcli", "dev", "wifi", "connect", n.name() }, ok));
     }
+}
+
+// ---------------------------------------------------------------------------
+// FreeBSD: Wi-Fi は wpa_supplicant を wpa_cli で、Bluetooth は netgraph(ng_ubt)+ hcsecd。
+// wpa_cli を一般ユーザーで使うには wpa_supplicant.conf の ctrl_interface_group と、そのグループへの
+// 参加が要る(scripts/freebsd-wifi.sh が設定する)。Bluetooth の検索・ペアリングは root の
+// bluetooth-config なので、端末を開いて行う(マウス・キーボードは bthidd が自動でつなぐ)。
+// ---------------------------------------------------------------------------
+
+/// 無線の IF 名(ifconfig -l の wlanN)。無ければ空
+fn wlanIf(st: *State) []const u8 {
+    if (st.wlan_if_len == 0) {
+        var b: [512]u8 = undefined;
+        if (sys.run(&.{ "ifconfig", "-l" }, &b)) |s| {
+            var it = std.mem.tokenizeAny(u8, s, " \n");
+            while (it.next()) |t| if (std.mem.startsWith(u8, t, "wlan") and t.len < st.wlan_if.len) {
+                @memcpy(st.wlan_if[0..t.len], t);
+                st.wlan_if_len = t.len;
+                break;
+            };
+        }
+    }
+    return st.wlan_if[0..st.wlan_if_len];
+}
+
+/// wpa_cli -i <IF> <args…> を列に並べる
+fn wpa(st: *State, kind: JobKind, args: []const []const u8, ok: []const u8) void {
+    var av: [10][]const u8 = undefined;
+    av[0] = "wpa_cli";
+    av[1] = "-i";
+    av[2] = wlanIf(st);
+    for (args, 0..) |a, i| av[3 + i] = a;
+    push(st, makeJob(kind, av[0 .. 3 + args.len], ok));
+}
+
+/// 数秒後にもう一度一覧を読む(スキャンや接続の完了を知らせる仕組みが無いので、時間で待つ)
+fn refreshLater(st: *State, secs: u8) void {
+    const f = st.frame orelse return;
+    if (st.scan_fd >= 0) return;
+    var nb: [4]u8 = undefined;
+    const s = std.fmt.bufPrintZ(&nb, "{d}", .{secs}) catch return;
+    st.scan_fd = sys.spawnReader(&.{ "sleep", s.ptr }, &st.scan_pid) orelse return;
+    f.app.loop.add(st.scan_fd, c.EPOLLIN | c.EPOLLHUP, st, onScanRead) catch {};
+}
+
+fn refreshWifiBsd(st: *State, rescan: bool) void {
+    if (!sys.hasCommand("wpa_cli")) {
+        setStatus(st, "wpa_cli が見つかりません", true);
+        return;
+    }
+    if (wlanIf(st).len == 0) {
+        setStatus(st, "無線 LAN(wlan0)がありません。doas sh ~/ame-shell/scripts/freebsd-wifi.sh で設定できます", true);
+        return;
+    }
+    wpa(st, .bsd_wifi_status, &.{"status"}, "");
+    wpa(st, .wifi_saved, &.{"list_networks"}, "");
+    wpa(st, .wifi_list, &.{"scan_results"}, "");
+    if (rescan) {
+        wpa(st, .wifi_rescan, &.{"scan"}, "");
+        st.busy_scan = true;
+        refreshLater(st, 4);
+    }
+}
+
+fn savedId(st: *const State, ssid: []const u8) ?u32 {
+    for (0..st.n_saved) |i| if (std.mem.eql(u8, st.saved[i][0..st.saved_len[i]], ssid)) return st.saved_id[i];
+    return null;
+}
+
+fn connectWifiBsd(st: *State, i: usize, with_pw: bool) void {
+    const n = &st.nets[i];
+    var msg: [96]u8 = undefined;
+    const ok = std.fmt.bufPrint(&msg, "{s} に接続しています…", .{n.name()}) catch "接続しています…";
+    setStatus(st, "接続しています…", false);
+    if (!with_pw) if (savedId(st, n.name())) |id| {
+        var ib: [12]u8 = undefined;
+        wpa(st, .wifi_connect, &.{ "select_network", std.fmt.bufPrint(&ib, "{d}", .{id}) catch "0" }, ok);
+        refreshLater(st, 6);
+        return;
+    };
+    // 新しいネットワーク: add_network の番号が返ってきてから設定する(finishBsd)
+    st.pend_ssid_len = n.ssid_len;
+    @memcpy(st.pend_ssid[0..n.ssid_len], n.ssid[0..n.ssid_len]);
+    st.pend_secure = n.secure;
+    st.pend_pw_len = if (with_pw) st.pw_len else 0;
+    @memcpy(st.pend_pw[0..st.pend_pw_len], st.pw[0..st.pend_pw_len]);
+    @memset(&st.pw, 0);
+    st.pw_len = 0;
+    wpa(st, .bsd_wifi_add, &.{"add_network"}, "");
+}
+
+fn refreshBtBsd(st: *State) void {
+    // アダプタ(ng_ubt が付いた USB の Bluetooth)があるか
+    var b: [256]u8 = undefined;
+    st.bt_on = sys.run(&.{ "sysctl", "-n", "dev.ubt.0.%desc" }, &b) != null;
+    // 登録済みの機器: /etc/bluetooth/hosts(bluetooth-config が名前を書く。誰でも読める)
+    st.n_devs = 0;
+    var fb: [8192]u8 = undefined;
+    if (sys.readFile("/etc/bluetooth/hosts", &fb)) |s| {
+        var it = std.mem.splitScalar(u8, s, '\n');
+        while (it.next()) |raw| {
+            const l = std.mem.trim(u8, raw, " \t\r");
+            if (l.len < 17 or l[0] == '#' or st.n_devs >= MAX_ITEMS) continue;
+            var toks = std.mem.tokenizeAny(u8, l, " \t");
+            const addr = toks.next() orelse continue;
+            if (addr.len != 17) continue;
+            var d = BtDev{ .paired = true };
+            @memcpy(&d.mac, addr);
+            const nm = std.mem.trim(u8, toks.rest(), " \t");
+            const name = if (nm.len > 0) nm else addr;
+            d.name_len = @min(name.len, d.name_buf.len);
+            @memcpy(d.name_buf[0..d.name_len], name[0..d.name_len]);
+            st.devs[st.n_devs] = d;
+            st.n_devs += 1;
+        }
+    }
+    restartAppear(st);
+    if (!st.bt_on) setStatus(st, "Bluetooth のアダプタが見つかりません(doas sh ~/ame-shell/scripts/freebsd-bluetooth.sh)", false) else if (st.n_devs == 0) setStatus(st, "「スキャン」で機器を探してペアリングします(管理者のパスワードを聞かれます)", false);
+    if (st.frame) |f| f.schedule();
+}
+
+/// 機器の検索・ペアリング(bluetooth-config scan は root で対話的に動くので、端末を開く)
+fn openBtConfigBsd(st: *State) void {
+    const f = st.frame orelse return;
+    var cb: [384]u8 = undefined;
+    const cmd = std.fmt.bufPrintZ(&cb, "{s} -e sh -c 'doas bluetooth-config scan; echo; echo \"Enter で閉じます\"; read _'", .{f.app.cfg.terminal.get()}) catch return;
+    f.app.spawn(cmd);
+    setStatus(st, "端末で機器を選んでください。終わったらパネルを開き直すと一覧に出ます", false);
+}
+
+fn finishBsd(st: *State, j: Job, out: []const u8) void {
+    const trimmed = std.mem.trim(u8, out, " \n");
+    const has = struct {
+        fn f(hay: []const u8, needle: []const u8) bool {
+            return std.mem.indexOf(u8, hay, needle) != null;
+        }
+    }.f;
+    // wpa_supplicant の操作口に入れない(グループの設定が無い)
+    if (has(out, "Failed to connect to non-global ctrl_ifname") or has(out, "Permission denied")) {
+        setStatus(st, "wpa_supplicant を操作する権限がありません: doas sh ~/ame-shell/scripts/freebsd-wifi.sh", true);
+        st.busy_scan = false;
+        return;
+    }
+    switch (j.kind) {
+        .bsd_wifi_status => {
+            var state: []const u8 = "";
+            st.cur_ssid_len = 0;
+            var it = std.mem.splitScalar(u8, out, '\n');
+            var ssid: []const u8 = "";
+            while (it.next()) |l| {
+                if (std.mem.startsWith(u8, l, "wpa_state=")) state = std.mem.trim(u8, l[10..], " \r");
+                if (std.mem.startsWith(u8, l, "ssid=")) ssid = std.mem.trim(u8, l[5..], " \r");
+            }
+            st.wifi_on = !(std.mem.eql(u8, state, "DISCONNECTED") or std.mem.eql(u8, state, "INTERFACE_DISABLED"));
+            if (std.mem.eql(u8, state, "COMPLETED")) {
+                st.cur_ssid_len = @min(ssid.len, st.cur_ssid.len);
+                @memcpy(st.cur_ssid[0..st.cur_ssid_len], ssid[0..st.cur_ssid_len]);
+            }
+        },
+        .wifi_saved => {
+            // network id / ssid / bssid / flags
+            st.n_saved = 0;
+            var it = std.mem.splitScalar(u8, out, '\n');
+            while (it.next()) |l| {
+                var f = std.mem.splitScalar(u8, l, '\t');
+                const id = std.fmt.parseInt(u32, std.mem.trim(u8, f.next() orelse continue, " "), 10) catch continue;
+                const ssid = f.next() orelse continue;
+                if (ssid.len == 0 or st.n_saved >= st.saved.len) continue;
+                const n = @min(ssid.len, 64);
+                @memcpy(st.saved[st.n_saved][0..n], ssid[0..n]);
+                st.saved_len[st.n_saved] = n;
+                st.saved_id[st.n_saved] = id;
+                st.n_saved += 1;
+            }
+        },
+        .wifi_list => {
+            // bssid / frequency / signal level / flags / ssid
+            st.busy_scan = st.scan_fd >= 0 and st.busy_scan;
+            st.n_nets = 0;
+            var it = std.mem.splitScalar(u8, out, '\n');
+            while (it.next()) |l| {
+                var f = std.mem.splitScalar(u8, l, '\t');
+                const bssid = f.next() orelse continue;
+                if (bssid.len != 17) continue;
+                _ = f.next() orelse continue;
+                const lvl = std.fmt.parseInt(i32, std.mem.trim(u8, f.next() orelse continue, " "), 10) catch 0;
+                const flags = f.next() orelse "";
+                const ssid = std.mem.trimRight(u8, f.rest(), "\r");
+                if (ssid.len == 0) continue;
+                // dBm(負)なら -100〜-50 を 0〜100% に。正の値はそのまま %
+                const sig: u8 = @intCast(if (lvl < 0) std.math.clamp(2 * (lvl + 100), 0, 100) else std.math.clamp(lvl, 0, 100));
+                const active = std.mem.eql(u8, ssid, st.cur_ssid[0..st.cur_ssid_len]);
+                var dup: ?usize = null;
+                for (st.nets[0..st.n_nets], 0..) |*e, k| if (std.mem.eql(u8, e.name(), ssid)) {
+                    dup = k;
+                };
+                if (dup) |k| {
+                    if (sig > st.nets[k].signal) st.nets[k].signal = sig;
+                    continue;
+                }
+                if (st.n_nets >= MAX_ITEMS) break;
+                var e = WifiNet{ .signal = sig, .secure = has(flags, "WPA") or has(flags, "RSN") or has(flags, "WEP") or has(flags, "SAE"), .active = active };
+                e.ssid_len = @min(ssid.len, e.ssid.len);
+                @memcpy(e.ssid[0..e.ssid_len], ssid[0..e.ssid_len]);
+                e.saved = isSaved(st, e.name());
+                st.nets[st.n_nets] = e;
+                st.n_nets += 1;
+            }
+            sortNets(st);
+            restartAppear(st);
+        },
+        .wifi_rescan => if (has(trimmed, "FAIL")) {
+            // スキャンを頼めなかった(直前にスキャンした等): 覚えている一覧のまま
+            st.busy_scan = false;
+        },
+        .bsd_wifi_add => {
+            // 返ってきた番号に SSID・パスワードを設定し、つなぎ、設定ファイルに保存する
+            const last = std.mem.trim(u8, trimmed[(std.mem.lastIndexOfScalar(u8, trimmed, '\n') orelse 0)..], " \n");
+            const id = std.fmt.parseInt(u32, last, 10) catch {
+                setStatus(st, "ネットワークを追加できません", true);
+                return;
+            };
+            var ib: [12]u8 = undefined;
+            const ids = std.fmt.bufPrint(&ib, "{d}", .{id}) catch return;
+            var sb: [80]u8 = undefined;
+            const q_ssid = std.fmt.bufPrint(&sb, "\"{s}\"", .{st.pend_ssid[0..st.pend_ssid_len]}) catch return;
+            wpa(st, .wifi_radio, &.{ "set_network", ids, "ssid", q_ssid }, "");
+            if (st.pend_secure) {
+                var pb: [140]u8 = undefined;
+                const q_pw = std.fmt.bufPrint(&pb, "\"{s}\"", .{st.pend_pw[0..st.pend_pw_len]}) catch return;
+                wpa(st, .wifi_radio, &.{ "set_network", ids, "psk", q_pw }, "");
+                @memset(&pb, 0);
+            } else wpa(st, .wifi_radio, &.{ "set_network", ids, "key_mgmt", "NONE" }, "");
+            @memset(&st.pend_pw, 0);
+            st.pend_pw_len = 0;
+            var mb: [96]u8 = undefined;
+            wpa(st, .wifi_connect, &.{ "select_network", ids }, std.fmt.bufPrint(&mb, "{s} に接続しています…", .{st.pend_ssid[0..st.pend_ssid_len]}) catch "接続しています…");
+            wpa(st, .wifi_radio, &.{"save_config"}, "");
+            refreshLater(st, 6);
+        },
+        .wifi_connect, .wifi_down => {
+            if (has(out, "FAIL")) {
+                var msg: [160]u8 = undefined;
+                setStatus(st, std.fmt.bufPrint(&msg, "失敗: {s}", .{firstLine(trimmed)}) catch "失敗", true);
+            } else {
+                setStatus(st, j.ok_msg[0..j.ok_len], false);
+                st.editing = null;
+            }
+            refreshLater(st, 4);
+        },
+        // set_network・save_config など: 結果は使わない
+        else => {},
+    }
+}
+
+fn sortNets(st: *State) void {
+    // 接続中 → 保存済み → 電波の強い順
+    std.mem.sort(WifiNet, st.nets[0..st.n_nets], {}, struct {
+        fn lt(_: void, a: WifiNet, b: WifiNet) bool {
+            if (a.active != b.active) return a.active;
+            if (a.saved != b.saved) return a.saved;
+            return a.signal > b.signal;
+        }
+    }.lt);
 }
 
 // ---------------------------------------------------------------------------
@@ -618,6 +907,14 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
     }
     // 電源スイッチ
     if (ly >= 66 and ly < 98 and lx >= 110 and lx < 176) {
+        if (is_bsd) {
+            if (st.tab == 0) {
+                // wpa_supplicant: オフ = 切断して自動接続も止める / オン = 再接続
+                st.wifi_on = !st.wifi_on;
+                wpa(st, .wifi_down, &.{if (st.wifi_on) "reconnect" else "disconnect"}, if (st.wifi_on) "Wi-Fi をオンにしました" else "Wi-Fi をオフにしました");
+            } else setStatus(st, "FreeBSD の Bluetooth のオン/オフは管理者の操作(service hcsecd など)が必要です", false);
+            return true;
+        }
         if (st.tab == 0) {
             st.wifi_on = !st.wifi_on;
             push(st, makeJob(.wifi_down, &.{ "nmcli", "radio", "wifi", if (st.wifi_on) "on" else "off" }, if (st.wifi_on) "Wi-Fi をオンにしました" else "Wi-Fi をオフにしました"));
@@ -628,6 +925,10 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
         return true;
     }
     if (hov == 201) {
+        if (is_bsd and st.tab == 1) {
+            openBtConfigBsd(st);
+            return true;
+        }
         if (st.tab == 0) refreshWifi(st, true) else if (!st.busy_scan) {
             st.busy_scan = true;
             setStatus(st, "周囲のデバイスを探しています(10 秒)…", false);
@@ -645,7 +946,10 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
             if (lx >= w - 106) connectWifi(st, i, true);
             return true;
         }
-        if (e.active) {
+        if (e.active and is_bsd) {
+            setStatus(st, "切断しています…", false);
+            wpa(st, .wifi_down, &.{"disconnect"}, std.fmt.bufPrint(&msg, "{s} から切断しました", .{e.name()}) catch "切断しました");
+        } else if (e.active) {
             setStatus(st, "切断しています…", false);
             push(st, makeJob(.wifi_down, &.{ "nmcli", "connection", "down", "id", e.name() }, std.fmt.bufPrint(&msg, "{s} から切断しました", .{e.name()}) catch "切断しました"));
         } else if (e.secure and !e.saved) {
@@ -653,6 +957,9 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
             st.pw_len = 0;
             f.updateKeyboardPub();
         } else connectWifi(st, i, false);
+    } else if (is_bsd) {
+        // FreeBSD: マウス・キーボードは bthidd が自動でつなぐ。音声機器は virtual_oss などの別の設定が要る
+        setStatus(st, "FreeBSD ではマウス・キーボードは自動で接続されます(新しい機器は「スキャン」から)", false);
     } else {
         const d = &st.devs[i];
         const mac: []const u8 = &d.mac;

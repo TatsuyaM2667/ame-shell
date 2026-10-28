@@ -74,6 +74,10 @@ pub const Config = struct {
     terminal: Str = Str.of("foot"),
     // notifications
     notify_timeout_ms: u32 = 6000,
+    /// バッテリーの残りが少なくなったとき(20% / 10% / 5%)に知らせる
+    notify_battery: bool = true,
+    /// USB の機器を挿した・抜いたときに知らせる
+    notify_usb: bool = true,
     // lock
     lock_enabled: bool = true,
 };
@@ -322,6 +326,10 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
     } else if (eq(u8, sec, "notifications")) {
         if (eq(u8, key, "timeout")) {
             if (num(val)) |n| cfg.notify_timeout_ms = @intFromFloat(std.math.clamp(n, 500, 600000)) else ok = false;
+        } else if (eq(u8, key, "battery")) {
+            cfg.notify_battery = boolean(val) orelse true;
+        } else if (eq(u8, key, "usb")) {
+            cfg.notify_usb = boolean(val) orelse true;
         } else ok = false;
     } else if (eq(u8, sec, "lyrics")) {
         if (eq(u8, key, "music-tui")) {

@@ -126,6 +126,23 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
         // 試験用(AME_DEBUG が設定されているときだけ): 「アーティスト|曲名|長さ秒|位置秒」で再生中のふりをする
         if (std.posix.getenv("AME_DEBUG") == null) return "error: AME_DEBUG が必要です";
         app.media.debugFake(rest);
+    } else if (eq(u8, cmd, "debug-battery")) {
+        // 試験用(AME_DEBUG のときだけ): 「残り% [ac]」の電池の状態にして、少なくなったときの通知を確かめる
+        if (std.posix.getenv("AME_DEBUG") == null) return "error: AME_DEBUG が必要です";
+        app.debug_battery = true;
+        app.sys.battery.present = true;
+        app.sys.battery.percent = std.fmt.parseInt(u8, arg, 10) catch return "error: 残り% を数で";
+        app.sys.battery.on_ac = std.mem.indexOf(u8, rest, "ac") != null;
+        app.sys.battery.charging = app.sys.battery.on_ac;
+        app.syswatch.checkBattery();
+        app.redrawBars();
+    } else if (eq(u8, cmd, "debug-usb")) {
+        // 試験用(AME_DEBUG のときだけ): 「add|remove <sysfs の DEVPATH>」の uevent を受け取ったことにする
+        if (std.posix.getenv("AME_DEBUG") == null) return "error: AME_DEBUG が必要です";
+        const dp = std.mem.trim(u8, rest[@min(rest.len, arg.len)..], " ");
+        var mb: [512]u8 = undefined;
+        const msg = std.fmt.bufPrint(&mb, "{s}@{s}\x00ACTION={s}\x00DEVPATH={s}\x00SUBSYSTEM=usb\x00DEVTYPE=usb_device\x00", .{ arg, dp, arg, dp }) catch return "error";
+        app.syswatch.usbUeventPub(msg);
     } else if (eq(u8, cmd, "debug-error")) {
         // 試験用(AME_DEBUG のときだけ): 失敗時の赤い光
         if (std.posix.getenv("AME_DEBUG") == null) return "error: AME_DEBUG が必要です";

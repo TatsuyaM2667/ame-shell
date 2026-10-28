@@ -54,6 +54,8 @@ apps {
 
 notifications {
   timeout 6000            // ms
+  battery on              // バッテリーの残りが 20% / 10% / 5% になったら知らせる
+  usb on                  // USB の機器を挿した・抜いたら知らせる
 }
 
 lock {

@@ -214,6 +214,8 @@ fi
 sh "$REPO/scripts/freebsd-touchpad.sh"
 # Bluetooth(ファームウェア・ng_ubt・hcsecd / sdpd / bthidd)
 sh "$REPO/scripts/freebsd-bluetooth.sh"
+# Wi-Fi(wpa_supplicant を ame-shell のパネルから操作できるように)
+sh "$REPO/scripts/freebsd-wifi.sh" --user "$TARGET_USER"
 
 # ---------------------------------------------------------------------------
 say "4/5 ツールチェイン(Zig $ZIG_VER・Odin $ODIN_TAG)"

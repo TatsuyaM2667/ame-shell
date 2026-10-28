@@ -179,6 +179,10 @@ if [ "$OS" = FreeBSD ] && [ "$CHECK" = 0 ] && [ "$DO_PKG" = 1 ]; then
         *" ng_ubt "*) ;;
         *) [ -f "$SRC/scripts/freebsd-bluetooth.sh" ] && { say "Bluetooth"; as_root sh "$SRC/scripts/freebsd-bluetooth.sh"; } ;;
     esac
+    # Wi-Fi: パネルから wpa_supplicant を操作できなければ設定する(wpa_supplicant.conf と network グループ)
+    if ifconfig -l 2>/dev/null | grep -q wlan && ! wpa_cli status >/dev/null 2>&1; then
+        [ -f "$SRC/scripts/freebsd-wifi.sh" ] && { say "Wi-Fi"; as_root sh "$SRC/scripts/freebsd-wifi.sh" --user "$(id -un)"; }
+    fi
     # ログイン画面(SDDM)の背景を今の壁紙に(同じ壁紙なら何もしない)
     [ -f "$SRC/scripts/sddm-theme.sh" ] && as_root sh "$SRC/scripts/sddm-theme.sh" --user "$(id -un)"
 fi

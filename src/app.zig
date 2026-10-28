@@ -194,6 +194,8 @@ pub const App = struct {
     ipc_server: ipc.Server = undefined,
     supertap: SuperTap = undefined,
     initialized: bool = false,
+    /// 試験用(ame-ctl debug-battery): 電池の状態を実機の値で上書きしない
+    debug_battery: bool = false,
     /// 描画中にサーフェスを消せないので、消したいものはループの最後にまとめて片付ける
     reap_pending: bool = false,
     read_done: bool = false,
@@ -551,7 +553,7 @@ pub const App = struct {
 
     pub fn refreshSys(self: *App, all: bool) void {
         const prev_ac = self.sys.battery.on_ac;
-        self.sys.battery = sys.battery();
+        if (!self.debug_battery) self.sys.battery = sys.battery();
         self.sys.brightness = sys.brightness();
         self.sys.net = sys.network();
         if (all) self.sys.volume = sys.volume();
@@ -559,6 +561,8 @@ pub const App = struct {
             // 電源が変わったら壁紙の FPS/解像度を切り替える
             for (self.outputs.items) |o| if (o.wall) |w| w.powerChanged();
         }
+        // 残りが少なくなったら通知(syswatch は初期化の後に作られる)
+        if (self.initialized) self.syswatch.checkBattery();
     }
 
     pub fn sampleCpu(self: *App) void {
