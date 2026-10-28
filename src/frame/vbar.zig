@@ -39,6 +39,9 @@ pub const Bar = struct {
     bt_checked_ms: u64 = 0,
     logo_tex: c.GLuint = 0,
     logo_tried: bool = false,
+    /// 画像のロゴが無い OS のロゴ(Nerd Font の Font Logos の 1 文字)と色
+    logo_glyph: []const u8 = "",
+    logo_color: ?Color = null,
 
     fn focusedIndex(f: *Frame) f32 {
         const t = f.out.focused_tags;
@@ -116,12 +119,21 @@ pub const Bar = struct {
             if (!self.logo_tried) {
                 self.logo_tried = true;
                 self.logo_tex = loadOsLogo();
+                if (self.logo_tex == 0) if (osLogoGlyph()) |g| {
+                    self.logo_glyph = g.glyph;
+                    self.logo_color = g.color;
+                };
             }
             if (self.logo_tex != 0) {
                 // OS のロゴ(/etc/os-release の LOGO=)。ホバーで少し大きく、背後に淡い光
                 const s: f32 = 26 + 4 * hv;
                 if (hv > 0.01) cv.shadow(cx - s / 2, y + 15 - s / 2, s, s, s / 2, 10, acc.alpha(0.5 * hv));
                 cv.image(self.logo_tex, cx - s / 2, y + 15 - s / 2, s, s, 0);
+            } else if (self.logo_glyph.len > 0) {
+                // OS のロゴの文字(FreeBSD など。Nerd Font の Font Logos)。ホバーで少し大きく、光る
+                const col = self.logo_color orelse Color.mix(acc, txt, 0.2);
+                const s: f32 = 26 + 3 * hv;
+                _ = cv.text(cx, y + 15 + s * 0.36, s, col, self.logo_glyph, .{ .alignment = .center, .glow = 2 + 5 * hv, .glow_color = col.alpha(0.55) });
             } else {
                 cv.rect(cx - 15, y, 30, 30, 15, acc.alpha(0.14 + 0.2 * hv));
                 _ = cv.text(cx, y + 22, 18, Color.mix(acc, txt, 0.3), "雨", .{ .bold = true, .alignment = .center, .glow = 3 + 4 * hv, .glow_color = acc.alpha(0.6) });
@@ -498,7 +510,42 @@ pub fn drawPopout(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
 
 /// /etc/os-release の LOGO=(Chimera なら chimera-logo)をアイコンテーマから探して読み込む。
 /// 起動直後に呼ばれるので、全テーマの索引は作らず hicolor だけを見る。
+/// /etc/os-release の ID(無ければ OS の種類)から、Nerd Font の Font Logos の文字を選ぶ。
+/// AME_OS_ID で上書きできる(試験用)。
+fn osLogoGlyph() ?struct { glyph: []const u8, color: ?Color } {
+    var b: [1024]u8 = undefined;
+    var id: []const u8 = if (@import("builtin").os.tag == .freebsd) "freebsd" else "";
+    if (sys.readFile("/etc/os-release", &b)) |s| {
+        var lines = std.mem.splitScalar(u8, s, '\n');
+        while (lines.next()) |l| {
+            if (std.mem.startsWith(u8, l, "ID=")) id = std.mem.trim(u8, l[3..], "\"");
+        }
+    }
+    if (std.posix.getenv("AME_OS_ID")) |e| id = e;
+    const table = [_]struct { id: []const u8, glyph: []const u8, color: u32 }{
+        .{ .id = "freebsd", .glyph = "\u{F30C}", .color = 0xd2302c }, // FreeBSD の赤
+        .{ .id = "arch", .glyph = "\u{F303}", .color = 0x1793d1 },
+        .{ .id = "debian", .glyph = "\u{F306}", .color = 0xd70a53 },
+        .{ .id = "fedora", .glyph = "\u{F30A}", .color = 0x51a2da },
+        .{ .id = "ubuntu", .glyph = "\u{F31B}", .color = 0xe95420 },
+        .{ .id = "alpine", .glyph = "\u{F300}", .color = 0x2c8dc4 },
+        .{ .id = "gentoo", .glyph = "\u{F30D}", .color = 0x9f95d6 },
+        .{ .id = "nixos", .glyph = "\u{F313}", .color = 0x7ebae4 },
+        .{ .id = "void", .glyph = "\u{F32E}", .color = 0x478061 },
+        .{ .id = "linuxmint", .glyph = "\u{F30E}", .color = 0x87cf3e },
+        .{ .id = "manjaro", .glyph = "\u{F312}", .color = 0x35bf5c },
+    };
+    for (table) |t| if (std.mem.eql(u8, t.id, id)) {
+        return .{ .glyph = t.glyph, .color = Color.hex(t.color) };
+    };
+    // その他の Linux はペンギン(テーマの色)
+    if (@import("builtin").os.tag == .linux and id.len > 0) return .{ .glyph = "\u{F31A}", .color = null };
+    return null;
+}
+
 fn loadOsLogo() c.GLuint {
+    // AME_OS_ID で別の OS のロゴを試しているときは画像のロゴを使わない
+    if (std.posix.getenv("AME_OS_ID") != null) return 0;
     const icons = @import("../icons.zig");
     var b: [1024]u8 = undefined;
     var name: []const u8 = "";

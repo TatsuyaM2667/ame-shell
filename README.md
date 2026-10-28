@@ -62,6 +62,18 @@ sh install.sh --uninstall [--user]
 
 `install.sh` が依存パッケージ(Chimera Linux は自動。他のディストリは足りないものを表示)、Zig 0.13、Odin、River(無ければ River 0.5 をソースから)、ame-shell のビルドとインストールまで行います。
 どのユーザーが実行しても構いません。doas / sudo が使えない人は自動で `--user` になります。全ユーザー用では、自分でビルドした River 0.5(`~/.local/opt/river-0.5`)も `/usr/local/opt` にコピーされ、他のアカウントからも River 0.5 のセッションが使えます。
+foot は自分の `~/.config/foot/foot.ini` が無ければ、ame-shell の半透明の設定(`data/xdg/foot/foot.ini`)で開きます。
+
+### アップデート(ame-update)
+
+```sh
+ame-update            # OS のパッケージ(FreeBSD は pkg、Chimera は apk)→ ame-shell(git pull → ビルド → インストール)→ 再起動
+ame-update --check    # 更新があるかを見るだけ
+ame-update --no-pkg   # ame-shell だけ(--no-self でパッケージだけ)
+```
+
+ランチャーで `>` → 「アップデート」からも実行できます(端末が開きます)。root が必要な作業は doas → sudo → su の順に使える方で行います。
+ソースに手元の変更があるときは `git pull` をせず、今のソースでビルドします。動いている ame-shell は新しい版で起動し直します(窓とワークスペースはそのまま)。
 
 ### FreeBSD(14 / 15、amd64)
 

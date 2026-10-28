@@ -73,9 +73,10 @@ pub const Wall = struct {
     px: ?[*]u8 = null,
 };
 
-const Action = enum { wallpaper, lock, logout, sleep, reboot, poweroff };
+const Action = enum { wallpaper, update, lock, logout, sleep, reboot, poweroff };
 const actions = [_]struct { a: Action, icon: []const u8, name: []const u8, desc: []const u8, keys: []const u8 }{
     .{ .a = .wallpaper, .icon = "\u{F0E09}", .name = "壁紙", .desc = "壁紙を選ぶ", .keys = "wallpaper kabegami" },
+    .{ .a = .update, .icon = "\u{F06B0}", .name = "アップデート", .desc = "パッケージと ame-shell を更新する(ame-update)", .keys = "update upgrade appudeto koushin" },
     .{ .a = .lock, .icon = "\u{F033E}", .name = "ロック", .desc = "画面をロックする", .keys = "lock rokku" },
     .{ .a = .logout, .icon = "\u{F0343}", .name = "ログアウト", .desc = "River を終了する", .keys = "logout exit" },
     .{ .a = .sleep, .icon = "\u{F04B2}", .name = "スリープ", .desc = "ロックしてサスペンド", .keys = "sleep suspend" },
@@ -584,10 +585,12 @@ pub const Launcher = struct {
                     .logout => self.app.riverCommand(&.{"exit"}),
                     .sleep => {
                         _ = self.app.lock.lock();
-                        sys.spawnDetached("sleep 1; loginctl suspend");
+                        sys.power(.suspend_);
                     },
-                    .reboot => sys.spawnDetached("loginctl reboot"),
-                    .poweroff => sys.spawnDetached("loginctl poweroff"),
+                    .reboot => sys.power(.reboot),
+                    .poweroff => sys.power(.poweroff),
+                    // 端末で ame-update を実行(root のパスワードを聞かれることがあるので端末の中で)
+                    .update => sys.spawnDetached("foot -T ame-update -e sh -c 'ame-update; echo; printf \"Enter で閉じます \"; read x'"),
                     .wallpaper => {},
                 }
                 return;

@@ -281,10 +281,10 @@ fn runSession(f: *Frame, a: SessionAction) void {
         .logout => app.riverCommand(&.{"exit"}),
         .sleep => {
             _ = app.lock.lock();
-            sys.spawnDetached("sleep 1; loginctl suspend");
+            sys.power(.suspend_);
         },
-        .reboot => sys.spawnDetached("loginctl reboot"),
-        .poweroff => sys.spawnDetached("loginctl poweroff"),
+        .reboot => sys.power(.reboot),
+        .poweroff => sys.power(.poweroff),
     }
 }
 

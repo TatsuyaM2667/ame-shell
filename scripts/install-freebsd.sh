@@ -102,7 +102,7 @@ REQUIRED="
 OPTIONAL="
  playerctl cava swaylock grim slurp wl-clipboard mpv ffmpeg
  xdg-desktop-portal xdg-desktop-portal-wlr
- noto-sans-jp nerd-fonts-symbols
+ noto-sans-jp nerd-fonts-symbols jetbrains-mono
 "
 # 日本語入力。fcitx5 用の Mozc は latest リポジトリにしか無いことがある(quarterly には無い)ので候補を順に試す
 [ "$DO_JA" = 1 ] && OPTIONAL="$OPTIONAL fcitx5 fcitx5-qt6 fcitx5-gtk3 fcitx5-configtool ja-fcitx5-mozc|ja-fcitx5-mozc3"

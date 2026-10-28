@@ -10,6 +10,28 @@ const builtin = @import("builtin");
 const is_bsd = builtin.os.tag == .freebsd;
 const bsd = @import("bsd.zig");
 
+/// 電源操作。Linux は loginctl(elogind / systemd-logind)、FreeBSD は ConsoleKit2 を D-Bus で
+/// (どちらも一般ユーザーのまま実行できる)。suspend は画面のロックが先に出るよう 1 秒待つ
+pub const PowerAction = enum { suspend_, reboot, poweroff };
+pub fn power(a: PowerAction) void {
+    if (is_bsd) {
+        const method = switch (a) {
+            .suspend_ => "Suspend",
+            .reboot => "Reboot",
+            .poweroff => "PowerOff",
+        };
+        var buf: [256]u8 = undefined;
+        const cmd = std.fmt.bufPrintZ(&buf, "{s}dbus-send --system --print-reply --dest=org.freedesktop.ConsoleKit /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager.{s} boolean:true", .{ if (a == .suspend_) "sleep 1; " else "", method }) catch return;
+        spawnDetached(cmd.ptr);
+        return;
+    }
+    spawnDetached(switch (a) {
+        .suspend_ => "sleep 1; loginctl suspend",
+        .reboot => "loginctl reboot",
+        .poweroff => "loginctl poweroff",
+    });
+}
+
 /// PATH にそのコマンドがあるか(nmcli・bluetoothctl の無い環境で、パネルに理由を出すため)
 pub fn hasCommand(name: []const u8) bool {
     const path = std.posix.getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";

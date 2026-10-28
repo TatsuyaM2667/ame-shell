@@ -93,7 +93,7 @@ if [ "$UNINSTALL" = 1 ]; then
     done < "$MANIFEST"
     run rm -f "$MANIFEST"
     # 自分で作った空ディレクトリだけ片付ける(他のファイルがあれば残る)
-    for d in "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell" "$DESTDIR$PREFIX/opt/river-0.5/bin" "$DESTDIR$PREFIX/opt/river-0.5"; do
+    for d in "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell/xdg/foot" "$DESTDIR$PREFIX/share/ame-shell/xdg" "$DESTDIR$PREFIX/share/ame-shell" "$DESTDIR$PREFIX/opt/river-0.5/bin" "$DESTDIR$PREFIX/opt/river-0.5"; do
         [ -d "$d" ] && run rmdir "$d" 2>/dev/null
     done
     say "完了しました。"
@@ -195,10 +195,17 @@ say "インストール先: ${DESTDIR}${PREFIX}($( [ "$USER_MODE" = 1 ] && echo 
 install_file "$OUT/bin/ame-shell" "$PREFIX/bin/ame-shell" 755
 install_file "$OUT/bin/ame-ctl" "$PREFIX/bin/ame-ctl" 755
 install_file "$HERE/ame-session" "$PREFIX/bin/ame-session" 755
+install_file "$HERE/ame-update" "$PREFIX/bin/ame-update" 755
+# ame-update が git pull してビルドし直すための、ソースの場所の記録
+tmp=$(mktemp "${TMPDIR:-/tmp}/ame-src.XXXXXX") || exit 1
+echo "$ROOT" > "$tmp"
+install_file "$tmp" "$PREFIX/share/ame-shell/source" 644
+rm -f "$tmp"
 install_file "$HERE/ame-river-init" "$PREFIX/share/ame-shell/ame-river-init" 755
 install_file "$HERE/ame-river5-init" "$PREFIX/share/ame-shell/ame-river5-init" 755
 install_file "$OUT/share/ame-shell/config.ame" "$PREFIX/share/ame-shell/config.ame" 644
 install_file "$OUT/share/ame-shell/bt-connect.sh" "$PREFIX/share/ame-shell/bt-connect.sh" 755
+install_file "$OUT/share/ame-shell/xdg/foot/foot.ini" "$PREFIX/share/ame-shell/xdg/foot/foot.ini" 644
 for w in "$OUT"/share/ame-shell/widgets/*.wasm; do
     [ -f "$w" ] || continue
     install_file "$w" "$PREFIX/share/ame-shell/widgets/$(basename "$w")" 644

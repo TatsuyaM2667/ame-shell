@@ -48,6 +48,14 @@ export QT_QPA_PLATFORM="wayland;xcb"
 export SDL_VIDEODRIVER="wayland,x11"
 export _JAVA_AWT_WM_NONREPARENTING=1
 export ELECTRON_OZONE_PLATFORM_HINT=auto
+# アプリの既定設定(今は foot の半透明の見た目)を XDG_CONFIG_DIRS の先頭に置く。
+# 各アプリは自分の ~/.config を先に読むので、ユーザーの設定がある場合はそちらが優先される
+for d in "$PREFIX_DIR/share/ame-shell/xdg" "$SELF_DIR/../data/xdg"; do
+    if [ -d "$d" ]; then
+        export XDG_CONFIG_DIRS="$(cd "$d" && pwd):${XDG_CONFIG_DIRS:-/usr/local/etc/xdg:/etc/xdg}"
+        break
+    fi
+done
 # 日本語入力(fcitx5 等)の変数はユーザーの設定があればそれを尊重し、ここでは上書きしない
 
 # ---- XDG_RUNTIME_DIR(通常は turnstile の PAM モジュールが用意する) ----

@@ -113,3 +113,9 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - ame-river5-init: シグナルで落ちたらシグナル名をログに、3 回落ちたら(正常終了でも)River を終了してログイン画面に戻る(黒画面に閉じ込めない)。入れ子の River 0.5 で確認。
 - Zig 0.13 のソースビルド: zstd を必須パッケージに、cmake に /usr/local の検索パスとリンクのパス。失敗時は root で再実行するよう案内。
 - 確認手順: docs/freebsd-test.md。
+
+## 2026-10-28(追記)FreeBSD のロゴ・foot・ame-update
+- 縦バーのロゴ: /etc/os-release に LOGO= が無い OS(FreeBSD など)は、ID から Nerd Font の Font Logos の文字(FreeBSD は U+F30C、赤)。Chimera は従来どおり画像。AME_OS_ID で試せる。
+- foot: ame-shell の半透明の foot.ini(data/xdg/foot/foot.ini)を ame-session が XDG_CONFIG_DIRS の先頭に置く。ユーザー自身の foot.ini があればそちらが優先。入れ子のセッションで確認。
+- ame-update: パッケージ(pkg / apk)→ git pull → ビルド → この ame-update が入っている場所へ再インストール → ame-ctl restart。--check / --no-pkg / --no-self / --force / --debug。インストーラがソースの場所を share/ame-shell/source に記録。ランチャーの「アップデート」からも。
+- 電源操作: loginctl の無い FreeBSD では ConsoleKit2(D-Bus)で再起動・電源オフ・スリープ。
