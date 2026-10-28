@@ -261,6 +261,8 @@ chown -R "$TARGET_USER" "$REPO"
 su -m "$TARGET_USER" -c "cd '$REPO' && env HOME='$UHOME' PATH='$TOOLS/zig-$ZIG_VER/bin:$ODIN_DIR:$PATH' zig build $BUILD_OPTS" ||
     die "ame-shell のビルドに失敗しました"
 sh "$REPO/session/install-session.sh" --prefix /usr/local
+# ログイン画面(SDDM)のテーマ: ロック画面と同じ見た目、背景はその人の ame-shell の壁紙
+sh "$REPO/scripts/sddm-theme.sh" --user "$TARGET_USER"
 
 # foot・fastfetch の設定を ame-shell のものに(元のファイルは *.ame-bak に残る)
 su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_CONFIG_HOME= sh '$REPO/scripts/app-config.sh'"

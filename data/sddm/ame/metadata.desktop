@@ -1,0 +1,11 @@
+[SddmGreeterTheme]
+Name=ame
+Description=ame-shell のログイン画面(ロック画面と同じ見た目、背景は ame-shell の壁紙)
+Author=ame-shell
+License=GPL-3.0-or-later
+Type=sddm-theme
+Version=1.0
+Website=https://github.com/TatsuyaM2667/ame-shell
+MainScript=Main.qml
+ConfigFile=theme.conf
+QtVersion=6

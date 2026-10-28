@@ -76,6 +76,7 @@ foot は自分の `~/.config/foot/foot.ini` が無ければ、ame-shell の半�
   FreeBSD はインストーラが I2C(ig4・iichid・hmt)と PS/2(psm の Synaptics / Elantech)のドライバを設定します。後からは `doas sh scripts/freebsd-touchpad.sh`(再起動後に有効)、状態の確認は `sh scripts/freebsd-touchpad.sh --check`。
 - **Bluetooth(FreeBSD)**: インストーラと ame-update が、内蔵アダプタのファームウェア(Realtek: rtlbt-firmware / Intel: iwmbt-firmware)・ng_ubt・hcsecd / sdpd / bthidd を設定します。後からは `doas sh scripts/freebsd-bluetooth.sh`、確認は `--check`。機器のペアリングは今のところ端末で `doas bluetooth-config scan`(マウス・キーボード)。
 - **無線のブロック解除**: Linux ではセッションの開始時に `rfkill unblock all`(と `bluetoothctl power on`)。
+- **ログイン画面(SDDM)**: ロック画面と同じ見た目の ame-shell のテーマ(`data/sddm/ame`。背景はその人の ame-shell の壁紙をぼかしたもの、動画なら 1 コマ目)。FreeBSD はインストーラと ame-update が入れ、壁紙を変えたら ame-update で背景も更新。手動では `doas sh scripts/sddm-theme.sh`。SDDM のテーマは QML でしか書けないため、ここだけ QML を使っています。
 
 ### アップデート(ame-update)
 

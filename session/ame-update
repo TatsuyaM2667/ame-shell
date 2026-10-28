@@ -163,6 +163,8 @@ if [ "$OS" = FreeBSD ] && [ "$CHECK" = 0 ] && [ "$DO_PKG" = 1 ]; then
         *" ng_ubt "*) ;;
         *) [ -f "$SRC/scripts/freebsd-bluetooth.sh" ] && { say "Bluetooth"; as_root sh "$SRC/scripts/freebsd-bluetooth.sh"; } ;;
     esac
+    # ログイン画面(SDDM)の背景を今の壁紙に(同じ壁紙なら何もしない)
+    [ -f "$SRC/scripts/sddm-theme.sh" ] && as_root sh "$SRC/scripts/sddm-theme.sh" --user "$(id -un)"
 fi
 
 # ---------------------------------------------------------------------------
