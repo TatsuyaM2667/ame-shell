@@ -149,3 +149,6 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - SDDM: ame-shell のオリジナルのテーマ(data/sddm/ame/Main.qml、Qt6)。ロック画面と同じく光る大きな時計・日付・ガラスの丸い入力欄、失敗で揺れて赤く、セッション切替・再起動・電源オフ。背景は scripts/sddm-theme.sh がその人の壁紙(動画は 1 秒目)から background.jpg を作る(QtQuick.Effects でぼかし、追加の Qt パッケージ不要)。QML は SDDM のテーマに限った例外(作者の了承済み。Qylock は大きすぎるため不採用)。sddm-greeter-qt6 --test-mode を入れ子の River 0.5 で表示して確認。
 - メディアタブ: 同期歌詞を「今の行だけ・行が変わるたびに下から弾んで出る(前の行は上へ消える)」表示に。上/真ん中/下のクリックで前の行/今の行の頭/次の行へ。中央揃えの折り返し(gfx: textWrapOpts / wrapCount、折り返した行は省略しない)。トーンアームの角度が逆(再生中に針がラベル上、停止中に盤面上)だったのを、停止 88°(盤の外)・再生 105°→115°(溝の外周→内周、曲の進みに合わせて)に。入れ子の River 0.5(D-Bus を分けて)で確認。
 - Arch: scripts/install-arch.sh(pacman で公式リポジトリから依存を入れる。River 0.5・Odin・wlroots0.20 も公式。sddm / NetworkManager / bluetooth を有効に、最後に install.sh --no-deps)。install.sh が Arch 系(ID=arch / ID_LIKE に arch)なら自動で呼ぶ。パッケージ名は core / extra の DB で確認、偽の pacman で流れを確認。
+
+## 2026-10-28(追記 6)ドキュメントサイト
+- site/: 本文(site/src/content/*.md、Markdown の部分集合 + ::video / ::img / ::demo / ::stats / ::cards)を Zig の wasm(site/src/main.zig、約 76KB)がブラウザで HTML に。デモ(ばね vs ベジェ・あいまい検索・主色抽出)は anim/anim.odin を freestanding_wasm32 にしたもの(約 2KB)を app.js から直接呼ぶ。zig build site → zig-out/site、site/deploy.sh で Cloudflare Pages(npx wrangler)。動画は入れ子の River 0.5(D-Bus とホームを分け、壁紙は ffmpeg で生成)で wf-recorder 録画。Chromium のヘッドレスで表示を確認(wrangler pages dev の workerd は musl で動かない)。

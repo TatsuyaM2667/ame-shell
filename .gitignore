@@ -3,3 +3,4 @@ zig-out/
 session/.ready
 logs/
 .ame-state/
+.wrangler/

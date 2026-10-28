@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ame-shell</title>
+<meta name="description" content="ame-shell: ばねの物理で動く、Zig と Odin で書いた Wayland のデスクトップシェル + ウィンドウマネージャ。Linux と FreeBSD に対応。">
+<meta property="og:title" content="ame-shell">
+<meta property="og:description" content="すべてがばねの物理で動く、ガラスのデスクトップ。Zig + Odin、Qt も GTK も使わない。">
+<meta property="og:image" content="media/shot-hero.jpg">
+<meta name="theme-color" content="#070b18">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="sky" aria-hidden="true"><i></i><i></i><i></i></div>
+<header class="top">
+  <a class="brand" href="#/"><img src="favicon.svg" alt="" width="26" height="26"><span>ame<b>-shell</b></span></a>
+  <nav id="nav" aria-label="ページ"></nav>
+  <a class="gh" href="https://github.com/TatsuyaM2667/ame-shell" target="_blank" rel="noopener" aria-label="GitHub">GitHub</a>
+</header>
+<div class="layout">
+  <main id="main" tabindex="-1">
+    <noscript><p>このサイトは WebAssembly で本文を表示します。JavaScript を有効にしてください。内容は <a href="https://github.com/TatsuyaM2667/ame-shell">GitHub の README</a> でも読めます。</p></noscript>
+    <p class="loading">読み込んでいます…</p>
+  </main>
+  <aside class="toc" id="toc" aria-label="このページの目次"></aside>
+</div>
+<footer class="foot">
+  <p>ame-shell — GPL-3.0 · <a href="https://github.com/TatsuyaM2667/ame-shell" target="_blank" rel="noopener">github.com/TatsuyaM2667/ame-shell</a></p>
+  <p class="built">このページの本文は Zig の WebAssembly(<span id="wsize">site.wasm</span>)が、デモは ame-shell と同じ Odin のコード(<span id="asize">anim.wasm</span>)が動かしています。</p>
+</footer>
+<div class="lightbox" id="lightbox" hidden><img alt=""></div>
+<script src="app.js" type="module"></script>
+</body>
+</html>

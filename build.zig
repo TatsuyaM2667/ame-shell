@@ -188,6 +188,27 @@ pub fn build(b: *std.Build) void {
         b.getInstallStep().dependOn(&inst.step);
     }
 
+    // --- ドキュメントサイト(zig build site → zig-out/site。公開は site/deploy.sh)---
+    // 本文を HTML にするのは Zig の wasm(site/src/main.zig)、デモは同じ anim/anim.odin を wasm にしたもの。
+    const site_step = b.step("site", "ドキュメントサイトを zig-out/site に作る");
+    const site_wasm = b.addExecutable(.{
+        .name = "site",
+        .root_source_file = b.path("site/src/main.zig"),
+        .target = wasm_target,
+        .optimize = .ReleaseSmall,
+    });
+    site_wasm.entry = .disabled;
+    site_wasm.rdynamic = true;
+    site_step.dependOn(&b.addInstallFile(site_wasm.getEmittedBin(), "site/site.wasm").step);
+    const odin_site = b.addSystemCommand(&.{ "odin", "build" });
+    odin_site.addDirectoryArg(b.path("anim"));
+    odin_site.addArgs(&.{ "-target:freestanding_wasm32", "-build-mode:shared", "-no-entry-point", "-o:speed", "-no-bounds-check", "-default-to-nil-allocator" });
+    const anim_site = odin_site.addPrefixedOutputFileArg("-out:", "anim.wasm");
+    odin_site.addFileInput(b.path("anim/anim.odin"));
+    site_step.dependOn(&b.addInstallFile(anim_site, "site/anim.wasm").step);
+    site_step.dependOn(&b.addInstallDirectory(.{ .source_dir = b.path("site/static"), .install_dir = .prefix, .install_subdir = "site" }).step);
+    site_step.dependOn(&b.addInstallDirectory(.{ .source_dir = b.path("site/media"), .install_dir = .prefix, .install_subdir = "site/media" }).step);
+
     // 既定設定・テーマを share に配置
     b.installDirectory(.{ .source_dir = b.path("data"), .install_dir = .{ .custom = "share/ame-shell" }, .install_subdir = "" });
 

@@ -218,6 +218,15 @@ ame-ctl lock | reload | widgets reload | stats | restart | quit
 - 動画壁紙は再生中に CPU 約 5%(720p)・メモリ +130MB 程度を使う。
 - 詳細は `docs/blockers.md`、計測値は `docs/perf.md`。
 
+## ドキュメントサイト
+
+`site/` に、写真・動画・ブラウザで動くデモつきの詳しいドキュメントがあります。本文は Zig の WebAssembly(`site/src/main.zig`)が HTML にし、デモは ame-shell と同じ `anim/anim.odin` を WebAssembly にしたものを動かします。
+
+```sh
+zig build site                 # zig-out/site に作る
+sh site/deploy.sh              # Cloudflare Pages に公開(初回は npx wrangler login)
+```
+
 ## ドキュメント
 
 `docs/architecture.md`(構成)・`docs/decisions.md`(設計判断と理由)・`docs/perf.md`(実測)・`docs/reference-analysis.md`(参考シェルの分析)・`docs/progress.md`(進捗)
