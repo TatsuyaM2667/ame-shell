@@ -30,6 +30,10 @@ pub fn main() !u8 {
         // 自分自身を exec し直す(設定やウィジェットを完全に読み直したいとき用)。
         // /proc/self/exe は、ビルドで実行ファイルが置き換わると "… (deleted)" になって exec できないので、
         // 起動時の argv[0](シンボリックリンク経由なら新しいビルドを指す)を PATH 検索付きで使う。
+        // 常駐させている子(playerctl --follow・pactl subscribe)は exec をまたいで残り、
+        // 新しい自分がもう 1 つずつ起動するので、先に止める
+        if (app.media.fd >= 0 and app.media.pid > 0) _ = c.kill(app.media.pid, c.SIGTERM);
+        if (app.pactl_fd >= 0 and app.pactl_pid > 0) _ = c.kill(app.pactl_pid, c.SIGTERM);
         const arg0 = std.os.argv[0];
         const argv = [_:null]?[*:0]const u8{ arg0, null };
         _ = c.execvp(arg0, @ptrCast(&argv));

@@ -372,8 +372,8 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         cv.line(cx + ca * r0, cy + sa * r0, cx + ca * r1, cy + sa * r1, 4, Color.mix(acc, acc.lighten(0.6), val).alpha(0.5 + 0.5 * val));
     }
     // 盤: 縁の光る輪 → 溝(曲間のすき間で区切られた帯)→ 無音の溝(デッドワックス)→ ラベル
-    const lr: f32 = 46; // ラベル(本物の LP は直径の約 1/3)
-    const wax: f32 = lr + 9; // ここより内側は溝の無い部分
+    const lr: f32 = 68; // ラベル = ジャケット(見やすさを優先して本物の LP より大きく、直径の約半分)
+    const wax: f32 = lr + 6; // ここより内側は溝の無い部分
     const white = Color.hex(0xffffff);
     cv.shadow(cx - R, cy - R + 10, R * 2, R * 2, R, 26, Color.hex(0x000000).alpha(0.65));
     cv.rect(cx - R, cy - R, R * 2, R * 2, R, Color.hex(0x0c0c11));
@@ -437,10 +437,10 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         const len: f32 = R * 1.25;
         const deg = std.math.pi / 180.0;
         // 角度と針先の位置(盤の中心からの距離、ヘッドシェル 18 を含む):
-        // 86° → 約 167(盤の外で休む)、102° → 約 119(最初の溝)、119° → 約 61(最後の溝。デッドワックスは 55 まで)
-        const rest = 86 * deg;
+        // 80° → 約 184(盤の外で休む)、102° → 約 119(最初の溝)、116° → 約 76(最後の溝。デッドワックスは 74 まで)
+        const rest = 80 * deg;
         const prog = if (m.length_s > 0) std.math.clamp(m.position() / m.length_s, 0, 1) else 0;
-        const on_record = (102 + 17 * prog) * deg;
+        const on_record = (102 + 14 * prog) * deg;
         const ang = rest + (on_record - rest) * v.arm.x;
         const ca = @cos(ang);
         const sa = @sin(ang);
@@ -490,8 +490,8 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
     _ = cv.text(tx, 160, 16, sub, m.artist[0..m.artist_len], .{ .max_w = tw });
     // アルバム名(あれば。アイコンつき)
     if (m.album_len > 0) {
-        _ = cv.text(tx, 183, 12.5, acc.lighten(0.25), "\u{F0025}", .{});
-        _ = cv.text(tx + 18, 183, 12.5, sub.alpha(0.9), m.album[0..m.album_len], .{ .max_w = tw - 18 });
+        _ = cv.text(tx, 185, 14, acc.lighten(0.25), "\u{F0025}", .{});
+        _ = cv.text(tx + 21, 185, 14, txt.alpha(0.85), m.album[0..m.album_len], .{ .max_w = tw - 21 });
     }
     if (m.length_s > 0) {
         const p = std.math.clamp(m.position() / m.length_s, 0, 1);
