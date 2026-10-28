@@ -22,6 +22,9 @@ const Surface = surface.Surface;
 const loop = @import("platform/loop.zig");
 const video = @import("video.zig");
 
+/// 壁紙の失敗の通知を最後に出した時刻(出力ごとに重ねて出さない)
+var last_fail_ms: u64 = 0;
+
 pub const Image = struct {
     tex: c.GLuint = 0,
     w: f32 = 0,
@@ -38,6 +41,8 @@ pub const Wallpaper = struct {
     img: Image = .{},
     prev_img: Image = .{},
     trans: Spring = Spring.init(1, 1.6, 1.0),
+    /// ピッカーなどで本人が切り替えた(失敗したら通知する。起動時の復元では通知しない)
+    user_switch: bool = false,
     /// 時間は「描いた分だけ」進める(止めている間に時間が飛ばないように)
     scene_time: f32 = 0,
     last_ms: u64 = 0,
@@ -160,7 +165,9 @@ pub const Wallpaper = struct {
         self.player = null;
         self.prev_mode = self.mode;
         self.mode = mode;
+        self.user_switch = true;
         if (mode == .image or mode == .video) self.loadMedia(image_path) else theme.setWallScheme(self.app, null);
+        if ((mode == .image or mode == .video) and self.mode == .aurora) self.reportFail(image_path);
         self.trans.snap(0);
         self.trans.set(1);
         self.last_ms = 0;
@@ -208,7 +215,14 @@ pub const Wallpaper = struct {
     fn onVideo(ctx: *anyopaque, fd: c_int, _: u32) void {
         const self: *Wallpaper = @ptrCast(@alignCast(ctx));
         for ([_]?*video.Player{ self.player, self.prev_player }) |pp| if (pp) |p| if (p.pipe_r == fd) {
-            if (p.pump()) self.surf.schedule();
+            if (p.failed and self.player == p and self.mode == .video) {
+                // 再生できなかった: オーロラに戻す(プレーヤーは次の切り替えで片付く)
+                p.failed = false;
+                self.mode = .aurora;
+                theme.setWallScheme(self.app, null);
+                self.reportFail(self.img_path[0..self.img_path_len]);
+                self.surf.schedule();
+            } else if (p.pump()) self.surf.schedule();
         };
     }
 
@@ -245,6 +259,19 @@ pub const Wallpaper = struct {
         c.glBindFramebuffer(c.GL_FRAMEBUFFER, 0);
         theme.setWallScheme(self.app, theme.schemeFromPixels(px.ptr, w, h));
         self.video_scheme_done = true;
+    }
+
+    /// 壁紙を変えられなかったことを知らせる(出力が複数あっても 1 回だけ)
+    fn reportFail(self: *Wallpaper, path: []const u8) void {
+        if (!self.user_switch) return;
+        const now = loop.nowMs();
+        if (last_fail_ms != 0 and now -| last_fail_ms < 2000) return;
+        last_fail_ms = now;
+        theme.flashError(self.app);
+        var body: [700]u8 = undefined;
+        const reason = if (video.isVideoPath(path)) video.last_error else "画像を読めません";
+        const msg = std.fmt.bufPrint(&body, "{s}\n{s}", .{ reason, std.fs.path.basename(path) }) catch reason;
+        self.app.notifs.post("ame-shell", "壁紙を変えられませんでした", msg, 0);
     }
 
     fn loadImage(self: *Wallpaper, path_in: []const u8) void {

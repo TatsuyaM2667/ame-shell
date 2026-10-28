@@ -139,3 +139,9 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - 追加の壁紙の取得はインストーラから外し、ame-update だけに。
 - fastfetch の設定(data/xdg/fastfetch/config.jsonc: logo.type=builtin で大きいロゴ、modules は fastfetch の既定と同じ。modules を省くと情報が出ないので明記)。scripts/foot-config.sh を app-config.sh にして foot と fastfetch の両方を FreeBSD で ~/.config に上書き。
 - 録画: FreeBSD の任意パッケージに wf-recorder が無く、押しても何も録れていなかった。wf-recorder を任意パッケージと ame-update に追加。無いときは録画中にせず、赤く光らせて入れ方を通知。開始・停止で保存先(~/Videos/rec_*.mp4)を通知。
+
+## 2026-10-28(追記 5)FreeBSD の壁紙・タッチパッド・Bluetooth、rfkill
+- 壁紙: 動画(mp4)を選んでも libmpv が無い・再生できないと、黙ってオーロラ(既定)に戻っていたので「変わらない」ように見えた。理由(video.last_error、mpv の END_FILE のエラー)を通知し、縁を赤く光らせる。入れ子の River 0.5 で壊れた mp4 / png を指定して通知を確認。
+- タッチパッド: 作者の機種(IdeaPad Slim 3 14ARP10)は Goodix GXTP5100(I2C HID、AMD の DesignWare I2C)。iichid は GPIO 割り込み未対応で自動でポーリングになるので amdgpio は外した。設定時に今すぐ kldload も。ame-update が未設定なら root で実行(ame-shell の更新の後)。
+- Bluetooth: Realtek RTL8852BE(0bda:4853)は FreeBSD の rtlbtfw の devd 設定にある。scripts/freebsd-bluetooth.sh でファームウェア pkg・ng_ubt・hcsecd / sdpd / bthidd。パネル(bluetoothctl 前提)は FreeBSD では未対応のまま。
+- rfkill: ame-session(Linux)が開始時に rfkill unblock all(uaccess で本人が使える)と bluetoothctl power on。

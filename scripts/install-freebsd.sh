@@ -212,6 +212,8 @@ fi
 
 # タッチパッド(I2C / PS/2 のドライバ)
 sh "$REPO/scripts/freebsd-touchpad.sh"
+# Bluetooth(ファームウェア・ng_ubt・hcsecd / sdpd / bthidd)
+sh "$REPO/scripts/freebsd-bluetooth.sh"
 
 # ---------------------------------------------------------------------------
 say "4/5 ツールチェイン(Zig $ZIG_VER・Odin $ODIN_TAG)"

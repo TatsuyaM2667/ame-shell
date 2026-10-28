@@ -122,6 +122,19 @@ if [ "${AME_SESSION_NESTED:-0}" != "1" ]; then
     fi
 fi
 
+# ---- 無線のブロックを解除(rfkill unblock all)----
+# 前のセッションや電源を切る前の状態で Wi-Fi / Bluetooth がソフトブロックされたままになっていることがある。
+# /dev/rfkill はログイン中の本人に使える(udev の uaccess)。FreeBSD には rfkill が無いので何もしない
+if [ "${AME_SESSION_NESTED:-0}" != "1" ] && command -v rfkill >/dev/null 2>&1; then
+    if rfkill unblock all 2>/dev/null; then
+        log "rfkill: unblock all"
+        # Bluetooth のアダプタを電源オンに(BlueZ が AutoEnable でない場合のため。少し待ってから裏で)
+        command -v bluetoothctl >/dev/null 2>&1 && (sleep 2; bluetoothctl power on >/dev/null 2>&1) &
+    else
+        log "rfkill: unblock all に失敗(/dev/rfkill の権限)"
+    fi
+fi
+
 # ---- クラッシュループ検出: 5 秒未満で終了する失敗が 3 回続いたら次回はセーフモード ----
 if [ -f "$CRASH" ] && [ "$SAFE" = "0" ]; then
     log "crashloop マーカーがあるためセーフモードで起動します(削除: rm $CRASH)"

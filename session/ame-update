@@ -152,6 +152,19 @@ if [ "$DO_SELF" = 1 ]; then
     [ "$CHECK" = 0 ] && [ "$OS" = FreeBSD ] && [ -f "$SRC/scripts/app-config.sh" ] && sh "$SRC/scripts/app-config.sh"
 fi
 
+# FreeBSD: タッチパッド・Bluetooth のドライバ(後から追加した設定。まだなら root で設定する。反映は再起動後)
+# ame-shell を更新した後に行う(1 回目の ame-update でも新しいスクリプトを使えるように)
+if [ "$OS" = FreeBSD ] && [ "$CHECK" = 0 ] && [ "$DO_PKG" = 1 ]; then
+    case " $(sysrc -n kld_list 2>/dev/null) " in
+        *" iichid "*) ;;
+        *) [ -f "$SRC/scripts/freebsd-touchpad.sh" ] && { say "タッチパッド"; as_root sh "$SRC/scripts/freebsd-touchpad.sh"; } ;;
+    esac
+    case " $(sysrc -n kld_list 2>/dev/null) " in
+        *" ng_ubt "*) ;;
+        *) [ -f "$SRC/scripts/freebsd-bluetooth.sh" ] && { say "Bluetooth"; as_root sh "$SRC/scripts/freebsd-bluetooth.sh"; } ;;
+    esac
+fi
+
 # ---------------------------------------------------------------------------
 say "3/3 再起動"
 if [ "$UPDATED" = 1 ] && command -v ame-ctl >/dev/null 2>&1 && ame-ctl stats >/dev/null 2>&1; then

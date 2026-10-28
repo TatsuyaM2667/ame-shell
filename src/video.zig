@@ -32,6 +32,9 @@ const UPDATE_FRAME: u64 = 1;
 const FORMAT_INT64 = 4;
 const EVENT_NONE = 0;
 const EVENT_VIDEO_RECONFIG = 17;
+const EVENT_END_FILE = 7;
+const END_FILE_REASON_ERROR = 4;
+const EndFile = extern struct { reason: c_int, err: c_int };
 
 const Api = struct {
     create: *const fn () callconv(.C) ?*MpvHandle,
@@ -52,11 +55,16 @@ const Api = struct {
 var api: ?Api = null;
 var api_tried = false;
 
+/// 直近の失敗の理由(壁紙を切り替えたときの通知に出す)
+pub var last_error: []const u8 = "";
+const no_libmpv_hint = if (@import("builtin").os.tag == .freebsd) "libmpv が見つかりません(doas pkg install mpv)" else "libmpv が見つかりません(mpv-libs などのパッケージを入れてください)";
+
 fn loadApi() ?Api {
     if (api_tried) return api;
     api_tried = true;
     const h = std.c.dlopen("libmpv.so.2", std.c.RTLD.LAZY) orelse std.c.dlopen("libmpv.so", std.c.RTLD.LAZY) orelse {
-        log.warn("libmpv が見つからないため動画壁紙は使えません(doas apk add mpv-libs)", .{});
+        log.warn("動画壁紙は使えません: {s}", .{no_libmpv_hint});
+        last_error = no_libmpv_hint;
         return null;
     };
     var a: Api = undefined;
@@ -77,6 +85,7 @@ fn loadApi() ?Api {
     }) |p| {
         const sym = std.c.dlsym(h, p[1]) orelse {
             log.warn("libmpv に {s} がありません", .{p[1]});
+            last_error = "libmpv が古いか壊れています";
             return null;
         };
         @field(a, p[0]) = @ptrCast(sym);
@@ -113,6 +122,8 @@ pub const Player = struct {
     h: c_int = 0,
     /// 描き直しが必要(新しいコマが来た)
     frame_ready: bool = false,
+    /// 再生できなかった(形式やデコーダの問題)
+    failed: bool = false,
     max_w: c_int,
     max_h: c_int,
 
@@ -120,7 +131,11 @@ pub const Player = struct {
     /// wl_display は mpv に渡さない: VA-API が別の場所でラウンドトリップし、イベントループの読み込み準備と
     /// 噛み合って固まるため(ハードウェア復号は DRM のレンダーノード経由で行われる)
     pub fn create(alloc: std.mem.Allocator, path: []const u8, max_w: c_int, max_h: c_int) ?*Player {
-        const a = loadApi() orelse return null;
+        last_error = "";
+        const a = loadApi() orelse {
+            last_error = no_libmpv_hint;
+            return null;
+        };
         const m = a.create() orelse return null;
         // 壁紙向け: 音なし・無限ループ・ハードウェア復号・字幕や OSD なし
         const opts = [_][2][*:0]const u8{
@@ -138,6 +153,7 @@ pub const Player = struct {
         };
         for (opts) |o| _ = a.set_option_string(m, o[0], o[1]);
         if (a.initialize(m) < 0) {
+            last_error = "mpv を初期化できません";
             a.terminate_destroy(m);
             return null;
         }
@@ -150,6 +166,7 @@ pub const Player = struct {
         var rc: ?*MpvRenderCtx = null;
         if (a.rc_create(&rc, m, &params) < 0 or rc == null) {
             log.warn("mpv の描画コンテキストを作れません", .{});
+            last_error = "mpv の描画(OpenGL)を準備できません";
             a.terminate_destroy(m);
             return null;
         }
@@ -199,6 +216,14 @@ pub const Player = struct {
             const ev = a.wait_event(self.mpv, 0);
             if (ev.event_id == EVENT_NONE) break;
             if (ev.event_id == EVENT_VIDEO_RECONFIG) self.resize();
+            if (ev.event_id == EVENT_END_FILE) if (ev.data) |d| {
+                const ef: *const EndFile = @ptrCast(@alignCast(d));
+                if (ef.reason == END_FILE_REASON_ERROR) {
+                    log.warn("mpv: 動画を再生できません(エラー {d})", .{ef.err});
+                    last_error = "動画を再生できません(形式かデコーダの問題)";
+                    self.failed = true;
+                }
+            };
         }
         if (a.rc_update(self.rc) & UPDATE_FRAME != 0) self.frame_ready = true;
         return self.frame_ready;

@@ -74,6 +74,8 @@ foot は自分の `~/.config/foot/foot.ini` が無ければ、ame-shell の半�
 - カーソルは未設定なら 24px(Adwaita)。
 - **タッチパッド**: タップでクリック(設定 `shell { tap-to-click on|off }`、River 0.5 のセッション。変更はログインし直すと反映)。
   FreeBSD はインストーラが I2C(ig4・iichid・hmt)と PS/2(psm の Synaptics / Elantech)のドライバを設定します。後からは `doas sh scripts/freebsd-touchpad.sh`(再起動後に有効)、状態の確認は `sh scripts/freebsd-touchpad.sh --check`。
+- **Bluetooth(FreeBSD)**: インストーラと ame-update が、内蔵アダプタのファームウェア(Realtek: rtlbt-firmware / Intel: iwmbt-firmware)・ng_ubt・hcsecd / sdpd / bthidd を設定します。後からは `doas sh scripts/freebsd-bluetooth.sh`、確認は `--check`。機器のペアリングは今のところ端末で `doas bluetooth-config scan`(マウス・キーボード)。
+- **無線のブロック解除**: Linux ではセッションの開始時に `rfkill unblock all`(と `bluetoothctl power on`)。
 
 ### アップデート(ame-update)
 

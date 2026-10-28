@@ -67,6 +67,6 @@ sh install.sh --debug
 
 ## タッチパッド
 - USB マウスは動くのにタッチパッドが動かない: タッチパッドのドライバが読み込まれていない。I2C 接続(ACPI の PNP0C50)は
-  ig4 + iichid + hmt(AMD は amdgpio も)、PS/2 接続は loader.conf の `hw.psm.synaptics_support` / `hw.psm.elantech_support`。
+  ig4 + iichid + hmt(GPIO 割り込みは未対応なので自動でポーリング)、PS/2 接続は loader.conf の `hw.psm.synaptics_support` / `hw.psm.elantech_support`。
   `doas sh scripts/freebsd-touchpad.sh` で設定して再起動。`sh scripts/freebsd-touchpad.sh --check` で、機器・モジュール・/dev/input の一覧を表示。
 - 動くがタップでクリックできない: libinput の既定は無効。ame-shell(River 0.5 の WM)が river_libinput_config_v1 で有効にする(設定 tap-to-click)。

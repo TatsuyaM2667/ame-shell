@@ -5,7 +5,7 @@
 #
 # タッチパッドのつながり方は 2 通り:
 #   - I2C(最近のノート PC の多く。ACPI の PNP0C50): ig4(I2C コントローラ)+ iichid + hmt(マルチタッチ)。
-#     AMD の機種は割り込みに amdgpio も使う(無くても iichid はポーリングで動く)
+#     iichid は GPIO 割り込みに未対応で、その場合は自動でポーリング(sampling mode)になる
 #   - PS/2: psm の Synaptics / Elantech / TrackPoint 対応を loader.conf で有効にする
 # USB マウスは何もしなくても使える(usbhid / ums)。
 
@@ -13,7 +13,7 @@ info() { printf '    %s\n' "$*"; }
 
 check() {
     echo "== タッチパッドらしい機器(ACPI / dmesg)"
-    devinfo -v 2>/dev/null | grep -iE 'PNP0C50|ACPI0C50|ELAN|SYNA|MSFT0001|iichid|hmt|psm' | sed 's/^ */    /' | head -n 20
+    devinfo -v 2>/dev/null | grep -iE 'PNP0C50|ACPI0C50|ELAN|SYNA|GXTP|MSFT0001|iichid|hmt|psm' | sed 's/^ */    /' | head -n 20
     dmesg 2>/dev/null | grep -iE 'iichid|hmt[0-9]|ig4iic|psm0|synaptics|elantech|amdgpio' | sed 's/^/    /' | tail -n 20
     echo "== 読み込まれているモジュール"
     for m in ig4 iichid hidbus hmt hms amdgpio; do
@@ -49,9 +49,8 @@ add_kld() {
 add_kld ig4
 add_kld iichid
 add_kld hmt
-case "$(sysctl -n hw.model 2>/dev/null)" in
-    *AMD*) add_kld amdgpio ;;
-esac
+# 今すぐ読み込む(読み込めれば再起動しなくても動く)
+for m in ig4 iichid hmt; do kldstat -q -n "$m" 2>/dev/null || kldload -n "$m" 2>/dev/null || true; done
 # PS/2 のタッチパッド
 for kv in hw.psm.synaptics_support hw.psm.elantech_support hw.psm.trackpoint_support; do
     if ! grep -q "^$kv=" /boot/loader.conf 2>/dev/null; then
