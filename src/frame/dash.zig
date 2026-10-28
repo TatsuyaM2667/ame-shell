@@ -13,6 +13,12 @@ const barmod = @import("../bar.zig");
 const data = @import("data.zig");
 const abi = @import("../widget_abi.zig");
 const Frame = @import("frame.zig").Frame;
+const loop = @import("../platform/loop.zig");
+
+/// 歌詞をホイールで見ている(最後に触ってから 5 秒以内)
+fn lyrManual(v: anytype) bool {
+    return v.lyr_touch_ms != 0 and loop.nowMs() -| v.lyr_touch_ms < 5000;
+}
 
 const TAB_H: f32 = 58;
 const PAD: f32 = 14;
@@ -48,6 +54,13 @@ pub const View = struct {
     lyr_hits: [48]struct { y0: f32, y1: f32, t: f32, idx: usize } = undefined,
     n_lyr_hits: usize = 0,
     lyr_area: [4]f32 = .{ 0, 0, 0, 0 },
+    /// 歌詞をホイールで動かした量(+ で前の行、- でこれからの行が見える)。5 秒触らなければ 0 に戻る
+    lyr_off: Spring = Spring.init(0, 0.3, 1.0),
+    lyr_off_min: f32 = 0,
+    lyr_off_max: f32 = 0,
+    lyr_touch_ms: u64 = 0,
+    /// これからの行の見え方(スクロール中だけ 1)
+    lyr_future: Spring = Spring.init(0, 0.3, 1.0),
     lyr_hover: ?usize = null,
     // カレンダー(WASM)の配置(入力の転送用)
     cal_rect: [4]f32 = .{ 0, 0, 0, 0 },
@@ -552,6 +565,7 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         .synced => {
             // 歌われた行が 1 行ずつ増えていく(これから歌う行は見せない)。新しい行は下でポンと弾んで出て、
             // それまでの行はその高さぶん上へ押し上げられ、小さく薄くなっていく
+            var advanced_manual = false;
             const cur = ly.current(pos);
             if (!std.meta.eql(cur.idx, v.lyr_idx)) {
                 // 1 行進んだときだけ押し上げる(シークで飛んだときは、その場で並べ直す)
@@ -560,13 +574,26 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
                 v.lyr_idx = cur.idx;
                 v.lyr_pop.snap(0);
                 v.lyr_pop.set(1);
-                v.lyr_scroll.snap(if (forward) 1 else 0);
+                // ホイールで見ている間は押し上げない(見ている場所がずれないよう、下で offset を補正する)
+                v.lyr_scroll.snap(if (forward and !lyrManual(v)) 1 else 0);
                 v.lyr_scroll.set(0);
+                advanced_manual = forward and lyrManual(v);
             }
+            // ホイールで見ている(最後に触ってから 5 秒以内)か。過ぎたら元の位置へ戻り、これからの行を隠す
+            const manual = lyrManual(v);
+            if (!manual and v.lyr_touch_ms != 0) {
+                v.lyr_touch_ms = 0;
+                v.lyr_off.set(0);
+            }
+            v.lyr_future.set(if (manual) 1 else 0);
             if (v.lyr_pop.step(dt)) animating = true;
             if (v.lyr_scroll.step(dt)) animating = true;
+            if (v.lyr_off.step(dt)) animating = true;
+            if (v.lyr_future.step(dt)) animating = true;
+            if (manual) animating = true; // 5 秒たったことに気づくため
             const t = v.lyr_pop.x;
             const s = v.lyr_scroll.x; // 1 → 0: 押し上げの残り
+            const fut = v.lyr_future.x;
             const big: f32 = 22;
             const small: f32 = 15.5;
             const gap: f32 = 14;
@@ -590,11 +617,26 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
             const cur_bottom = base_y + (n0 - 1) * big * 1.36 + big * 0.35;
             // 押し上げの量 = 新しい行の高さ + 行間
             const shift = (cur_bottom - cur_top) + gap;
+            if (advanced_manual) {
+                // 見ている場所を保つ(全体が 1 行ぶん上がるので、そのぶん下げる)
+                v.lyr_off.x += shift;
+                v.lyr_off.target += shift;
+            }
+            const off = v.lyr_off.x;
+            const top_edge: f32 = 22;
+            const bottom_edge: f32 = H - 14;
+            // 歌い終えた行・これからの行の見え方(上下の端で消える)
+            const edgeFade = struct {
+                fn get(top: f32, bot: f32, te: f32, be: f32) f32 {
+                    return std.math.clamp((top - te) / 60, 0, 1) * std.math.clamp((be - bot) / 60, 0, 1);
+                }
+            }.get;
             // ---- 歌い終えた行(新しい順に上へ) ----
+            v.lyr_off_max = 0;
             if (cur.idx) |ci| {
                 var bottom = cur_top - gap;
                 var k: usize = 1;
-                while (k <= ci and k < 40) : (k += 1) {
+                while (k <= ci and k <= 80) : (k += 1) {
                     const idx = ci - k;
                     const str = text_of(lines, idx);
                     // 直前の行は、押し上げの間に大きい文字から小さい文字へ
@@ -603,25 +645,58 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
                     const nl: f32 = @floatFromInt(cv.wrapCount(str, sz, max_w, 2));
                     const y = bottom - (nl - 1) * lh - sz * 0.3 + s * shift;
                     const top = y - sz * 0.9;
-                    if (top < -20) break; // 上の端より外(fade で消えている)
-                    // 古い行ほど薄く、上の端では消えていく
-                    const fade = std.math.clamp((top - 22) / 70, 0, 1);
-                    const age = @max(0.25, 1 - @as(f32, @floatFromInt(k - 1)) * 0.16);
-                    const hov = v.lyr_hover != null and v.lyr_hover.? == idx;
-                    const col = if (hov) acc.lighten(0.45) else if (k == 1) Color.mix(sub, txt, 0.4 + 0.6 * s) else sub;
-                    _ = cv.textWrapOpts(mid, y, sz, col.alpha(age * fade * (if (hov) @as(f32, 1.0) else 0.85)), str, max_w, 2, lh, .{ .alignment = .center });
-                    if (v.n_lyr_hits < v.lyr_hits.len) {
-                        v.lyr_hits[v.n_lyr_hits] = .{ .y0 = top - gap / 2, .y1 = y + (nl - 1) * lh + sz * 0.3 + gap / 2, .t = lines[idx].t, .idx = idx };
-                        v.n_lyr_hits += 1;
+                    const bot = y + (nl - 1) * lh + sz * 0.3;
+                    // 一番上の行が上の端の少し下に来るところまで、ホイールで戻れる
+                    v.lyr_off_max = @max(0, top_edge + 30 - top);
+                    // 見えている範囲だけ描く(上の端より外は、スクロールの範囲の計算だけ)
+                    if (bot + off > 0 and top + off < H) {
+                        // 古い行ほど薄く(ホイールで見ている間は均一)、上の端では消えていく
+                        const fade = edgeFade(top + off, bot + off, top_edge, bottom_edge);
+                        const age0 = @max(0.25, 1 - @as(f32, @floatFromInt(k - 1)) * 0.16);
+                        const age = age0 + (0.75 - age0) * fut;
+                        const hov = v.lyr_hover != null and v.lyr_hover.? == idx;
+                        const col = if (hov) acc.lighten(0.45) else if (k == 1) Color.mix(sub, txt, 0.4 + 0.6 * s) else sub;
+                        _ = cv.textWrapOpts(mid, y + off, sz, col.alpha(age * fade * (if (hov) @as(f32, 1.0) else 0.85)), str, max_w, 2, lh, .{ .alignment = .center });
+                        if (v.n_lyr_hits < v.lyr_hits.len) {
+                            v.lyr_hits[v.n_lyr_hits] = .{ .y0 = top + off - gap / 2, .y1 = bot + off + gap / 2, .t = lines[idx].t, .idx = idx };
+                            v.n_lyr_hits += 1;
+                        }
                     }
                     bottom = top - gap - s * shift;
+                }
+            }
+            // ---- これからの行(ホイールで見ている間だけ。薄く) ----
+            v.lyr_off_min = 0;
+            {
+                const first: usize = if (cur.idx) |ci| ci + 1 else 0;
+                var top = cur_bottom + gap;
+                var idx = first;
+                while (idx < lines.len and idx < first + 80) : (idx += 1) {
+                    const str = text_of(lines, idx);
+                    const lh = small * 1.36;
+                    const nl: f32 = @floatFromInt(cv.wrapCount(str, small, max_w, 2));
+                    const y = top + small * 0.9;
+                    const bot = y + (nl - 1) * lh + small * 0.3;
+                    // 一番下の行が下の端の少し上に来るところまで、ホイールで進める
+                    v.lyr_off_min = @min(0, bottom_edge - 30 - bot);
+                    if (fut > 0.01 and bot + off > 0 and top + off < H) {
+                        const fade = edgeFade(top + off, bot + off, top_edge, bottom_edge);
+                        const hov = v.lyr_hover != null and v.lyr_hover.? == idx;
+                        const col = if (hov) acc.lighten(0.45) else txt;
+                        _ = cv.textWrapOpts(mid, y + off, small, col.alpha(fut * fade * (if (hov) @as(f32, 0.95) else 0.45)), str, max_w, 2, lh, .{ .alignment = .center });
+                        if (fut > 0.5 and v.n_lyr_hits < v.lyr_hits.len) {
+                            v.lyr_hits[v.n_lyr_hits] = .{ .y0 = top + off - gap / 2, .y1 = bot + off + gap / 2, .t = lines[idx].t, .idx = idx };
+                            v.n_lyr_hits += 1;
+                        }
+                    }
+                    top = bot + gap;
                 }
             }
             // ---- 今の行: 下からポップ(拡大・不透明度・位置を同じスプリングで。少し行き過ぎて戻る) ----
             if (cur_s.len > 0) {
                 cv.save();
                 // 押し上げと一緒に下から上がってくる(前の行と重ならない)+ 弾み
-                cv.translate(0, s * shift + (1 - t) * 16);
+                cv.translate(0, s * shift + (1 - t) * 16 + off);
                 cv.scaleAbout(mid, base_y, 0.8 + 0.2 * t);
                 cv.opacity(std.math.clamp(t * 1.8, 0, 1));
                 // 行の時間の進みに合わせて少しずつアクセント色へ
@@ -629,16 +704,16 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
                 _ = cv.textWrapOpts(mid, base_y, big, col, cur_s, max_w, 3, big * 1.36, .{ .alignment = .center, .bold = true, .glow = 2.5, .glow_color = acc.lighten(0.3).alpha(0.45) });
                 cv.restore();
                 if (v.n_lyr_hits < v.lyr_hits.len) {
-                    v.lyr_hits[v.n_lyr_hits] = .{ .y0 = cur_top - gap / 2, .y1 = cur_bottom + gap / 2, .t = lines[cur.idx.?].t, .idx = cur.idx.? };
+                    v.lyr_hits[v.n_lyr_hits] = .{ .y0 = cur_top + off - gap / 2, .y1 = cur_bottom + off + gap / 2, .t = lines[cur.idx.?].t, .idx = cur.idx.? };
                     v.n_lyr_hits += 1;
                 }
             } else {
-                _ = cv.text(mid, base_y, big, sub.alpha(0.6), "♪", .{ .alignment = .center });
+                _ = cv.text(mid, base_y + off, big, sub.alpha(0.6), "♪", .{ .alignment = .center });
             }
-            // ---- 下の余白: 次の行へ(カーソルを乗せると案内だけ出す。歌詞そのものは先に見せない) ----
+            // ---- 下の余白: 次の行へ(カーソルを乗せると案内だけ出す。ふだんは歌詞そのものは先に見せない) ----
             const next: ?usize = if (cur.idx) |ci| (if (ci + 1 < lines.len) ci + 1 else null) else (if (lines.len > 0) @as(?usize, 0) else null);
-            if (next) |ni| if (v.n_lyr_hits < v.lyr_hits.len) {
-                v.lyr_hits[v.n_lyr_hits] = .{ .y0 = cur_bottom + gap / 2, .y1 = H - 12, .t = lines[ni].t, .idx = ni };
+            if (fut < 0.5) if (next) |ni| if (v.n_lyr_hits < v.lyr_hits.len) {
+                v.lyr_hits[v.n_lyr_hits] = .{ .y0 = cur_bottom + off + gap / 2, .y1 = H - 12, .t = lines[ni].t, .idx = ni };
                 v.n_lyr_hits += 1;
                 if (v.lyr_hover != null and v.lyr_hover.? == ni)
                     _ = cv.text(mid, H - 30, 11, acc.lighten(0.3).alpha(0.8), "\u{F0140} 次の行へ", .{ .alignment = .center });
@@ -859,10 +934,22 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
         }
         if (lh != v.lyr_hover) redraw = true;
         v.lyr_hover = lh;
+        // ホイール: 歌い終えた行・これからの行を見る(5 秒触らなければ今の行へ戻る)
+        const inside = lx >= a[0] and lx < a[0] + a[2] and cy >= a[1] and cy < a[1] + a[3];
+        if (ev.kind == .scroll and inside and app.media.lyrics.state == .synced) {
+            const step: f32 = 48;
+            const base = if (lyrManual(v)) v.lyr_off.target else 0;
+            v.lyr_off.set(std.math.clamp(base + (if (ev.scroll < 0) step else -step), v.lyr_off_min, v.lyr_off_max));
+            v.lyr_touch_ms = loop.nowMs();
+            return true;
+        }
         if (ev.kind == .press and ev.button == 0x110) if (lh) |idx| {
             for (v.lyr_hits[0..v.n_lyr_hits]) |hh| if (hh.idx == idx) {
                 @import("../media.zig").seekTo(app.media, hh.t);
             };
+            // 行を選んだら、スクロールをやめてその行から通常どおり
+            v.lyr_touch_ms = 0;
+            v.lyr_off.set(0);
             return true;
         };
     }
