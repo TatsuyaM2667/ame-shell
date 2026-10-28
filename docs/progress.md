@@ -145,3 +145,4 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - タッチパッド: 作者の機種(IdeaPad Slim 3 14ARP10)は Goodix GXTP5100(I2C HID、AMD の DesignWare I2C)。iichid は GPIO 割り込み未対応で自動でポーリングになるので amdgpio は外した。設定時に今すぐ kldload も。ame-update が未設定なら root で実行(ame-shell の更新の後)。
 - Bluetooth: Realtek RTL8852BE(0bda:4853)は FreeBSD の rtlbtfw の devd 設定にある。scripts/freebsd-bluetooth.sh でファームウェア pkg・ng_ubt・hcsecd / sdpd / bthidd。パネル(bluetoothctl 前提)は FreeBSD では未対応のまま。
 - rfkill: ame-session(Linux)が開始時に rfkill unblock all(uaccess で本人が使える)と bluetoothctl power on。
+- 動画の壁紙をどこでも動くように: libmpv が無い・END_FILE のエラー・5 秒たっても最初のコマが出ない(見張りのタイマー)ときは ffmpeg のプロセスで再生(sh -c で VA-API の scale_vaapi → だめなら CPU、画面を覆う大きさに切り抜いた RGBA をパイプで受けてテクスチャへ)。プロセスグループごと SIGKILL して回収。入れ子の River 0.5 で VA-API(CPU 約 39%)・CPU 復号(LIBVA_DRIVER_NAME を壊して確認、約 135%)・libmpv → ffmpeg → 通知の順の失敗を確認。失敗したパイプを epoll に残すと空回りする不具合も修正。ame-update が FreeBSD で mpv・ffmpeg を入れる。

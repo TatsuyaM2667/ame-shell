@@ -36,6 +36,8 @@ pub const Wallpaper = struct {
     out: *Output,
     surf: *Surface,
     timer: loop.Timer,
+    /// libmpv の再生開始を見張る(最初のコマが出なければ ffmpeg へ)
+    watch: loop.Timer,
     mode: cfgmod.WallMode,
     prev_mode: cfgmod.WallMode,
     img: Image = .{},
@@ -66,6 +68,7 @@ pub const Wallpaper = struct {
             .out = out,
             .surf = undefined,
             .timer = try loop.Timer.init(),
+            .watch = try loop.Timer.init(),
             .mode = app.cfg.wall_mode,
             .prev_mode = app.cfg.wall_mode,
         };
@@ -82,6 +85,7 @@ pub const Wallpaper = struct {
         // 壁紙は入力を受けない(デスクトップのクリックはコンポジタへ)
         self.surf.setInputRect(0, 0, 0, 0);
         try app.loop.add(self.timer.fd, c.EPOLLIN, self, onTimer);
+        try app.loop.add(self.watch.fd, c.EPOLLIN, self, onWatch);
         // ピッカーで最後に選んだ壁紙があればそれを優先(再起動・再ログイン後も保つ)
         var sb: [600]u8 = undefined;
         if (loadSaved(&sb)) |saved| {
@@ -97,6 +101,8 @@ pub const Wallpaper = struct {
         self.dropPlayers();
         self.app.loop.remove(self.timer.fd);
         _ = c.close(self.timer.fd);
+        self.app.loop.remove(self.watch.fd);
+        _ = c.close(self.watch.fd);
         self.surf.destroy();
         self.app.alloc.destroy(self);
     }
@@ -195,11 +201,16 @@ pub const Wallpaper = struct {
         const sc: i32 = @max(self.out.scale, 1);
         const max_w: c_int = @intCast(@as(i32, @intCast(sz[0])) * sc);
         const max_h: c_int = @intCast(@as(i32, @intCast(sz[1])) * sc);
-        if (video.Player.create(app.alloc, path, max_w, max_h)) |p| {
+        // libmpv → 使えなければ ffmpeg(AME_VIDEO_BACKEND=ffmpeg で ffmpeg に固定)
+        const force_ff = if (std.posix.getenv("AME_VIDEO_BACKEND")) |b| std.mem.eql(u8, b, "ffmpeg") else false;
+        const player = (if (force_ff) null else video.Player.create(app.alloc, path, max_w, max_h)) orelse
+            video.Player.createFfmpeg(app.alloc, path, max_w, max_h);
+        if (player) |p| {
             self.player = p;
             self.mode = .video;
             self.video_scheme_done = false;
             app.loop.add(p.pipe_r, c.EPOLLIN, self, onVideo) catch {};
+            if (p.ff == null) self.watch.arm(5000, 0);
             return;
         }
         // libmpv が無い: GIF なら 1 コマ目を静止画として使う
@@ -215,15 +226,60 @@ pub const Wallpaper = struct {
     fn onVideo(ctx: *anyopaque, fd: c_int, _: u32) void {
         const self: *Wallpaper = @ptrCast(@alignCast(ctx));
         for ([_]?*video.Player{ self.player, self.prev_player }) |pp| if (pp) |p| if (p.pipe_r == fd) {
+            const redraw = p.pump();
             if (p.failed and self.player == p and self.mode == .video) {
-                // 再生できなかった: オーロラに戻す(プレーヤーは次の切り替えで片付く)
-                p.failed = false;
-                self.mode = .aurora;
-                theme.setWallScheme(self.app, null);
-                self.reportFail(self.img_path[0..self.img_path_len]);
-                self.surf.schedule();
-            } else if (p.pump()) self.surf.schedule();
+                self.videoFailed(p);
+                return;
+            }
+            if (redraw) self.surf.schedule();
         };
+    }
+
+    /// 今の動画を再生できなかった: libmpv なら ffmpeg で読み直し、ffmpeg でもだめならオーロラに戻して知らせる
+    fn videoFailed(self: *Wallpaper, p: *video.Player) void {
+        const app = self.app;
+        self.watch.disarm();
+        const path = self.img_path[0..self.img_path_len];
+        if (p.ff == null) {
+            var buf: [600]u8 = undefined;
+            const full = if (std.mem.startsWith(u8, path, "~/"))
+                std.fmt.bufPrint(&buf, "{s}/{s}", .{ std.posix.getenv("HOME") orelse "", path[2..] }) catch path
+            else
+                path;
+            const mw = p.max_w;
+            const mh = p.max_h;
+            app.loop.remove(p.pipe_r);
+            app.gpu.makeCurrent(self.surf.egl_surf);
+            p.destroy(app.alloc);
+            self.player = null;
+            if (video.Player.createFfmpeg(app.alloc, full, mw, mh)) |np| {
+                std.log.info("壁紙の動画を ffmpeg で再生し直します", .{});
+                self.player = np;
+                app.loop.add(np.pipe_r, c.EPOLLIN, self, onVideo) catch {};
+                self.surf.schedule();
+                return;
+            }
+        } else {
+            // 終わったパイプは読めるままなので、すぐ外して片付ける(残すとイベントループが空回りする)
+            app.loop.remove(p.pipe_r);
+            app.gpu.makeCurrent(self.surf.egl_surf);
+            p.destroy(app.alloc);
+            self.player = null;
+        }
+        self.mode = .aurora;
+        theme.setWallScheme(app, null);
+        self.reportFail(path);
+        self.surf.schedule();
+    }
+
+    /// libmpv で始めて 5 秒たっても最初のコマが出ない(GPU の描画が使えないなど): ffmpeg に切り替える
+    fn onWatch(ctx: *anyopaque, _: c_int, _: u32) void {
+        const self: *Wallpaper = @ptrCast(@alignCast(ctx));
+        self.watch.ack();
+        const p = self.player orelse return;
+        if (self.mode != .video or p.ff != null or p.tex != 0) return;
+        std.log.warn("libmpv で 5 秒たっても動画が出ないため ffmpeg に切り替えます", .{});
+        self.videoFailed(p);
     }
 
     /// 切り替え前の壁紙(画像テクスチャまたは動画)を捨てる

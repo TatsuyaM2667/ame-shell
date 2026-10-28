@@ -40,7 +40,7 @@ River 0.5 は「描画は River、配置はウィンドウマネージャ」と�
 River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ランチャーなど)はそのまま使えます。
 
 ### 壁紙と配色
-- **ライブ壁紙**: シェーダで描くオーロラ / 雨、**GIF・MP4 などの動画**(libmpv を実行時に読み込み、ハードウェア復号)、画像
+- **ライブ壁紙**: シェーダで描くオーロラ / 雨、**GIF・MP4 などの動画**、画像。動画は libmpv(実行時に読み込み、ハードウェア復号)で再生し、libmpv が無い・再生できない・5 秒たっても映らないときは ffmpeg で再生します(VA-API で復号・縮小、使えなければ CPU。横 1280・30fps)。それでもだめなときは理由を通知します。`AME_VIDEO_BACKEND=ffmpeg` で ffmpeg に固定
 - **壁紙ピッカー**(Super+Shift+W): 斜めのカードが並び、決定するとカードの位置から円・斜めワイプ・短冊で切り替わる
 - **壁紙の置き場**: `~/Pictures/wallpapers`・`~/.config/ame-shell/wallpapers`・`~/.local/share/ame-shell/wallpapers`・`<prefix>/share/ame-shell/wallpapers`(同じ名前は 1 つにまとめる)。ame-update は、追加の壁紙を非公開リポジトリ(`AME_WALLPAPERS_REPO` で変更、空で無効)から取ってきます。GitHub にログインしていない場合は案内を出すだけです(`gh auth login && gh auth setup-git`)
 - **配色は壁紙から自動**: 壁紙の一番鮮やかな色からアクセント、ガラス・文字色も合わせてなめらかに遷移。再生中はアルバムアートの色に。くすんだ緑や、エラーと紛らわしい赤は避ける

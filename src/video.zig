@@ -109,10 +109,13 @@ fn getProc(_: ?*anyopaque, name: [*:0]const u8) callconv(.C) ?*anyopaque {
     return @ptrCast(@constCast(c.eglGetProcAddress(name)));
 }
 
-/// 1 本の動画を繰り返し再生し、コマを GL テクスチャへ描く
+/// 1 本の動画を繰り返し再生し、コマを GL テクスチャへ描く。
+/// 通常は libmpv(ハードウェア復号・GPU で描画)。libmpv が無い・再生できないときは ffmpeg のプロセスで
+/// 復号したコマ(RGBA)をパイプで受け取ってテクスチャへ送る(ff が非 null。mpv / rc は使わない)
 pub const Player = struct {
-    mpv: *MpvHandle,
-    rc: *MpvRenderCtx,
+    mpv: *MpvHandle = undefined,
+    rc: *MpvRenderCtx = undefined,
+    ff: ?*Ff = null,
     /// mpv のスレッド → メインループへの通知(新しいコマ / イベント)
     pipe_r: c_int,
     pipe_w: c_int,
@@ -188,6 +191,14 @@ pub const Player = struct {
     }
 
     pub fn destroy(self: *Player, alloc: std.mem.Allocator) void {
+        if (self.ff) |f| {
+            f.destroy(alloc);
+            if (self.fbo != 0) c.glDeleteFramebuffers(1, &self.fbo);
+            if (self.tex != 0) c.glDeleteTextures(1, &self.tex);
+            _ = c.close(self.pipe_r);
+            alloc.destroy(self);
+            return;
+        }
         const a = api.?;
         a.rc_set_update_callback(self.rc, null, null);
         a.set_wakeup_callback(self.mpv, null, null);
@@ -208,6 +219,18 @@ pub const Player = struct {
 
     /// メインループで pipe_r が読めるようになったら呼ぶ。描き直しが要るなら true
     pub fn pump(self: *Player) bool {
+        if (self.ff) |f| {
+            switch (f.read(self.pipe_r)) {
+                .frame => self.frame_ready = true,
+                .eof => {
+                    log.warn("ffmpeg: 動画を再生できません", .{});
+                    last_error = "動画を再生できません(ffmpeg で読めない形式です)";
+                    self.failed = true;
+                },
+                .none => {},
+            }
+            return self.frame_ready;
+        }
         const a = api.?;
         var drain: [64]u8 = undefined;
         while (c.read(self.pipe_r, &drain, drain.len) > 0) {}
@@ -258,6 +281,15 @@ pub const Player = struct {
 
     /// 新しいコマを FBO のテクスチャへ描く(GL コンテキストが current の状態で)
     pub fn render(self: *Player) void {
+        if (self.ff) |f| {
+            if (!self.frame_ready) return;
+            self.frame_ready = false;
+            if (self.tex == 0) self.allocTarget(f.w, f.h);
+            c.glBindTexture(c.GL_TEXTURE_2D, self.tex);
+            c.glPixelStorei(c.GL_UNPACK_ALIGNMENT, 4);
+            c.glTexSubImage2D(c.GL_TEXTURE_2D, 0, 0, 0, f.w, f.h, c.GL_RGBA, c.GL_UNSIGNED_BYTE, f.front.ptr);
+            return;
+        }
         if (!self.frame_ready or self.fbo == 0) return;
         self.frame_ready = false;
         const a = api.?;
@@ -289,11 +321,140 @@ pub const Player = struct {
         c.glColorMask(c.GL_TRUE, c.GL_TRUE, c.GL_TRUE, c.GL_TRUE);
     }
 
+    /// ffmpeg 版: コマを受けるテクスチャと(配色の読み戻し用の)FBO
+    fn allocTarget(self: *Player, w: c_int, h: c_int) void {
+        self.w = w;
+        self.h = h;
+        c.glGenTextures(1, &self.tex);
+        c.glBindTexture(c.GL_TEXTURE_2D, self.tex);
+        c.glTexImage2D(c.GL_TEXTURE_2D, 0, c.GL_RGBA8, w, h, 0, c.GL_RGBA, c.GL_UNSIGNED_BYTE, null);
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MIN_FILTER, c.GL_LINEAR);
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MAG_FILTER, c.GL_LINEAR);
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_WRAP_S, c.GL_CLAMP_TO_EDGE);
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_WRAP_T, c.GL_CLAMP_TO_EDGE);
+        c.glGenFramebuffers(1, &self.fbo);
+        c.glBindFramebuffer(c.GL_FRAMEBUFFER, self.fbo);
+        c.glFramebufferTexture2D(c.GL_FRAMEBUFFER, c.GL_COLOR_ATTACHMENT0, c.GL_TEXTURE_2D, self.tex, 0);
+        c.glBindFramebuffer(c.GL_FRAMEBUFFER, 0);
+    }
+
+    /// libmpv を使わず、ffmpeg のプロセスで復号する(libmpv が無い・再生できないときの代わり)。
+    /// 画面を覆うように拡大・切り抜きした RGBA を受け取る。CPU で復号するので、大きさは横 1280 まで・30fps
+    pub fn createFfmpeg(alloc: std.mem.Allocator, path: []const u8, max_w: c_int, max_h: c_int) ?*Player {
+        if (max_w <= 0 or max_h <= 0) return null;
+        const scale = @min(1.0, 1280.0 / @as(f32, @floatFromInt(max_w)));
+        const w: c_int = @divTrunc(@as(c_int, @intFromFloat(@as(f32, @floatFromInt(max_w)) * scale)), 2) * 2;
+        const h: c_int = @divTrunc(@as(c_int, @intFromFloat(@as(f32, @floatFromInt(max_h)) * scale)), 2) * 2;
+        const f = Ff.spawn(alloc, path, w, h) orelse {
+            last_error = "動画を再生できません(ffmpeg がありません)";
+            return null;
+        };
+        const self = alloc.create(Player) catch {
+            f.destroy(alloc);
+            return null;
+        };
+        self.* = .{ .ff = f, .pipe_r = f.fd, .pipe_w = -1, .max_w = max_w, .max_h = max_h, .w = w, .h = h };
+        log.info("動画を ffmpeg で再生します({d}x{d})", .{ w, h });
+        return self;
+    }
+
     /// 一時停止(画面ロック中など)
     pub fn setPaused(self: *Player, paused: bool) void {
+        if (self.ff) |f| {
+            _ = c.kill(-f.pid, if (paused) c.SIGSTOP else c.SIGCONT);
+            return;
+        }
         const a = api.?;
         const cmd = [_]?[*:0]const u8{ "set", "pause", if (paused) "yes" else "no", null };
         _ = a.command(self.mpv, &cmd);
+    }
+};
+
+/// ffmpeg のプロセスと、パイプから受け取るコマ(back に読み込み、そろったら front と入れ替える)
+const Ff = struct {
+    pid: c.pid_t,
+    fd: c_int,
+    w: c_int,
+    h: c_int,
+    front: []u8,
+    back: []u8,
+    filled: usize = 0,
+
+    const ReadResult = enum { none, frame, eof };
+
+    fn spawn(alloc: std.mem.Allocator, path: []const u8, w: c_int, h: c_int) ?*Ff {
+        var pz: [600]u8 = undefined;
+        const in = std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return null;
+        // まず VA-API(GPU で復号・縮小。4K でも CPU は軽い)、使えなければ CPU で復号する。
+        // どちらも画面を覆うように拡大して切り抜く(壁紙のシェーダの cover と同じ見た目)。動画のパスは $1 で渡す
+        var sb: [900]u8 = undefined;
+        const script = std.fmt.bufPrintZ(&sb,
+            \\common="-nostdin -loglevel error -stream_loop -1 -re"
+            \\ffmpeg $common -hwaccel vaapi -hwaccel_output_format vaapi -i "$1" -an -sn \
+            \\  -vf "scale_vaapi=w={d}:h={d}:force_original_aspect_ratio=increase,hwdownload,format=nv12,crop={d}:{d},fps=30,format=rgba" \
+            \\  -f rawvideo - ||
+            \\exec ffmpeg $common -i "$1" -an -sn \
+            \\  -vf "scale={d}:{d}:force_original_aspect_ratio=increase,crop={d}:{d},fps=30" -pix_fmt rgba -f rawvideo -
+        , .{ w, h, w, h, w, h, w, h }) catch return null;
+        const argv = [_]?[*:0]const u8{ "/bin/sh", "-c", script.ptr, "ame-video", in.ptr, null };
+        var fds: [2]c_int = undefined;
+        if (c.pipe2(&fds, c.O_CLOEXEC) != 0) return null;
+        const pid = c.fork();
+        if (pid < 0) {
+            _ = c.close(fds[0]);
+            _ = c.close(fds[1]);
+            return null;
+        }
+        if (pid == 0) {
+            // 自分のプロセスグループにする(止めるときに sh と ffmpeg をまとめて止める)
+            _ = c.setpgid(0, 0);
+            const devnull = c.open("/dev/null", c.O_RDWR);
+            if (devnull >= 0) {
+                _ = c.dup2(devnull, 0);
+                _ = c.dup2(devnull, 2);
+            }
+            _ = c.dup2(fds[1], 1);
+            // ame-shell の SIGCHLD などのマスクを引き継がない
+            var sigset: c.sigset_t = undefined;
+            _ = c.sigemptyset(&sigset);
+            _ = c.sigprocmask(c.SIG_SETMASK, &sigset, null);
+            _ = c.execv("/bin/sh", @ptrCast(&argv));
+            c._exit(127);
+        }
+        _ = c.close(fds[1]);
+        _ = c.fcntl(fds[0], c.F_SETFL, c.fcntl(fds[0], c.F_GETFL) | c.O_NONBLOCK);
+        const size: usize = @intCast(w * h * 4);
+        const self = alloc.create(Ff) catch return null;
+        const front = alloc.alloc(u8, size) catch return null;
+        const back = alloc.alloc(u8, size) catch return null;
+        self.* = .{ .pid = pid, .fd = fds[0], .w = w, .h = h, .front = front, .back = back };
+        return self;
+    }
+
+    /// 読めるだけ読む。コマがそろったら .frame(複数そろったら最後のもの)、ffmpeg が終わったら .eof
+    fn read(self: *Ff, fd: c_int) ReadResult {
+        var got = false;
+        while (true) {
+            const n = c.read(fd, self.back.ptr + self.filled, self.back.len - self.filled);
+            if (n == 0) return .eof;
+            if (n < 0) break; // EAGAIN: 今は読むものが無い
+            self.filled += @intCast(n);
+            if (self.filled == self.back.len) {
+                std.mem.swap([]u8, &self.front, &self.back);
+                self.filled = 0;
+                got = true;
+            }
+        }
+        return if (got) .frame else .none;
+    }
+
+    fn destroy(self: *Ff, alloc: std.mem.Allocator) void {
+        // 止めてすぐ回収する(ゾンビを残さない。SIGKILL なら待ち時間はほぼ無い)
+        _ = c.kill(-self.pid, c.SIGKILL);
+        _ = c.waitpid(self.pid, null, 0);
+        alloc.free(self.front);
+        alloc.free(self.back);
+        alloc.destroy(self);
     }
 };
 
