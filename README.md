@@ -62,9 +62,12 @@ sh install.sh --user     # 自分だけ(~/.local)。root 不要。SDDM には出
 sh install.sh --uninstall [--user]
 ```
 
-`install.sh` が依存パッケージ(Chimera Linux は自動。他のディストリは足りないものを表示)、Zig 0.13、Odin、River(無ければ River 0.5 をソースから)、ame-shell のビルドとインストールまで行います。
+`install.sh` が依存パッケージ(Chimera Linux は apk、Arch 系は pacman で自動。他のディストリは足りないものを表示)、Zig 0.13、Odin、River(無ければ River 0.5 をソースから)、ame-shell のビルドとインストールまで行います。
 どのユーザーが実行しても構いません。doas / sudo が使えない人は自動で `--user` になります。全ユーザー用では、自分でビルドした River 0.5(`~/.local/opt/river-0.5`)も `/usr/local/opt` にコピーされ、他のアカウントからも River 0.5 のセッションが使えます。
 foot は自分の `~/.config/foot/foot.ini` が無ければ、ame-shell の半透明の設定(`data/xdg/foot/foot.ini`)で開きます。
+
+### Arch Linux
+`sh install.sh` が Arch(と EndeavourOS / Manjaro など Arch 系)を見つけると `scripts/install-arch.sh` を使います。River 0.5・Odin・wlroots 0.20 も公式リポジトリにあるので、pacman で入れて(AUR は使いません)、sddm・NetworkManager・bluetooth を有効にし(ほかのログイン画面が有効ならそのまま)、ame-shell をビルドしてインストールします。Zig だけは 0.13 が必要なので公式の配布物を `~/.cache` に取ってきます。
 
 ### 画面の拡大率・端末
 - **拡大率は自動**(River 0.5 のセッション、`wlr-randr` を使用): 画素の細かさを作者の環境(14 インチ 1920x1200、拡大率 1)と比べて 0.25 刻みで決めます。ふつうの画面は 1 のまま、14 インチ 2880x1800 なら 1.5、13 インチ 4K なら 2。

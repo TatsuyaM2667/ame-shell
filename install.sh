@@ -7,10 +7,10 @@
 #
 # オプション: --no-deps(パッケージを入れない)/ --no-river(River が無くても作らない)/ --yes(確認しない)
 #           --debug(デバッグ情報つき・安全検査ありでビルド。クラッシュのバックトレースに関数名が出る)
-# FreeBSD では scripts/install-freebsd.sh(完全自動)に任せる。
+# FreeBSD では scripts/install-freebsd.sh、Arch 系では scripts/install-arch.sh(どちらも完全自動)に任せる。
 #
 # Linux で行うこと:
-#   1. 依存パッケージ(Chimera Linux の apk は自動。その他のディストリは足りないものを表示)
+#   1. 依存パッケージ(Chimera Linux の apk・Arch の pacman は自動。その他のディストリは足りないものを表示)
 #   2. Zig 0.13.0(無ければ公式の配布物を ~/.cache に)と Odin(無ければソースからビルド)
 #   3. River が無ければ River 0.5 をソースからビルド(Zig 0.16 + wlroots 0.20)
 #   4. ame-shell をビルドして、session/install-session.sh でインストール
@@ -54,6 +54,16 @@ fi
 if [ "$UNINSTALL" = 1 ]; then
     if [ "$USER_MODE" = 1 ]; then exec sh "$REPO/session/install-session.sh" --uninstall --user; fi
     exec sh "$REPO/session/install-session.sh" --uninstall
+fi
+
+# ---- Arch 系(Arch / EndeavourOS / Manjaro など)は専用スクリプトで pacman から依存を入れる ----
+# (そのスクリプトが最後に install.sh --no-deps を呼び戻す)
+if [ "$NO_DEPS" = 0 ] && [ -z "${AME_FROM_ARCH:-}" ] && command -v pacman >/dev/null 2>&1 &&
+    { grep -q '^ID=arch' /etc/os-release 2>/dev/null || grep -qE '^ID_LIKE=.*arch' /etc/os-release 2>/dev/null; }; then
+    fwd=""
+    [ "$USER_MODE" = 1 ] && fwd="--user"
+    # shellcheck disable=SC2086  # FWD は空白区切りのオプション
+    exec sh "$REPO/scripts/install-arch.sh" $fwd $FWD
 fi
 
 # ---- root 権限で実行する手段(root なら不要、無ければ doas / sudo、どれも無ければ不可) ----
