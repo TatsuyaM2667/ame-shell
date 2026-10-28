@@ -37,6 +37,8 @@ pub usingnamespace @cImport({
     @cInclude("river-window-management-v1-client-protocol.h");
     @cInclude("river-xkb-bindings-v1-client-protocol.h");
     @cInclude("river-layer-shell-v1-client-protocol.h");
+    @cInclude("river-input-management-v1-client-protocol.h");
+    @cInclude("river-libinput-config-v1-client-protocol.h");
     @cInclude("wlr-foreign-toplevel-management-unstable-v1-client-protocol.h");
     @cInclude("xkbcommon/xkbcommon.h");
     // GPU

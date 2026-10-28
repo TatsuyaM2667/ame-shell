@@ -64,3 +64,9 @@ sh install.sh --debug
   FreeBSD 向けのバイナリに Linux の直接のシステムコール(`syscall` 命令・`os.linux.*`)が 1 つも残っていないことを逆アセンブルで確認済み。
 - zstd: LLVM 18 が `-lzstd` を要求するが、FreeBSD の base の zstd は private 名。pkg の `zstd` を必須にし、Zig の cmake に
   `-DCMAKE_PREFIX_PATH="/usr/local/llvm18;/usr/local"` と `-DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/lib"` を追加。
+
+## タッチパッド
+- USB マウスは動くのにタッチパッドが動かない: タッチパッドのドライバが読み込まれていない。I2C 接続(ACPI の PNP0C50)は
+  ig4 + iichid + hmt(AMD は amdgpio も)、PS/2 接続は loader.conf の `hw.psm.synaptics_support` / `hw.psm.elantech_support`。
+  `doas sh scripts/freebsd-touchpad.sh` で設定して再起動。`sh scripts/freebsd-touchpad.sh --check` で、機器・モジュール・/dev/input の一覧を表示。
+- 動くがタップでクリックできない: libinput の既定は無効。ame-shell(River 0.5 の WM)が river_libinput_config_v1 で有効にする(設定 tap-to-click)。

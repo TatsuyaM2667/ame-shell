@@ -40,6 +40,8 @@ pub const Config = struct {
     frame_opacity: f32 = 0.82,
     ui_scale: f32 = 1.25,
     super_launcher: bool = true,
+    /// タッチパッドのタップでクリック(River 0.5 のセッション)
+    tap_to_click: bool = true,
     /// 天気の場所(空 = IP アドレスから推定)。例: "Sapporo"、"Osaka"
     weather_location: Str = .{},
     // bar
@@ -267,6 +269,8 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             if (num(val)) |n| cfg.ui_scale = std.math.clamp(n, 0.75, 2.5) else ok = false;
         } else if (eq(u8, key, "weather-location")) {
             cfg.weather_location.set(val);
+        } else if (eq(u8, key, "tap-to-click")) {
+            cfg.tap_to_click = boolean(val) orelse true;
         } else if (eq(u8, key, "super-launcher")) {
             cfg.super_launcher = boolean(val) orelse true;
         } else if (eq(u8, key, "frame-opacity")) {

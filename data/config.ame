@@ -5,6 +5,7 @@ shell {
   layout caelestia          // caelestia(枠とドロワー)| classic(横バー)
   ui-scale 1.25
   super-launcher on         // Super を単独で押して離すとランチャー
+  tap-to-click on           // タッチパッドのタップでクリック(River 0.5 のセッション。変更はログインし直すと反映)
   // weather-location "Sapporo"  // 天気の場所(省略すると IP アドレスから推定)
 }
 

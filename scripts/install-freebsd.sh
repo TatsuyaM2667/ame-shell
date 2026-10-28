@@ -210,6 +210,9 @@ if [ "$DO_TAP" = 1 ]; then
     fi
 fi
 
+# タッチパッド(I2C / PS/2 のドライバ)
+sh "$REPO/scripts/freebsd-touchpad.sh"
+
 # ---------------------------------------------------------------------------
 say "4/5 ツールチェイン(Zig $ZIG_VER・Odin $ODIN_TAG)"
 mkdir -p "$TOOLS/src"
@@ -257,8 +260,6 @@ su -m "$TARGET_USER" -c "cd '$REPO' && env HOME='$UHOME' PATH='$TOOLS/zig-$ZIG_V
     die "ame-shell のビルドに失敗しました"
 sh "$REPO/session/install-session.sh" --prefix /usr/local
 
-# 追加の壁紙(非公開リポジトリ。GitHub にログインしていなければ案内だけ)
-su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_DATA_HOME= sh '$REPO/scripts/fetch-wallpapers.sh'"
 # foot の見た目(半透明・fastfetch)を ame-shell のものに。元の foot.ini は foot.ini.ame-bak に残る
 su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_CONFIG_HOME= sh '$REPO/scripts/foot-config.sh'"
 

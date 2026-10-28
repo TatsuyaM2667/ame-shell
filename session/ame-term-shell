@@ -4,10 +4,32 @@
 #   - fastfetch が無い、AME_FASTFETCH=0、すでに出した(FASTFETCH_SHOWN)ときは出さない
 #   - シェルの設定ファイルで自分で fastfetch を呼んでいる場合も、二重にならないよう出さない
 
+# 窓の大きさが決まる(タイル配置される)まで少し待つ。決まる前に出すと、配置し直しで表示が崩れる
+wait_size() {
+    prev=""
+    i=0
+    while [ $i -lt 12 ]; do
+        cur=$(stty size 2>/dev/null)
+        case "$cur" in
+            ""|"0 "*|*" 0") ;;
+            *) [ "$cur" = "$prev" ] && [ $i -ge 3 ] && return ;;
+        esac
+        prev=$cur
+        sleep 0.05
+        i=$((i + 1))
+    done
+}
+
 if [ -z "${FASTFETCH_SHOWN:-}" ] && [ "${AME_FASTFETCH:-1}" != 0 ] && command -v fastfetch >/dev/null 2>&1 &&
     ! grep -qs fastfetch "$HOME/.profile" "$HOME/.shrc" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.cshrc" \
         "$HOME/.tcshrc" "$HOME/.config/fish/config.fish"; then
-    fastfetch
+    wait_size
+    # FreeBSD はいつもの大きい FreeBSD のロゴに(自分の fastfetch の設定があればそちらに任せる)
+    if [ "$(uname -s)" = FreeBSD ] && [ ! -e "${XDG_CONFIG_HOME:-$HOME/.config}/fastfetch" ]; then
+        fastfetch --logo freebsd
+    else
+        fastfetch
+    fi
 fi
 FASTFETCH_SHOWN=1
 export FASTFETCH_SHOWN

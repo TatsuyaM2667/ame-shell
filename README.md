@@ -42,7 +42,7 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
 ### 壁紙と配色
 - **ライブ壁紙**: シェーダで描くオーロラ / 雨、**GIF・MP4 などの動画**(libmpv を実行時に読み込み、ハードウェア復号)、画像
 - **壁紙ピッカー**(Super+Shift+W): 斜めのカードが並び、決定するとカードの位置から円・斜めワイプ・短冊で切り替わる
-- **壁紙の置き場**: `~/Pictures/wallpapers`・`~/.config/ame-shell/wallpapers`・`~/.local/share/ame-shell/wallpapers`・`<prefix>/share/ame-shell/wallpapers`(同じ名前は 1 つにまとめる)。インストーラと ame-update は、追加の壁紙を非公開リポジトリ(`AME_WALLPAPERS_REPO` で変更、空で無効)から取ってきます。GitHub にログインしていない場合は案内を出すだけです(`gh auth login && gh auth setup-git`)
+- **壁紙の置き場**: `~/Pictures/wallpapers`・`~/.config/ame-shell/wallpapers`・`~/.local/share/ame-shell/wallpapers`・`<prefix>/share/ame-shell/wallpapers`(同じ名前は 1 つにまとめる)。ame-update は、追加の壁紙を非公開リポジトリ(`AME_WALLPAPERS_REPO` で変更、空で無効)から取ってきます。GitHub にログインしていない場合は案内を出すだけです(`gh auth login && gh auth setup-git`)
 - **配色は壁紙から自動**: 壁紙の一番鮮やかな色からアクセント、ガラス・文字色も合わせてなめらかに遷移。再生中はアルバムアートの色に。くすんだ緑や、エラーと紛らわしい赤は避ける
 - **エラーは赤**: Wi-Fi の接続失敗などでは枠の縁が一瞬赤く光る
 - **ガラス**: 壁紙を dual Kawase でぼかし、パネルは真後ろをサンプル(屈折・色収差・ハイライト)
@@ -72,6 +72,8 @@ foot は自分の `~/.config/foot/foot.ini` が無ければ、ame-shell の半�
 - **foot**: 自分の `~/.config/foot/foot.ini` が無ければ ame-shell の設定(半透明、JetBrains Mono 12pt、`dpi-aware=no`)。開くと最初に `fastfetch` を表示します(`AME_FASTFETCH=0` で無効。シェルの設定で自分で呼んでいる場合は二重にしません)。
   FreeBSD では、インストーラと ame-update が `~/.config/foot/foot.ini` をこの設定で上書きします(元のファイルは `foot.ini.ame-bak`)。
 - カーソルは未設定なら 24px(Adwaita)。
+- **タッチパッド**: タップでクリック(設定 `shell { tap-to-click on|off }`、River 0.5 のセッション。変更はログインし直すと反映)。
+  FreeBSD はインストーラが I2C(ig4・iichid・hmt)と PS/2(psm の Synaptics / Elantech)のドライバを設定します。後からは `doas sh scripts/freebsd-touchpad.sh`(再起動後に有効)、状態の確認は `sh scripts/freebsd-touchpad.sh --check`。
 
 ### アップデート(ame-update)
 

@@ -28,6 +28,7 @@ const Audio = @import("audio.zig").Audio;
 const ipc = @import("ipc.zig");
 const SuperTap = @import("platform/supertap.zig").SuperTap;
 const Wm = @import("wm/wm.zig").Wm;
+const Touchpad = @import("wm/touchpad.zig");
 
 const log = std.log.scoped(.app);
 
@@ -120,6 +121,7 @@ pub const App = struct {
     wm_lsh: ?*c.struct_river_layer_shell_v1 = null,
     /// River 0.3: 開いているアプリの一覧(ワークスペースごとのアプリ名の推測用)
     toplevels: ?*Toplevels = null,
+    touchpad: ?*Touchpad = null,
     seat: ?*c.struct_wl_seat = null,
     seat_status: ?*c.struct_zriver_seat_status_v1 = null,
     pointer: ?*c.struct_wl_pointer = null,
@@ -741,6 +743,9 @@ fn onGlobal(data: ?*anyopaque, reg: ?*c.struct_wl_registry, name: u32, interface
     } else if (iface(interface, &c.zwlr_foreign_toplevel_manager_v1_interface)) {
         const m: *c.struct_zwlr_foreign_toplevel_manager_v1 = @ptrCast(bind(reg, name, &c.zwlr_foreign_toplevel_manager_v1_interface, ver, 3) orelse return);
         app.toplevels = Toplevels.create(app, m) catch null;
+    } else if (iface(interface, &c.river_libinput_config_v1_interface)) {
+        const lc: *c.struct_river_libinput_config_v1 = @ptrCast(bind(reg, name, &c.river_libinput_config_v1_interface, ver, 1) orelse return);
+        app.touchpad = Touchpad.create(app.alloc, lc, app.cfg.tap_to_click) catch null;
     } else if (iface(interface, &c.river_xkb_bindings_v1_interface)) {
         app.wm_xkb = @ptrCast(bind(reg, name, &c.river_xkb_bindings_v1_interface, ver, 3));
         if (app.wm) |w| w.setXkb(app.wm_xkb.?);

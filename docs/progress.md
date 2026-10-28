@@ -131,3 +131,9 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - ame-display-scale: wlr-randr の物理サイズと解像度から、Chimera の環境(1920px / 300mm = 6.4 px/mm、拡大率 1)と同じ見た目になる拡大率(0.25 刻み、1.25 未満は 1)を設定。~/.config/ame-shell/output-scale・AME_OUTPUT_SCALE で上書き、off で無効。偽の wlr-randr で試験。
 - XCURSOR_SIZE=24 / XCURSOR_THEME=Adwaita(未設定のときだけ)。FreeBSD の任意パッケージに fastfetch・wlr-randr(14 / 15 の quarterly にあることを確認)、ame-update が未導入なら入れる。
 - FreeBSD: scripts/foot-config.sh で ~/.config/foot/foot.ini を ame-shell の設定に上書き(初回だけ foot.ini.ame-bak に退避、同じ内容なら何もしない)。install-freebsd.sh と ame-update から。
+
+## 2026-10-28(追記 4)FreeBSD のタッチパッド・fastfetch
+- タッチパッド: scripts/freebsd-touchpad.sh(ig4 / iichid / hmt / AMD は amdgpio を kld_list、psm の Synaptics / Elantech / TrackPoint を loader.conf、--check で診断)。install-freebsd.sh から。
+- タップでクリック: river_libinput_config_v1 を wl_proxy_add_dispatcher で受け、tap_support > 0 の機器に set_tap(src/wm/touchpad.zig、設定 tap-to-click)。入れ子の River 0.5 で bind されエラーが無いことを確認(ヘッドレスには実機器が無いのでタップ自体は未確認)。
+- fastfetch: 窓の大きさが決まってから表示、FreeBSD は --logo freebsd(大きいロゴ。自分の fastfetch の設定があれば任せる)。
+- 追加の壁紙の取得はインストーラから外し、ame-update だけに。
