@@ -166,3 +166,10 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - アプリのアイコン: ランチャーは 30 秒以上たつと開くたびに一覧を読み直し、そのたびに全アイコン・サムネイルのテクスチャを捨てて読み直していた(動画の壁紙のサムネイル(ffmpeg)の後ろに並ぶので遅い)。テクスチャをアイコン名 / パスで保持して使い回し、アイコンとサムネイルは別のスレッドで読む。
 - そのほか: XDG_RUNTIME_DIR が長くて ame-ctl のソケットのパスが入らないと起動時に落ちていたのを、ame-ctl を無効にして続行するように。動画のサムネイルのパスを作るときに同じバッファから読んで書いていた(Debug ビルドで abort)のを修正。
 - 確認: 入れ子の River 0.5(XDG_RUNTIME_DIR とセッションバスを分離)で、メディアタブ(debug-media、アルバム名・新しいレコード)、遅れて書かれた歌詞ファイルの読み込み、バッテリーのポップアップとユーティリティ、30 秒後のランチャー(0.25 秒でアイコンあり)、Wi-Fi(0.4 秒で一覧)・Bluetooth の一覧を撮影。netlink(KOBJECT_UEVENT)のソケットを確認。zig build test、FreeBSD のクロスビルドも通過。
+
+## 2026-10-28(追記 8)歌詞の取り寄せ先・music-tui の表示崩れ
+- 歌詞: 取り寄せ先を順に探すように(再生アプリの歌詞ファイル → キャッシュ → music-tui の歌詞サーバ(WORKERS_URL の /tracks から曲名で探して /lyrics/<パス>)→ LRCLIB の get → search → NetEase の cloudsearch → song/lyric)。同期歌詞が見つかったら終わり、同期の無い歌詞は最後の手段。NetEase は 1 件目が別の曲のことが多いので、曲名・アーティスト・長さで点数を付けて選ぶ。クレジットの行(作词 : …)は除く。
+- LRCLIB が 503(混雑)を返したときも「歌詞なし」とキャッシュしていたので、一時的な失敗(通信できない・429・5xx)のときは覚えないように。古い「無し」のキャッシュ(#none)は探し直す。
+- 設定: lyrics { music-tui on|off|<URL> / lrclib on|off / netease on|off }。
+- music-tui(music-tui-bsd): TUI の表示中は stderr を $XDG_STATE_HOME/music-tui/stderr.log へ(ALSA / PipeWire の underrun などのメッセージが画面に重なって残っていた)。外部 mpv の出力も捨てる。
+- 確認: 入れ子の River 0.5(XDG_CACHE_HOME・XDG_RUNTIME_DIR・セッションバスを分離)で、music-tui の歌詞サーバ(快晴・104Hz)、NetEase(夜に駆ける、music-tui と LRCLIB を切って)、LRCLIB(Pretender)から取れることをログと画面で確認。

@@ -59,3 +59,10 @@ notifications {
 lock {
   enabled on
 }
+
+// 歌詞の取り寄せ先(上から順に探し、同期歌詞が見つかったら終わり)
+lyrics {
+  music-tui on            // music-tui の歌詞サーバ。on なら ~/music-tui-bsd/.env の WORKERS_URL を使う(URL を直接書いてもよい)
+  lrclib on               // LRCLIB(lrclib.net)
+  netease on              // NetEase Cloud Music(非公式の公開 API。日本語の曲に強い)
+}

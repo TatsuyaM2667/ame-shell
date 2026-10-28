@@ -65,6 +65,11 @@ pub const Config = struct {
     // font
     font_ui: Str = Str.of("Noto Sans CJK JP"),
     font_icon: Str = Str.of("JetBrainsMono Nerd Font Propo"),
+    // lyrics: 歌詞の取り寄せ先(music-tui の歌詞サーバ → LRCLIB → NetEase の順)
+    lyrics_music_tui: Str = Str.of(""), // 空なら ~/music-tui-bsd/.env(または ~/music-tui/.env)の WORKERS_URL
+    lyrics_music_tui_on: bool = true,
+    lyrics_lrclib: bool = true,
+    lyrics_netease: bool = true,
     // apps
     terminal: Str = Str.of("foot"),
     // notifications
@@ -317,6 +322,15 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
     } else if (eq(u8, sec, "notifications")) {
         if (eq(u8, key, "timeout")) {
             if (num(val)) |n| cfg.notify_timeout_ms = @intFromFloat(std.math.clamp(n, 500, 600000)) else ok = false;
+        } else ok = false;
+    } else if (eq(u8, sec, "lyrics")) {
+        if (eq(u8, key, "music-tui")) {
+            // on / off、または歌詞サーバの URL
+            if (boolean(val)) |b| cfg.lyrics_music_tui_on = b else cfg.lyrics_music_tui.set(val);
+        } else if (eq(u8, key, "lrclib")) {
+            cfg.lyrics_lrclib = boolean(val) orelse true;
+        } else if (eq(u8, key, "netease")) {
+            cfg.lyrics_netease = boolean(val) orelse true;
         } else ok = false;
     } else if (eq(u8, sec, "lock")) {
         if (eq(u8, key, "enabled")) cfg.lock_enabled = boolean(val) orelse true else ok = false;
