@@ -30,6 +30,9 @@ if [ "${AME_SESSION_NESTED:-0}" != "1" ]; then
     command -v fcitx5 >/dev/null 2>&1 && fcitx5 -d >/dev/null 2>&1
 
     [ -f "$HOME/.config/ame-shell/river5-extra.sh" ] && . "$HOME/.config/ame-shell/river5-extra.sh"
+
+    # 画面の拡大率(高解像度の画面でも文字や UI が同じくらいの大きさに見えるように)
+    sh "$(dirname "$0")/ame-display-scale" &
 fi
 
 # ---- ame-shell(シェル + ウィンドウマネージャ)の監督 ----

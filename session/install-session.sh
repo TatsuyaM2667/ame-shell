@@ -196,6 +196,7 @@ install_file "$OUT/bin/ame-shell" "$PREFIX/bin/ame-shell" 755
 install_file "$OUT/bin/ame-ctl" "$PREFIX/bin/ame-ctl" 755
 install_file "$HERE/ame-session" "$PREFIX/bin/ame-session" 755
 install_file "$HERE/ame-update" "$PREFIX/bin/ame-update" 755
+install_file "$HERE/ame-term-shell" "$PREFIX/bin/ame-term-shell" 755
 # ame-update が git pull してビルドし直すための、ソースの場所の記録
 tmp=$(mktemp "${TMPDIR:-/tmp}/ame-src.XXXXXX") || exit 1
 echo "$ROOT" > "$tmp"
@@ -203,6 +204,7 @@ install_file "$tmp" "$PREFIX/share/ame-shell/source" 644
 rm -f "$tmp"
 install_file "$HERE/ame-river-init" "$PREFIX/share/ame-shell/ame-river-init" 755
 install_file "$HERE/ame-river5-init" "$PREFIX/share/ame-shell/ame-river5-init" 755
+install_file "$HERE/ame-display-scale" "$PREFIX/share/ame-shell/ame-display-scale" 755
 install_file "$OUT/share/ame-shell/config.ame" "$PREFIX/share/ame-shell/config.ame" 644
 install_file "$OUT/share/ame-shell/bt-connect.sh" "$PREFIX/share/ame-shell/bt-connect.sh" 755
 install_file "$OUT/share/ame-shell/xdg/foot/foot.ini" "$PREFIX/share/ame-shell/xdg/foot/foot.ini" 644

@@ -1,0 +1,66 @@
+#!/bin/sh
+# ame-display-scale: 画面の拡大率を、どの画面でも文字や UI が同じくらいの大きさに見えるように自動で決める。POSIX sh。
+# ame-river5-init がセッションの開始時に裏で呼ぶ。wlr-randr(wlr-output-management)を使う。
+#
+# 基準は作者の環境(14 インチ 1920x1200 = 横 300mm、拡大率 1)。画素の細かさ(px/mm)をこれで割り、
+# 0.25 刻みに丸めた値を拡大率にする。1.25 未満なら 1 のまま(ふつうのノート PC や外部モニタは変わらない)。
+#   例: 14 インチ 2880x1800 → 1.5、13 インチ 4K → 2、27 インチ 4K → 1、24 インチ 1080p → 1
+# 自分で決めるとき: ~/.config/ame-shell/output-scale に「1.5」や「eDP-1 1.5」(画面ごと)、「off」で何もしない。
+#   環境変数 AME_OUTPUT_SCALE でも同じ(ファイルより優先)。
+
+REF_PX_PER_MM=6.4      # 1920px / 300mm
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}/ame-shell/output-scale"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ame-shell"
+log() { printf '%s [display-scale] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$STATE_DIR/session.log"; }
+
+command -v wlr-randr >/dev/null 2>&1 || { log "wlr-randr がないため拡大率は変えません / wlr-randr not found"; exit 0; }
+
+want="${AME_OUTPUT_SCALE:-}"
+[ -z "$want" ] && [ -f "$CONF" ] && want=$(grep -v '^[[:space:]]*#' "$CONF" | tr '\n' ';')
+case "$want" in off|off\;*) log "拡大率の自動設定は off"; exit 0 ;; esac
+
+# 出力が現れるまで少し待つ(セッションの開始直後)
+info=""
+i=0
+while [ $i -lt 20 ]; do
+    info=$(wlr-randr 2>/dev/null)
+    [ -n "$info" ] && break
+    sleep 0.25
+    i=$((i + 1))
+done
+[ -n "$info" ] || { log "wlr-randr から画面の情報が取れません"; exit 0; }
+
+# 画面ごとに「名前 横px 横mm 今の拡大率」
+printf '%s\n' "$info" | awk '
+    /^[^ \t]/ { if (name != "") print name, px, mm, sc; name = $1; px = 0; mm = 0; sc = 1; next }
+    /Physical size:/ { split($3, a, "x"); mm = a[1] + 0 }
+    /current/ && /px/ { split($1, b, "x"); px = b[1] + 0 }
+    /Scale:/ { sc = $2 + 0 }
+    END { if (name != "") print name, px, mm, sc }
+' | while read -r name px mm cur; do
+    # 指定があればそれ(「名前 値」が優先、次に名前なしの値)
+    s=$(printf '%s\n' "$want" | tr ';' '\n' | awk -v n="$name" '
+        NF == 2 && $1 == n { print $2; found = 1; exit }
+        NF == 1 && def == "" { def = $1 }
+        END { if (!found && def != "") print def }')
+    if [ -z "$s" ]; then
+        if [ "$px" -le 0 ] || [ "$mm" -le 0 ]; then
+            log "$name: 物理サイズが不明なのでそのまま(${px}px, ${mm}mm)"
+            continue
+        fi
+        s=$(awk -v px="$px" -v mm="$mm" -v ref="$REF_PX_PER_MM" 'BEGIN {
+            r = px / mm / ref; s = int(r * 4 + 0.5) / 4
+            if (s < 1.25) s = 1; if (s > 3) s = 3
+            printf "%g", s }')
+    fi
+    if awk -v a="$s" -v b="$cur" 'BEGIN { exit !(a - b < 0.01 && b - a < 0.01) }'; then
+        log "$name: 拡大率 $s(${px}px / ${mm}mm)"
+        continue
+    fi
+    if wlr-randr --output "$name" --scale "$s" >/dev/null 2>&1; then
+        log "$name: 拡大率を $s にしました(${px}px / ${mm}mm)"
+    else
+        log "$name: 拡大率 $s を設定できませんでした"
+    fi
+done
+exit 0

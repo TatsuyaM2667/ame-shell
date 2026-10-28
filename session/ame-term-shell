@@ -1,0 +1,19 @@
+#!/bin/sh
+# ame-term-shell: ame-shell の foot の既定設定(data/xdg/foot/foot.ini の shell=)から起動されるシェル。
+# 端末を開いたら最初に fastfetch でシステムの情報を出し、それからいつものシェル($SHELL)になる。POSIX sh。
+#   - fastfetch が無い、AME_FASTFETCH=0、すでに出した(FASTFETCH_SHOWN)ときは出さない
+#   - シェルの設定ファイルで自分で fastfetch を呼んでいる場合も、二重にならないよう出さない
+
+if [ -z "${FASTFETCH_SHOWN:-}" ] && [ "${AME_FASTFETCH:-1}" != 0 ] && command -v fastfetch >/dev/null 2>&1 &&
+    ! grep -qs fastfetch "$HOME/.profile" "$HOME/.shrc" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.cshrc" \
+        "$HOME/.tcshrc" "$HOME/.config/fish/config.fish"; then
+    fastfetch
+fi
+FASTFETCH_SHOWN=1
+export FASTFETCH_SHOWN
+
+# 自分自身を $SHELL にされていても、ループせずにふつうのシェルにする
+case "${SHELL:-}" in
+    ""|*/ame-term-shell|ame-term-shell) SHELL=/bin/sh; export SHELL ;;
+esac
+exec "$SHELL"
