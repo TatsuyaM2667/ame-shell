@@ -1,52 +1,82 @@
 // ame-shell ドキュメントサイトの描画エンジン(Zig → wasm32-freestanding)。
 //
-// 各ページの本文(content/*.md、Markdown の小さな部分集合 + 独自のブロック)をビルド時に埋め込み、
-// ブラウザ上でこの WebAssembly が HTML に変換する。JavaScript は wasm を読み込んで結果を DOM に
-// 入れるだけ(static/app.js)。デモ(スプリング・あいまい検索・主色抽出)は ame-shell 本体と同じ
-// Odin のコア(anim/anim.odin)を wasm にしたものを app.js から呼ぶ。
+// 5 つの区分(ドキュメント・技術解説・関数リファレンス・Wiki・ブログ)の本文をビルド時に埋め込み、
+// ブラウザ上でこの WebAssembly が HTML にする。JavaScript は wasm を読み込んで結果を DOM に入れるだけ
+// (static/app.js)。関数リファレンスは site/gen/refgen.zig がソースから生成したもの(refpages)。
 //
-// 書式:
-//   # 見出し / ## 見出し {#id} / ### 見出し     段落は空行で区切る
+// 書式(Markdown の部分集合 + 独自のブロック):
+//   # 見出し / ## 見出し {#id} / ### 見出し {#id}     段落は空行で区切る
 //   - 箇条書き / 1. 番号付き / > 補足(>! で注意) / ``` コード ``` / | 表 |(2 行目は |---|)
-//   ::video 名前 | 説明     media/名前.mp4(ポスターは media/名前.jpg)
-//   ::img ファイル | 説明     media/ファイル
-//   ::demo spring|fuzzy|color
-//   ::stats  の次の行から空行まで「値 | 説明」     ::cards  の次の行から空行まで「アイコン | 題 | 本文」
+//   ::video 名前 | 説明   ::img ファイル | 説明   ::demo spring|fuzzy|color
+//   ::stats(値 | 説明)/ ::cards(アイコン | 題 | 本文)/ ::infobox 題(項目 | 値)… 空行まで
+//   :::easy 題 … ::: / :::deep 題 … ::: / :::research 題 … :::   (囲み)
 //   < で始まる行は HTML をそのまま
-//   行内: **太字** `コード` [文字](URL)   表のセルの先頭の ✓ ✗ △ は色付き
+//   行内: **太字** `コード` [文字](URL) [[wiki の項目]] [[項目|表示する文字]]
 
 const std = @import("std");
+const refpages = @import("refpages");
 
-const Page = struct { slug: []const u8, title: []const u8, src: []const u8, tech: bool = false };
+const Sec = enum(u32) { doc, tech, ref, wiki, blog };
 
-const pages = [_]Page{
-    .{ .slug = "", .title = "ホーム", .src = @embedFile("content/home.md") },
-    .{ .slug = "animation", .title = "アニメーション", .src = @embedFile("content/animation.md") },
-    .{ .slug = "shell", .title = "シェルの機能", .src = @embedFile("content/shell.md") },
-    .{ .slug = "performance", .title = "性能", .src = @embedFile("content/performance.md") },
-    .{ .slug = "compare", .title = "ほかの WM と比較", .src = @embedFile("content/compare.md") },
-    .{ .slug = "install", .title = "インストール", .src = @embedFile("content/install.md") },
-    .{ .slug = "reference", .title = "リファレンス", .src = @embedFile("content/reference.md") },
-    // ---- 技術解説(コードごとに: 何を・なぜ・結果・ほかの方法との違い)----
-    .{ .tech = true, .slug = "tech", .title = "技術解説: 全体像", .src = @embedFile("content/tech/index.md") },
-    .{ .tech = true, .slug = "tech-lang", .title = "言語とツールチェイン", .src = @embedFile("content/tech/lang.md") },
-    .{ .tech = true, .slug = "tech-build", .title = "ビルド(build.zig)", .src = @embedFile("content/tech/build.md") },
-    .{ .tech = true, .slug = "tech-loop", .title = "起動とイベントループ", .src = @embedFile("content/tech/loop.md") },
-    .{ .tech = true, .slug = "tech-wayland", .title = "Wayland とサーフェス", .src = @embedFile("content/tech/wayland.md") },
-    .{ .tech = true, .slug = "tech-gpu", .title = "GPU レンダラ", .src = @embedFile("content/tech/gpu.md") },
-    .{ .tech = true, .slug = "tech-glass", .title = "ガラス・壁紙・配色", .src = @embedFile("content/tech/glass.md") },
-    .{ .tech = true, .slug = "tech-text", .title = "文字の描画", .src = @embedFile("content/tech/text.md") },
-    .{ .tech = true, .slug = "tech-anim", .title = "ばねとアニメーションの中核", .src = @embedFile("content/tech/anim.md") },
-    .{ .tech = true, .slug = "tech-wm", .title = "ウィンドウマネージャ", .src = @embedFile("content/tech/wm.md") },
-    .{ .tech = true, .slug = "tech-frame", .title = "枠とドロワー", .src = @embedFile("content/tech/frame.md") },
-    .{ .tech = true, .slug = "tech-launcher", .title = "ランチャーとアイコン", .src = @embedFile("content/tech/launcher.md") },
-    .{ .tech = true, .slug = "tech-media", .title = "メディア・歌詞・音・動画", .src = @embedFile("content/tech/media.md") },
-    .{ .tech = true, .slug = "tech-notify-lock", .title = "通知とロック画面", .src = @embedFile("content/tech/notify-lock.md") },
-    .{ .tech = true, .slug = "tech-wasm", .title = "WebAssembly ウィジェット", .src = @embedFile("content/tech/wasm.md") },
-    .{ .tech = true, .slug = "tech-platform", .title = "OS 対応(Linux と FreeBSD)", .src = @embedFile("content/tech/platform.md") },
-    .{ .tech = true, .slug = "tech-config", .title = "設定と ame-ctl", .src = @embedFile("content/tech/config.md") },
-    .{ .tech = true, .slug = "tech-session", .title = "セッションとインストーラ", .src = @embedFile("content/tech/session.md") },
-    .{ .tech = true, .slug = "tech-site", .title = "このサイトの作り", .src = @embedFile("content/tech/site.md") },
+const Page = struct {
+    slug: []const u8,
+    title: []const u8,
+    src: []const u8,
+    sec: Sec = .doc,
+    /// Wiki: カテゴリ / ブログ: 日付
+    meta: []const u8 = "",
+};
+
+fn d(slug: []const u8, title: []const u8, src: []const u8) Page {
+    return .{ .slug = slug, .title = title, .src = src, .sec = .doc };
+}
+fn t(slug: []const u8, title: []const u8, src: []const u8) Page {
+    return .{ .slug = slug, .title = title, .src = src, .sec = .tech };
+}
+
+const static_pages = [_]Page{
+    // ---- ドキュメント ----
+    d("", "ホーム", @embedFile("content/home.md")),
+    d("animation", "アニメーション", @embedFile("content/animation.md")),
+    d("shell", "シェルの機能", @embedFile("content/shell.md")),
+    d("performance", "性能", @embedFile("content/performance.md")),
+    d("compare", "ほかの WM と比較", @embedFile("content/compare.md")),
+    d("install", "インストール", @embedFile("content/install.md")),
+    d("reference", "設定とコマンド", @embedFile("content/reference.md")),
+    // ---- 技術解説 ----
+    t("tech", "全体像", @embedFile("content/tech/index.md")),
+    t("tech-lang", "言語とツールチェイン", @embedFile("content/tech/lang.md")),
+    t("tech-build", "ビルド(build.zig)", @embedFile("content/tech/build.md")),
+    t("tech-loop", "起動とイベントループ", @embedFile("content/tech/loop.md")),
+    t("tech-wayland", "Wayland とサーフェス", @embedFile("content/tech/wayland.md")),
+    t("tech-gpu", "GPU レンダラ", @embedFile("content/tech/gpu.md")),
+    t("tech-glass", "ガラス・壁紙・配色", @embedFile("content/tech/glass.md")),
+    t("tech-text", "文字の描画", @embedFile("content/tech/text.md")),
+    t("tech-anim", "ばねとアニメーションの中核", @embedFile("content/tech/anim.md")),
+    t("tech-wm", "ウィンドウマネージャ", @embedFile("content/tech/wm.md")),
+    t("tech-frame", "枠とドロワー", @embedFile("content/tech/frame.md")),
+    t("tech-launcher", "ランチャーとアイコン", @embedFile("content/tech/launcher.md")),
+    t("tech-media", "メディア・歌詞・音・動画", @embedFile("content/tech/media.md")),
+    t("tech-notify-lock", "通知とロック画面", @embedFile("content/tech/notify-lock.md")),
+    t("tech-wasm", "WebAssembly ウィジェット", @embedFile("content/tech/wasm.md")),
+    t("tech-platform", "OS 対応(Linux と FreeBSD)", @embedFile("content/tech/platform.md")),
+    t("tech-config", "設定と ame-ctl", @embedFile("content/tech/config.md")),
+    t("tech-session", "セッションとインストーラ", @embedFile("content/tech/session.md")),
+    t("tech-site", "このサイトの作り", @embedFile("content/tech/site.md")),
+} ++ convList(.wiki, @import("content/wiki/list.zig").items) ++ convList(.blog, @import("content/blog/list.zig").items);
+
+/// 一覧ファイル(.{ スラッグ, 題, カテゴリか日付, 本文 } のタプル)を Page の配列にする
+fn convList(comptime sec: Sec, comptime items: anytype) [items.len]Page {
+    var out: [items.len]Page = undefined;
+    inline for (items, 0..) |it, i| out[i] = .{ .slug = it[0], .title = it[1], .meta = it[2], .src = it[3], .sec = sec };
+    return out;
+}
+
+const pages = blk: {
+    var arr: [static_pages.len + refpages.pages.len]Page = undefined;
+    for (static_pages, 0..) |p, i| arr[i] = p;
+    for (refpages.pages, 0..) |r, i| arr[static_pages.len + i] = .{ .slug = r.slug, .title = r.title, .src = r.src, .sec = .ref };
+    break :blk arr;
 };
 
 // ---- JS とのやりとり用のバッファ ----
@@ -67,94 +97,180 @@ export fn page_count() u32 {
 
 /// in_buf[0..len] のスラッグのページ番号(無ければ -1)
 export fn find_page(len: u32) i32 {
-    const s = in_buf[0..@min(len, in_buf.len)];
-    for (pages, 0..) |p, i| if (std.mem.eql(u8, p.slug, s)) return @intCast(i);
-    return -1;
+    return if (findSlug(in_buf[0..@min(len, in_buf.len)])) |i| @intCast(i) else -1;
 }
 
-/// ページの題(out に書く)。戻り値は長さ
+fn findSlug(s: []const u8) ?usize {
+    for (pages, 0..) |p, i| if (std.mem.eql(u8, p.slug, s)) return i;
+    return null;
+}
+
+/// 区分(0 ドキュメント / 1 技術解説 / 2 関数リファレンス / 3 Wiki / 4 ブログ)
+export fn page_section(i: u32) u32 {
+    return if (i < pages.len) @intFromEnum(pages[i].sec) else 0;
+}
+
 export fn page_title(i: u32) u32 {
     reset();
     if (i < pages.len) raw(pages[i].title);
     return @intCast(out_len);
 }
 
-/// ナビゲーション(今のページに印)
+/// 上のナビゲーション(区分だけ)
 export fn render_nav(cur: u32) u32 {
     reset();
-    for (pages, 0..) |p, i| {
-        if (p.tech) continue;
-        raw("<a href=\"#/");
-        raw(p.slug);
+    const sec: Sec = if (cur < pages.len) pages[cur].sec else .doc;
+    const items = [_]struct { s: Sec, href: []const u8, label: []const u8 }{
+        .{ .s = .doc, .href = "#/", .label = "docs" },
+        .{ .s = .tech, .href = "#/tech", .label = "技術解説" },
+        .{ .s = .ref, .href = "#/ref", .label = "関数リファレンス" },
+        .{ .s = .wiki, .href = "#/wiki", .label = "Wiki" },
+        .{ .s = .blog, .href = "#/blog", .label = "ブログ" },
+    };
+    for (items) |it| {
+        raw("<a href=\"");
+        raw(it.href);
         raw("\"");
-        if (i == cur) raw(" class=\"on\" aria-current=\"page\"");
+        if (it.s == sec) raw(" class=\"on\"");
         raw(">");
-        esc(p.title);
+        raw(it.label);
         raw("</a>");
     }
-    // 技術解説は 1 つの入口にまとめ、章の一覧は横(render_toc)に出す
-    raw("<a href=\"#/tech\" class=\"tech");
-    if (cur < pages.len and pages[cur].tech) raw(" on");
-    raw("\">技術解説</a>");
     return @intCast(out_len);
 }
 
-/// ページ本文の HTML。戻り値は長さ
+/// ページ本文の HTML
 export fn render_page(i: u32) u32 {
     reset();
     if (i >= pages.len) {
-        raw("<h1>ページが見つかりません</h1><p><a href=\"#/\">ホームへ</a></p>");
+        raw("<h1>404: ページが見つかりません</h1><p><a href=\"#/\">ホームへ</a> · <a href=\"#/wiki\">Wiki</a></p>");
         return @intCast(out_len);
     }
-    renderDoc(pages[i].src);
-    // 前後のページへのリンク
-    raw("<nav class=\"pager\">");
-    if (i > 0) {
-        raw("<a class=\"prev\" href=\"#/");
-        raw(pages[i - 1].slug);
-        raw("\"><small>前へ</small>");
-        esc(pages[i - 1].title);
-        raw("</a>");
+    const p = pages[i];
+    switch (p.sec) {
+        .doc, .tech, .ref => {
+            const name = switch (p.sec) {
+                .ref => "AME-SHELL(3)",
+                .tech => "AME-SHELL(7)",
+                else => "AME-SHELL(1)",
+            };
+            raw("<div class=\"manhead\"><span>");
+            raw(name);
+            raw("</span><span>");
+            raw(switch (p.sec) {
+                .ref => "ame-shell 関数リファレンス",
+                .tech => "ame-shell 技術解説",
+                else => "ame-shell マニュアル",
+            });
+            raw("</span><span>");
+            raw(name);
+            raw("</span></div>");
+        },
+        else => {},
     }
-    if (i + 1 < pages.len) {
-        raw("<a class=\"next\" href=\"#/");
-        raw(pages[i + 1].slug);
-        raw("\"><small>次へ</small>");
-        esc(pages[i + 1].title);
-        raw("</a>");
+    cur_sec = p.sec;
+    renderDoc(p.src, p);
+    switch (p.sec) {
+        .wiki => {
+            if (std.mem.eql(u8, p.slug, "wiki")) wikiIndex() else {
+                raw("<div class=\"catlinks\">カテゴリ: <a href=\"#/wiki#");
+                catId(p.meta);
+                raw("\">");
+                esc(p.meta);
+                raw("</a></div>");
+            }
+        },
+        .blog => if (std.mem.eql(u8, p.slug, "blog")) blogIndex(),
+        else => {},
     }
-    raw("</nav>");
+    pager(i);
     if (overflow) raw("<p>(ページが大きすぎます)</p>");
     return @intCast(out_len);
 }
 
-/// ページ内の目次(## の見出し)
+/// 横の欄: 区分ごとの一覧と、このページの目次
 export fn render_toc(i: u32) u32 {
     reset();
     if (i >= pages.len) return 0;
-    // 技術解説のページ: 章の一覧を先に
-    if (pages[i].tech) {
-        raw("<div class=\"chap\"><p>技術解説</p>");
-        var k: usize = 0;
-        for (pages, 0..) |p, j| {
-            if (!p.tech) continue;
-            raw("<a href=\"#/");
-            raw(p.slug);
-            raw("\"");
-            if (j == i) raw(" class=\"cur\"");
-            raw(">");
-            if (k > 0) {
-                var nb: [8]u8 = undefined;
-                raw(std.fmt.bufPrint(&nb, "{d}. ", .{k}) catch "");
+    const p = pages[i];
+    switch (p.sec) {
+        .wiki => {
+            raw("<div class=\"wlogo\"><a href=\"#/wiki\"><b>ame-shell</b><span>Wiki</span></a><small>ame-shell の用語集</small></div>");
+            raw("<div class=\"chap\"><p>案内</p><a href=\"#/wiki\">メインページ</a><a href=\"#/wiki#index\">すべての項目</a><a href=\"#/tech\">技術解説</a><a href=\"#/ref\">関数リファレンス</a></div>");
+            raw("<div class=\"chap\"><p>カテゴリ</p>");
+            var seen: [32][]const u8 = undefined;
+            var ns: usize = 0;
+            for (pages) |q| {
+                if (q.sec != .wiki or q.meta.len == 0) continue;
+                var dup = false;
+                for (seen[0..ns]) |x| dup = dup or std.mem.eql(u8, x, q.meta);
+                if (dup or ns >= seen.len) continue;
+                seen[ns] = q.meta;
+                ns += 1;
+                raw("<a href=\"#/wiki#");
+                catId(q.meta);
+                raw("\">");
+                esc(q.meta);
+                raw("</a>");
             }
-            esc(p.title);
-            raw("</a>");
-            k += 1;
-        }
-        raw("</div>");
+            raw("</div>");
+            return @intCast(out_len);
+        },
+        .blog => {
+            raw("<div class=\"chap\"><p>記事</p>");
+            var k: usize = pages.len;
+            while (k > 0) {
+                k -= 1;
+                const q = pages[k];
+                if (q.sec != .blog or q.meta.len == 0) continue;
+                raw("<a href=\"#/");
+                raw(q.slug);
+                raw("\"");
+                if (k == i) raw(" class=\"cur\"");
+                raw("><small>");
+                raw(q.meta);
+                raw("</small> ");
+                esc(q.title);
+                raw("</a>");
+            }
+            raw("</div>");
+            return @intCast(out_len);
+        },
+        else => {},
     }
+    // ドキュメント・技術解説・リファレンス: 同じ区分のページ一覧
+    raw("<div class=\"chap\"><p>");
+    raw(switch (p.sec) {
+        .tech => "技術解説",
+        .ref => "ファイル",
+        else => "ドキュメント",
+    });
+    raw("</p>");
+    var k: usize = 0;
+    for (pages, 0..) |q, j| {
+        if (q.sec != p.sec) continue;
+        raw("<a href=\"#/");
+        raw(q.slug);
+        raw("\"");
+        if (j == i) raw(" class=\"cur\"");
+        raw(">");
+        if (p.sec == .tech and k > 0) {
+            var nb: [8]u8 = undefined;
+            raw(std.fmt.bufPrint(&nb, "{d}. ", .{k}) catch "");
+        }
+        if (p.sec == .ref and q.slug.len > 4) esc(q.slug[4..]) else esc(q.title);
+        raw("</a>");
+        k += 1;
+    }
+    raw("</div>");
     raw("<div class=\"here\">");
-    var it = std.mem.splitScalar(u8, pages[i].src, '\n');
+    tocLinks(p.src);
+    raw("</div>");
+    return @intCast(out_len);
+}
+
+fn tocLinks(src: []const u8) void {
+    var it = std.mem.splitScalar(u8, src, '\n');
     var n: u32 = 0;
     var in_code = false;
     while (it.next()) |line| {
@@ -168,11 +284,105 @@ export fn render_toc(i: u32) u32 {
         inlineText(h.text);
         raw("</a>");
     }
-    raw("</div>");
-    return @intCast(out_len);
+}
+
+fn pager(i: usize) void {
+    const sec = pages[i].sec;
+    var prev: ?usize = null;
+    var next: ?usize = null;
+    var k = i;
+    while (k > 0) {
+        k -= 1;
+        if (pages[k].sec == sec) {
+            prev = k;
+            break;
+        }
+    }
+    k = i + 1;
+    while (k < pages.len) : (k += 1) if (pages[k].sec == sec) {
+        next = k;
+        break;
+    };
+    if (prev == null and next == null) return;
+    raw("<nav class=\"pager\">");
+    if (prev) |q| {
+        raw("<a class=\"prev\" href=\"#/");
+        raw(pages[q].slug);
+        raw("\"><small>← 前</small>");
+        esc(pages[q].title);
+        raw("</a>");
+    }
+    if (next) |q| {
+        raw("<a class=\"next\" href=\"#/");
+        raw(pages[q].slug);
+        raw("\"><small>次 →</small>");
+        esc(pages[q].title);
+        raw("</a>");
+    }
+    raw("</nav>");
+}
+
+/// Wiki のメインページの末尾: カテゴリごとの全項目
+fn wikiIndex() void {
+    raw("<h2 id=\"index\">すべての項目</h2>");
+    var seen: [32][]const u8 = undefined;
+    var ns: usize = 0;
+    for (pages) |q| {
+        if (q.sec != .wiki or q.meta.len == 0) continue;
+        var dup = false;
+        for (seen[0..ns]) |x| dup = dup or std.mem.eql(u8, x, q.meta);
+        if (dup or ns >= seen.len) continue;
+        seen[ns] = q.meta;
+        ns += 1;
+        raw("<h3 id=\"");
+        catId(q.meta);
+        raw("\">");
+        esc(q.meta);
+        raw("</h3><ul class=\"cols\">");
+        for (pages) |r| {
+            if (r.sec != .wiki or !std.mem.eql(u8, r.meta, q.meta)) continue;
+            raw("<li><a class=\"wl\" href=\"#/");
+            raw(r.slug);
+            raw("\">");
+            esc(r.title);
+            raw("</a></li>");
+        }
+        raw("</ul>");
+    }
+}
+
+/// カテゴリ名 → id(バイト列を 16 進にする。日本語でも一意)
+fn catId(s: []const u8) void {
+    raw("cat-");
+    var buf: [2]u8 = undefined;
+    for (s[0..@min(s.len, 24)]) |ch| {
+        _ = std.fmt.bufPrint(&buf, "{x:0>2}", .{ch}) catch return;
+        raw(&buf);
+    }
+}
+
+/// ブログの一覧(新しい順)
+fn blogIndex() void {
+    raw("<ul class=\"posts\">");
+    var k: usize = pages.len;
+    while (k > 0) {
+        k -= 1;
+        const q = pages[k];
+        if (q.sec != .blog or q.meta.len == 0) continue;
+        raw("<li><time>");
+        raw(q.meta);
+        raw("</time><a href=\"#/");
+        raw(q.slug);
+        raw("\">");
+        esc(q.title);
+        raw("</a></li>");
+    }
+    raw("</ul>");
 }
 
 // ---------------------------------------------------------------------------
+
+var cur_sec: Sec = .doc;
 
 fn reset() void {
     out_len = 0;
@@ -213,17 +423,17 @@ var id_buf: [16]u8 = undefined;
 
 /// 「見出し {#id}」→ 本文と id(無ければ sec-番号)
 fn splitId(s: []const u8, n: u32) Heading {
-    const t = std.mem.trimRight(u8, s, " ");
-    if (std.mem.endsWith(u8, t, "}")) {
-        if (std.mem.lastIndexOf(u8, t, " {#")) |k| {
-            return .{ .text = t[0..k], .id = t[k + 3 .. t.len - 1] };
+    const tt = std.mem.trimRight(u8, s, " ");
+    if (std.mem.endsWith(u8, tt, "}")) {
+        if (std.mem.lastIndexOf(u8, tt, " {#")) |k| {
+            return .{ .text = tt[0..k], .id = tt[k + 3 .. tt.len - 1] };
         }
     }
     const id = std.fmt.bufPrint(&id_buf, "sec-{d}", .{n}) catch "sec";
-    return .{ .text = t, .id = id };
+    return .{ .text = tt, .id = id };
 }
 
-/// 行内の書式: **太字** `コード` [文字](URL)
+/// 行内の書式: **太字** `コード` [文字](URL) [[wiki の項目]] [[項目|文字]]
 fn inlineText(s: []const u8) void {
     var k: usize = 0;
     var plain: usize = 0;
@@ -244,6 +454,14 @@ fn inlineText(s: []const u8) void {
                 raw("<strong>");
                 inlineText(s[k + 2 .. e]);
                 raw("</strong>");
+                k = e + 2;
+                plain = k;
+                continue;
+            }
+        } else if (s[k] == '[' and k + 1 < s.len and s[k + 1] == '[') {
+            if (std.mem.indexOfPos(u8, s, k + 2, "]]")) |e| {
+                esc(s[plain..k]);
+                wikiLink(s[k + 2 .. e]);
                 k = e + 2;
                 plain = k;
                 continue;
@@ -269,6 +487,32 @@ fn inlineText(s: []const u8) void {
         k += 1;
     }
     esc(s[plain..]);
+}
+
+/// [[slug]] / [[slug|文字]]: Wiki の項目へのリンク。項目が無ければ赤いリンク(Wikipedia と同じ)
+fn wikiLink(inner: []const u8) void {
+    var slug = inner;
+    var label: []const u8 = "";
+    if (std.mem.indexOfScalar(u8, inner, '|')) |bar| {
+        slug = inner[0..bar];
+        label = inner[bar + 1 ..];
+    }
+    var sb: [96]u8 = undefined;
+    const full = std.fmt.bufPrint(&sb, "wiki/{s}", .{slug}) catch slug;
+    const found = findSlug(full);
+    raw("<a class=\"wl");
+    if (found == null) raw(" new");
+    raw("\" href=\"#/");
+    esc(full);
+    raw("\"");
+    if (found) |fi| {
+        raw(" title=\"");
+        esc(pages[fi].title);
+        raw("\"");
+    }
+    raw(">");
+    if (label.len > 0) inlineText(label) else if (found) |fi| esc(pages[fi].title) else esc(slug);
+    raw("</a>");
 }
 
 /// 表のセル: 先頭の ✓ ✗ △ に色を付ける
@@ -299,13 +543,26 @@ fn trim(s: []const u8) []const u8 {
 }
 
 const Block = enum { none, para, ul, ol, quote, table };
+const Mode = enum { normal, stats, cards, infobox };
 
-fn renderDoc(src: []const u8) void {
+fn renderDoc(src: []const u8, page: Page) void {
     var lines = std.mem.splitScalar(u8, src, '\n');
     var block: Block = .none;
     var h2n: u32 = 0;
     var table_row: u32 = 0;
-    var mode: enum { normal, stats, cards } = .normal;
+    var mode: Mode = .normal;
+    var toc_done = false;
+    // Wiki: 見出しが 3 つ以上あれば、最初の ## の前に目次の箱(Wikipedia と同じ)
+    var n_h2: u32 = 0;
+    {
+        var it = std.mem.splitScalar(u8, src, '\n');
+        var in_code = false;
+        while (it.next()) |l| {
+            if (std.mem.startsWith(u8, l, "```")) in_code = !in_code;
+            if (!in_code and std.mem.startsWith(u8, l, "## ")) n_h2 += 1;
+        }
+    }
+    const wiki_toc = page.sec == .wiki and n_h2 >= 3;
 
     while (lines.next()) |line_raw| {
         const line = std.mem.trimRight(u8, line_raw, " \r");
@@ -332,41 +589,72 @@ fn renderDoc(src: []const u8) void {
             continue;
         }
 
-        // ---- 空行: ブロックを閉じる ----
+        // ---- 空行 ----
         if (line.len == 0) {
             close(&block);
-            switch (mode) {
-                .stats, .cards => raw("</div>"),
-                .normal => {},
-            }
-            mode = .normal;
+            endMode(&mode);
             continue;
         }
 
-        // ---- ::stats / ::cards の中身 ----
-        if (mode == .stats) {
+        // ---- ::stats / ::cards / ::infobox の中身 ----
+        if (mode != .normal) {
             var it = splitBar(line);
-            const v = trim(it.next() orelse "");
-            const l = trim(it.next() orelse "");
-            raw("<div class=\"stat\"><b>");
-            inlineText(v);
-            raw("</b><span>");
-            inlineText(l);
-            raw("</span></div>");
+            switch (mode) {
+                .stats => {
+                    const v = trim(it.next() orelse "");
+                    const l = trim(it.next() orelse "");
+                    raw("<div class=\"stat\"><b>");
+                    inlineText(v);
+                    raw("</b><span>");
+                    inlineText(l);
+                    raw("</span></div>");
+                },
+                .cards => {
+                    const ic = trim(it.next() orelse "");
+                    const tt = trim(it.next() orelse "");
+                    const bd = trim(it.rest());
+                    raw("<div class=\"card\"><i>");
+                    esc(ic);
+                    raw("</i><h4>");
+                    inlineText(tt);
+                    raw("</h4><p>");
+                    inlineText(bd);
+                    raw("</p></div>");
+                },
+                .infobox => {
+                    const k = trim(it.next() orelse "");
+                    const v = trim(it.rest());
+                    raw("<tr><th>");
+                    inlineText(k);
+                    raw("</th><td>");
+                    inlineText(v);
+                    raw("</td></tr>");
+                },
+                .normal => {},
+            }
             continue;
         }
-        if (mode == .cards) {
-            var it = splitBar(line);
-            const ic = trim(it.next() orelse "");
-            const t = trim(it.next() orelse "");
-            const b = trim(it.rest());
-            raw("<div class=\"card\"><i>");
-            esc(ic);
-            raw("</i><h4>");
-            inlineText(t);
-            raw("</h4><p>");
-            inlineText(b);
-            raw("</p></div>");
+
+        // ---- 囲み(:::easy 題 … :::)----
+        if (std.mem.startsWith(u8, line, ":::")) {
+            close(&block);
+            const rest = trim(line[3..]);
+            if (rest.len == 0) {
+                raw("</div>");
+            } else {
+                var sp = std.mem.splitScalar(u8, rest, ' ');
+                const kind = sp.next() orelse "";
+                const title = trim(sp.rest());
+                raw("<div class=\"box ");
+                esc(kind);
+                raw("\"><p class=\"box-h\">");
+                raw(if (std.mem.eql(u8, kind, "easy")) "はじめての人へ" else if (std.mem.eql(u8, kind, "research")) "研究者向け" else if (std.mem.eql(u8, kind, "math")) "数式" else "くわしく");
+                if (title.len > 0) {
+                    raw(" — ");
+                    inlineText(title);
+                }
+                raw("</p>");
+            }
             continue;
         }
 
@@ -384,7 +672,7 @@ fn renderDoc(src: []const u8) void {
             var it = splitBar(line[2..]);
             var head = std.mem.tokenizeScalar(u8, trim(it.next() orelse ""), ' ');
             const kind = head.next() orelse "";
-            const arg = head.next() orelse "";
+            const arg = trim(head.rest());
             const cap = trim(it.rest());
             if (std.mem.eql(u8, kind, "video")) {
                 raw("<figure class=\"media\"><video src=\"media/");
@@ -410,6 +698,11 @@ fn renderDoc(src: []const u8) void {
             } else if (std.mem.eql(u8, kind, "cards")) {
                 raw("<div class=\"cards\">");
                 mode = .cards;
+            } else if (std.mem.eql(u8, kind, "infobox")) {
+                raw("<table class=\"infobox\"><caption>");
+                inlineText(if (arg.len > 0) arg else page.title);
+                raw("</caption>");
+                mode = .infobox;
             }
             continue;
         }
@@ -421,6 +714,26 @@ fn renderDoc(src: []const u8) void {
             while (lvl < line.len and line[lvl] == '#') lvl += 1;
             const body = trim(line[lvl..]);
             if (lvl == 2) {
+                if (wiki_toc and !toc_done) {
+                    toc_done = true;
+                    raw("<div class=\"wtoc\"><p>目次</p>");
+                    var it = std.mem.splitScalar(u8, src, '\n');
+                    var n: u32 = 0;
+                    var in_code = false;
+                    raw("<ol>");
+                    while (it.next()) |l| {
+                        if (std.mem.startsWith(u8, l, "```")) in_code = !in_code;
+                        if (in_code or !std.mem.startsWith(u8, l, "## ")) continue;
+                        n += 1;
+                        const h = splitId(l[3..], n);
+                        raw("<li><a href=\"#");
+                        esc(h.id);
+                        raw("\">");
+                        inlineText(h.text);
+                        raw("</a></li>");
+                    }
+                    raw("</ol></div>");
+                }
                 h2n += 1;
                 const h = splitId(body, h2n);
                 raw("<h2 id=\"");
@@ -434,7 +747,6 @@ fn renderDoc(src: []const u8) void {
                 const tag = if (lvl <= 1) "h1" else "h3";
                 raw("<");
                 raw(tag);
-                // 「見出し {#id}」なら id を付ける(番号の自動の id は ## だけ)
                 var text = body;
                 if (std.mem.endsWith(u8, body, "}")) if (std.mem.lastIndexOf(u8, body, " {#")) |k| {
                     raw(" id=\"");
@@ -447,6 +759,14 @@ fn renderDoc(src: []const u8) void {
                 raw("</");
                 raw(tag);
                 raw(">");
+                if (lvl <= 1) {
+                    if (page.sec == .wiki and !std.mem.eql(u8, page.slug, "wiki")) raw("<p class=\"wsub\">出典: ame-shell Wiki — ame-shell の用語集</p>");
+                    if (page.sec == .blog and page.meta.len > 0) {
+                        raw("<p class=\"post-meta\"><time>");
+                        raw(page.meta);
+                        raw("</time> · ame-shell 開発ブログ</p>");
+                    }
+                }
             }
             continue;
         }
@@ -503,7 +823,6 @@ fn renderDoc(src: []const u8) void {
             raw("</li>");
             continue;
         }
-        // 箇条書きの続きの行(字下げ)
         if ((block == .ul or block == .ol) and std.mem.startsWith(u8, line, "  ")) {
             out_len -|= "</li>".len;
             raw("<br>");
@@ -534,10 +853,16 @@ fn renderDoc(src: []const u8) void {
         inlineText(line);
     }
     close(&block);
-    switch (mode) {
+    endMode(&mode);
+}
+
+fn endMode(m: *Mode) void {
+    switch (m.*) {
         .stats, .cards => raw("</div>"),
+        .infobox => raw("</table>"),
         .normal => {},
     }
+    m.* = .normal;
 }
 
 fn caption(cap: []const u8) void {
@@ -549,8 +874,8 @@ fn caption(cap: []const u8) void {
     raw("</figure>");
 }
 
-fn close(b: *Block) void {
-    switch (b.*) {
+fn close(bl: *Block) void {
+    switch (bl.*) {
         .none => {},
         .para => raw("</p>"),
         .ul => raw("</ul>"),
@@ -558,6 +883,5 @@ fn close(b: *Block) void {
         .quote => raw("</p></aside>"),
         .table => raw("</table></div>"),
     }
-    b.* = .none;
+    bl.* = .none;
 }
-

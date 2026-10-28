@@ -10,6 +10,12 @@
 
 > 引用しているコードと数値は、すべて 2026 年 10 月時点の `master` のものです。計測は Ryzen 7 7735HS / Radeon 680M / Mesa 26.2 / Chimera Linux(musl)、ReleaseFast ビルドで行っています。
 
+:::easy このページを読む前に
+デスクトップの画面は、たくさんの部品(バー・壁紙・通知・窓)でできています。ふつうは、部品ごとに別々のプログラムが動いています。ame-shell は、それを**1 つのプログラム**にまとめ、全部を同じ方法で描き、同じ方法で動かしています。
+
+このページは、その全体の地図です。分からない言葉は、[[wayland]]・[[compositor]]・[[epoll]] のように点線の下線が付いていれば、押すと Wiki で説明が開きます。
+:::
+
 ## 設計の原則 {#principles}
 
 ame-shell のコードは、次の 6 つの原則で一貫しています。各ページの判断は、ほぼすべてこのどれかから導かれています。
@@ -77,3 +83,24 @@ ame-shell のコードは、次の 6 つの原則で一貫しています。各�
 5. ばねがまだ動いていれば、`eglSwapBuffers` のコミットに次のフレームの要求を相乗りさせる。止まったら何もしない → epoll_wait で完全に眠る。
 
 この流れの中に、決まった間隔で起きるものは 1 つもありません。それが待機時 CPU 0.0〜0.1% の理由です。
+
+## 研究者向けの補足 {#research}
+
+:::research 設計の位置づけ
+ame-shell のアーキテクチャは、**イベント駆動・単一スレッド・単一 GL 文脈**の古典的な構成(reactor パターン)です。並行性は「ブロックする仕事をスレッドか子プロセスに出し、完了を fd で受ける」形に限り、共有状態のロックをほぼ不要にしています(例外はアイコンのワーカーの結果のリスト 1 つ)。
+
+描画はリアクティブ(状態が変わったサーフェスだけを [[frame-callback]] で描く)で、即時モード(毎フレーム命令を積み直す)の API です。保持モードのシーングラフ(Qt Quick・GTK4)に比べて差分の管理が無い代わりに、「動いているものが無ければ何もしない」ことを、ばねの収束判定という 1 つの条件で保証しています。
+
+関連: D. C. Schmidt, "Reactor: An Object Behavioral Pattern for Demultiplexing and Dispatching Handles for Synchronous Events", Pattern Languages of Program Design, 1995.
+:::
+
+## 関連する用語 {#terms}
+
+- [[wayland]]
+- [[compositor]]
+- [[layer-shell]]
+- [[epoll]]
+- [[frame-callback]]
+- [[spring]]
+- [[sdf]]
+- [[webassembly]]

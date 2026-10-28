@@ -13,6 +13,12 @@
 | `zig-out/site/`(`zig build site`) | このサイト |
 | `zig-out/bin/vptr`・`vkbd`(`zig build tools`) | 試験用の仮想ポインタ・仮想キーボード |
 
+:::easy このページを読む前に
+プログラムは、書いた文字(ソース)を、コンピュータが実行できる形(バイナリ)に変換して使います。この変換の手順をまとめたものが「ビルド」です。
+
+ame-shell のビルドは、Zig のプログラム(`build.zig`)1 つに全部書いてあります。Wayland の約束事(XML)から C のコードを作る、Odin のコードをつなぐ、WebAssembly の部品を作る、別の OS(FreeBSD)向けに作る([[cross-compilation]])、までを、`zig build` の 1 回で行います。
+:::
+
 ## Wayland のプロトコルを XML から作る {#protocols}
 
 ame-shell は 16 個の Wayland プロトコル(layer-shell・session-lock・River のウィンドウ管理・xkb-bindings・libinput の設定など)を使います。各 XML から `wayland-scanner` で C のヘッダとコードを作ります。
@@ -139,3 +145,20 @@ w.addObjectFile(anim_wasm);
 | システムの wasm3・stb を使う | ディストリによって入っていない・版が違う。ソースを同梱すれば常に同じものが入る |
 | pkg-config を常に使う | クロスビルドのときに手元(Linux)のライブラリを拾ってしまう |
 | 生成した C のコードをリポジトリに入れる | wayland-scanner の版が変わると古くなる。XML から毎回作るほうが確実 |
+
+## 研究者向けの補足 {#research}
+
+:::research 再現可能なビルドと、依存のグラフ
+`zig build` は、各ステップの入力(ファイルの中身のハッシュ・引数)から出力をキャッシュする、内容アドレス型のビルドシステムです(Nix や Bazel と同じ考え方)。外部コマンド(`wayland-scanner`・`odin`)も `addSystemCommand` の入出力を宣言すれば、同じ規則でキャッシュされます。`addDirectoryArg` だけではディレクトリの**中身**が依存に入らない、という落とし穴(本文)は、この「宣言した入力しか見ない」性質の裏返しです。
+
+ベンダリング(wasm3・stb_image・nanosvg のソースの同梱)は、システムの版の違いを排除し、ビルドの出力を入力だけの関数に近づけます。FreeBSD の sysroot を使ったクロスビルドと、逆アセンブルによる不変条件(Linux のシステムコールが 0 個)の検査は、**実行できない対象に対する静的な検証**の一例です。
+:::
+
+## 関連する用語 {#terms}
+
+- [[zig]]
+- [[cross-compilation]]
+- [[translate-c]]
+- [[wasm3]]
+- [[musl]]
+- [[odin]]

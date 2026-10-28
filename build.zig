@@ -199,6 +199,34 @@ pub fn build(b: *std.Build) void {
     });
     site_wasm.entry = .disabled;
     site_wasm.rdynamic = true;
+    // 関数リファレンス: ソース(src・anim・widgets)を読んで、関数・型・定数のページを生成して埋め込む
+    const refgen = b.addExecutable(.{ .name = "refgen", .root_source_file = b.path("site/gen/refgen.zig"), .target = b.graph.host, .optimize = .ReleaseSafe });
+    const refgen_run = b.addRunArtifact(refgen);
+    const ref_out = refgen_run.addOutputFileArg("refpages.zig");
+    {
+        var files = std.ArrayList([]const u8).init(b.allocator);
+        for ([_][]const u8{ "src", "widgets" }) |dir_name| {
+            var dir = std.fs.cwd().openDir(b.pathFromRoot(dir_name), .{ .iterate = true }) catch continue;
+            defer dir.close();
+            var walker = dir.walk(b.allocator) catch continue;
+            defer walker.deinit();
+            while (walker.next() catch null) |ent| {
+                if (ent.kind != .file or !std.mem.endsWith(u8, ent.path, ".zig")) continue;
+                files.append(b.fmt("{s}/{s}", .{ dir_name, ent.path })) catch {};
+            }
+        }
+        files.append("anim/anim.odin") catch {};
+        std.mem.sort([]const u8, files.items, {}, struct {
+            fn lt(_: void, x: []const u8, y: []const u8) bool {
+                return std.mem.lessThan(u8, x, y);
+            }
+        }.lt);
+        for (files.items) |f| {
+            refgen_run.addArg(f);
+            refgen_run.addFileArg(b.path(f));
+        }
+    }
+    site_wasm.root_module.addAnonymousImport("refpages", .{ .root_source_file = ref_out });
     site_step.dependOn(&b.addInstallFile(site_wasm.getEmittedBin(), "site/site.wasm").step);
     const odin_site = b.addSystemCommand(&.{ "odin", "build" });
     odin_site.addDirectoryArg(b.path("anim"));

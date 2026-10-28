@@ -63,6 +63,7 @@ function render() {
     const main = document.getElementById("main");
     main.innerHTML = out(S.render_page(idx));
     main.dataset.page = i < 0 ? "missing" : slug || "home";
+    document.body.dataset.sec = i < 0 ? "doc" : ["doc", "tech", "ref", "wiki", "blog"][S.page_section(idx)];
     document.getElementById("nav").innerHTML = out(S.render_nav(idx));
     document.getElementById("toc").innerHTML = i < 0 ? "" : out(S.render_toc(idx));
     const title = i < 0 ? "見つかりません" : out(S.page_title(idx));

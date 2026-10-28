@@ -2,6 +2,12 @@
 
 <p class="file">対象: src/launcher.zig(1219 行)/ src/icons.zig(212 行)/ src/wallpick.zig(383 行)/ src/platform/sys.zig の spawnDetached</p>
 
+:::easy このページを読む前に
+ランチャーは、アプリを名前で探して起動する部品です。「vsc」と打つだけで「Visual Studio Code」が見つかるのは、入力の文字が名前の中に順番どおりに出てくるかを調べているからです([[fuzzy-matching]])。
+
+さらに、よく使うアプリ・最近使ったアプリほど上に来ます([[frecency]])。アプリを起動するときは、ame-shell とは切り離して起動するので、ame-shell を再起動してもアプリは閉じません([[fork-exec]])。
+:::
+
 ## アプリを探す: .desktop を読む {#desktop}
 
 `$XDG_DATA_HOME` と `$XDG_DATA_DIRS` の各 `applications/` を、サブディレクトリまでたどって `.desktop` を読みます。Flatpak のアプリ(`~/.local/share/flatpak/exports/share` と `/var/lib/flatpak/exports/share`)も、`XDG_DATA_DIRS` に入っていない環境のために追加で探します。`[Desktop Entry]` の節だけを見て、`NoDisplay` / `Hidden` / `Type` が Application 以外のものは除きます。
@@ -133,3 +139,17 @@ fn run(self: *IconWorker, jobs: []IconJob, gen: u32) void {
 - カードの形は、画像を歪めずに平行四辺形でくり抜くシェーダ([GPU の種類 9](#/tech-gpu))。
 - 選んだカードの**画面上の位置**を、壁紙の切り替えのシェーダの起点(`u_origin`)として渡します。カードから新しい壁紙が広がるように見えます([切り替え](#/tech-glass))。
 - 動画の壁紙のサムネイルは、ffmpeg で 1 秒目のコマを `~/.cache/ame-shell/thumbs` に PNG で保存します。ファイル名は「パスと更新時刻のハッシュ」なので、動画を差し替えたら作り直します。
+
+## 研究者向けの補足 {#research}
+
+:::research 順位付けの関数としての見方
+ランチャーの順位は、`score(q, e) = max_f (fuzzy(q, f(e)) + b_f) + 100000·[お気に入り] + frecency(e)` という、**辞書式に近い重み付きの和**です。お気に入りの項は他の項より桁が大きいので、実質的に辞書式順序の第 1 キーになります。[[fuzzy-matching|あいまい検索]]は貪欲な部分列照合なので O(|f(e)|) で、全アプリに対して O(Σ|f(e)|) で毎キー入力を処理できます(最適な整列を求める O(|q||f|) の動的計画法は採っていない)。
+
+[[frecency]] は使用の時系列の指数減衰の和 `Σ exp(−Δt_i/τ)` の、段階関数と「回数 × 最新の使用の重み」による近似です。ワーカースレッドとの受け渡しは、世代番号によって**古い結果を捨てる**(楽観的な並行制御)ことで、一覧の再走査とデコードの競合をロックなしに解決しています。
+:::
+
+## 関連する用語 {#terms}
+
+- [[fuzzy-matching]]
+- [[frecency]]
+- [[fork-exec]]

@@ -2,6 +2,12 @@
 
 <p class="file">対象: src/config.zig(345 行)/ src/ipc.zig(242 行)/ src/ctl.zig(59 行)/ app.zig の inotify</p>
 
+:::easy このページを読む前に
+ame-shell の設定は、`config.ame` というテキストファイルに書きます。`theme { accent #7ab8ff }` のように、色も引用符なしで書けます。ファイルを保存した瞬間に反映されます([[inotify]])。
+
+外から ame-shell を操作するには、`ame-ctl` というコマンドを使います(`ame-ctl volume up` など)。これは、ame-shell の受付の窓口([[unix-socket]])に 1 行のメッセージを送るだけの、小さなプログラムです。
+:::
+
 ## 設定の言語: 小さな DSL {#dsl}
 
 ```zig
@@ -121,3 +127,27 @@ ame-ctl は**libc だけ**にリンクする 14 KB のプログラムです。�
 ### キーの割り当ては ame-ctl を経由しない {#same-path}
 
 ame-ctl のコマンドを処理する関数(`ipc.runCommand`)は、River 0.5 のキーの割り当てからも**直接**呼ばれます([ウィンドウマネージャ](#/tech-wm#binds))。外からも中からも同じコマンドの言葉で操作でき、キーを押したときにはプロセスを起動しません。
+
+## 研究者向けの補足 {#research}
+
+:::research 文法
+設定の言語の文法(EBNF):
+
+```
+file    = { section } ;
+section = word "{" { entry } "}" ;
+entry   = key [ value ] ( "\n" | ";" ) ;
+key     = word ;
+value   = word | string | color | number ;
+string  = '"' { any − '"' − "\n" } '"' ;
+comment = "//" … "\n" | "#" ( " " | "\n" | "#" ) … "\n" ;
+```
+
+字句解析は 1 文字の先読みで十分で(`#` の後の 1 文字で色かコメントかを決める)、構文解析は「区切りまでの語を集めて、キーと値を適用する」だけの、状態がほとんど無い機械です。誤りに対しては**局所的な回復**(その行だけを捨てて続ける)を行うので、知らないキーや壊れた行があっても、残りの設定は全部有効になります。値の範囲は適用時に丸める(clamp)ので、パースの結果は常に描画に安全な値の集合に入ります。
+:::
+
+## 関連する用語 {#terms}
+
+- [[inotify]]
+- [[unix-socket]]
+- [[posix-sh]]

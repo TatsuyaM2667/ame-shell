@@ -4,6 +4,12 @@
 
 ame-shell は、Linux(Chimera = musl / Arch = glibc)と FreeBSD 14・15 の両方で、**同じソースから**ビルドします。OS の違いは `src/platform/` と `build.zig` の中に閉じ込め、それ以外のコードは OS を知りません。
 
+:::easy このページを読む前に
+Linux と FreeBSD は、どちらも Unix の仲間ですが、細かいところが違います。電池の残りや CPU の温度の読み方、OS に仕事を頼むときの番号([[syscall]])、キーボードの読み方([[ioctl]])などです。
+
+ame-shell は、この違いを `src/platform/` という場所に閉じ込めています。それ以外の部分は、どちらの OS で動いているかを知りません。
+:::
+
 ## 方針: カーネルのインターフェースと、小さなコマンドだけ {#policy}
 
 ```zig
@@ -110,3 +116,20 @@ FreeBSD も evdev(`/dev/input/event*`)を持っていますが、**ioctl の番�
 | ロックできない | FreeBSD の pam_unix は root でないと照合できない | setuid の swaylock に任せる([ロック](#/tech-notify-lock)) |
 | 動画の壁紙が出ない | libmpv が無い・動かない環境 | ffmpeg で再生する経路([動画](#/tech-media#ffmpeg)) |
 | タッチパッドが動かない | I2C HID のドライバ(ig4・iichid・hmt)が既定で読み込まれない | インストーラで kld_list に追加(GPIO 割り込みは未対応なので自動でポーリング) |
+
+## 研究者向けの補足 {#research}
+
+:::research 移植性の層と、ABI の差
+移植性の問題は、(1) **API の差**(epoll と kqueue、/proc と sysctl)、(2) **ABI の差**(構造体の並び、システムコールの番号、ioctl の符号化、関数の引数の型)、(3) **ポリシーの差**(pam_unix の権限モデル)、に分けられます。(1) は shim のライブラリ(libepoll-shim・libinotify)と `platform/` の関数で吸収し、(2) はコンパイル時の型の反射(`@typeInfo`)と OS ごとの定数の表で吸収し、(3) は機能を別の実装(setuid の swaylock)に委ねて吸収しています。
+
+(2) の誤りは**コンパイルもリンクも通る**ため、最も見つけにくい種類です(SIGSYS の件)。これに対しては、成果物(バイナリ)に対する不変条件の静的な検査(逆アセンブルでの命令の計数)が有効でした。
+:::
+
+## 関連する用語 {#terms}
+
+- [[kqueue]]
+- [[sysctl]]
+- [[ioctl]]
+- [[evdev]]
+- [[syscall]]
+- [[sigsys]]

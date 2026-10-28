@@ -2,6 +2,12 @@
 
 <p class="file">対象: src/main.zig(80 行)/ src/platform/loop.zig(96 行)/ src/app.zig の run・onWarmTimer</p>
 
+:::easy このページを読む前に
+ame-shell は、画面の合図・時計・音量の変化・通知・設定ファイルの保存など、たくさんのことを同時に「待って」います。
+
+1 つずつ「何か来た?」と聞いて回ると、何も来ていないときも CPU を使い続けます(ポーリング)。ame-shell は、全部をまとめて OS に預け、「**何か起きたら起こして**」と頼んで眠ります([[epoll]])。だから何もしていないときの CPU の使用率は、ほぼ 0% です。
+:::
+
 ## イベントループ: すべてを 1 つの epoll で待つ {#epoll}
 
 ```zig
@@ -212,3 +218,23 @@ fn onWarmTimer(ctx: *anyopaque, _: c_int, _: u32) void {
 起動 400 ms 後から、よく使う文字(ASCII・かな・UI の漢字・Nerd Font のアイコン・インストールされているアプリ名)のグリフを、**1 回 6 ms まで、12 ms おき**に作っておきます。1 回の作業を 1 フレーム(16.6 ms)より十分短くしているので、先読み中に操作しても引っかかりません。
 
 **結果**: 初めてランチャーを開いたときに 1 フレームが 525 ms かかっていたのが、**開くときに作るグリフ 0 字**になりました([文字](#/tech-text))。
+
+## 研究者向けの補足 {#research}
+
+:::research 待ち合わせの計算量と、タイマーの設計
+`poll`/`select` は呼ぶたびに n 個の fd を走査するので O(n)、[[epoll]] は準備済みのリストを返すので O(k)(k は準備できた数)です。ame-shell の n は数十なので漸近的な差より、「全ての種類の出来事を fd に正規化して 1 つの待ち合わせに集約できる」ことが本質です(timerfd・inotify・signalfd の思想)。
+
+タイマーは「次に状態が変わる時刻」にだけ張る**イベント駆動のスケジューリング**で、周期的なティックを持ちません。これは tickless カーネル(Linux の NO_HZ)と同じ発想で、待機時の起床回数を、外部からの出来事の数そのものまで減らします。時計は「次の分の境目」で起きるので、待機時の起床は 1 分に 1 回です。
+
+参考: J. Lemon, "Kqueue: A generic and scalable event notification facility", USENIX 2001 / D. Kegel, "The C10K problem".
+:::
+
+## 関連する用語 {#terms}
+
+- [[epoll]]
+- [[kqueue]]
+- [[timerfd]]
+- [[inotify]]
+- [[sigsys]]
+- [[syscall]]
+- [[pipe]]
