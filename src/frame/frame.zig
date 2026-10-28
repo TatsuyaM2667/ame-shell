@@ -12,24 +12,25 @@
 // 排他領域(ウィンドウを避けさせる幅)は、各辺に貼った幅 1px の透明サーフェスで確保する
 // (全面アンカーのサーフェスには排他領域を設定できないため)。
 const std = @import("std");
-const c = @import("../c.zig");
+
 const anim = @import("../anim.zig");
 const Spring = anim.Spring;
 const Color = anim.Color;
-const gfx = @import("../gfx.zig");
-const theme = @import("../theme.zig");
 const appmod = @import("../app.zig");
 const App = appmod.App;
 const Output = appmod.Output;
-const surface = @import("../surface.zig");
-const Surface = surface.Surface;
+const c = @import("../c.zig");
+const gfx = @import("../gfx.zig");
 const loop = @import("../platform/loop.zig");
 const sys = @import("../platform/sys.zig");
-const data = @import("data.zig");
-const vbar = @import("vbar.zig");
+const surface = @import("../surface.zig");
+const Surface = surface.Surface;
+const theme = @import("../theme.zig");
 const dash = @import("dash.zig");
-const side = @import("side.zig");
+const data = @import("data.zig");
 const netpanel = @import("netpanel.zig");
+const side = @import("side.zig");
+const vbar = @import("vbar.zig");
 
 /// 1 つのドロワーの状態。t は開き具合(0..1、少し行き過ぎてから戻る)、w/h は中身の大きさ。
 pub const Drawer = struct {

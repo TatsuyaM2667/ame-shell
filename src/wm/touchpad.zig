@@ -3,6 +3,7 @@
 // 機器のイベントは種類が多く、使うのは tap_support と removed だけなので、リスナーではなく
 // wl_proxy_add_dispatcher で受けてイベント名で振り分ける(未使用のイベントは無視)。
 const std = @import("std");
+
 const c = @import("../c.zig");
 
 const Touchpad = @This();

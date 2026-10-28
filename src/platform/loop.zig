@@ -4,6 +4,7 @@
 // fd として1つの epoll に登録し、カーネルに待たせる。アニメーション中以外は
 // epoll_wait で完全にブロックするので、待機時の CPU 使用率はほぼ 0 になる。
 const std = @import("std");
+
 const c = @import("../c.zig");
 
 pub const Callback = *const fn (ctx: *anyopaque, fd: c_int, events: u32) void;

@@ -61,9 +61,9 @@ pub fn build(b: *std.Build) void {
     const odin = b.addSystemCommand(&.{ "odin", "build" });
     odin.addDirectoryArg(b.path("anim"));
     odin.addArgs(&.{
-        "-build-mode:obj",   "-no-entry-point",           "-o:speed",
-        "-no-bounds-check",  "-default-to-nil-allocator", "-no-thread-local",
-        "-reloc-mode:pic",   odin_target,
+        "-build-mode:obj",  "-no-entry-point",           "-o:speed",
+        "-no-bounds-check", "-default-to-nil-allocator", "-no-thread-local",
+        "-reloc-mode:pic",  odin_target,
     });
     const anim_obj = odin.addPrefixedOutputFileArg("-out:", "anim.o");
     // ディレクトリ引数は中身の変更を追跡しないため、ソースを明示的に入力に加える。
@@ -71,8 +71,8 @@ pub fn build(b: *std.Build) void {
 
     // --- wasm3: WASM ウィジェットの実行ランタイム(C, MIT) ---
     const wasm3_files = [_][]const u8{
-        "m3_bind.c", "m3_code.c",   "m3_compile.c", "m3_core.c",     "m3_emit.c",  "m3_env.c",
-        "m3_exec.c", "m3_function.c", "m3_info.c",  "m3_module.c", "m3_optimize.c", "m3_parse.c",
+        "m3_bind.c", "m3_code.c",     "m3_compile.c", "m3_core.c",   "m3_emit.c",     "m3_env.c",
+        "m3_exec.c", "m3_function.c", "m3_info.c",    "m3_module.c", "m3_optimize.c", "m3_parse.c",
     };
 
     // --- シェル本体 ---

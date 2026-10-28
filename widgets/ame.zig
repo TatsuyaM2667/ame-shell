@@ -10,13 +10,14 @@
 // アニメーションは Odin のスプリング(anim.odin を wasm32 にビルドしたもの)をそのまま使う。
 const std = @import("std");
 
-// ---- ホストと共有するレイアウト(src/widget_abi.zig) ----
 const abi = @import("abi");
 pub const CmdKind = abi.CmdKind;
 pub const Cmd = abi.Cmd;
 pub const Store = abi.Store;
 pub const Action = abi.Action;
+pub const PointerKind = abi.PointerKind;
 
+// ---- ホストと共有するレイアウト(src/widget_abi.zig) ----
 extern "ame" fn action(id: u32, value: f32) void;
 
 pub fn act(a: Action, v: f32) void {
@@ -153,8 +154,6 @@ pub fn mix(a: u32, b: u32, t: f32) u32 {
 pub fn hit(px: f32, py: f32, x: f32, y: f32, w: f32, h: f32) bool {
     return px >= x and px < x + w and py >= y and py < y + h;
 }
-
-pub const PointerKind = abi.PointerKind;
 
 /// 各ウィジェットが `pub const W = struct { ... }` を定義し、この関数でエクスポートを生成する。
 pub fn exportWidget(comptime W: type) void {

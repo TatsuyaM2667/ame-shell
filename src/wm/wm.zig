@@ -15,21 +15,22 @@
 // の中でしか変えられない。キー操作や ame-ctl からの要求はいったん queue に積み、manage_dirty で
 // manage sequence を起こしてから処理する。
 const std = @import("std");
-const c = @import("../c.zig");
+
 const anim = @import("../anim.zig");
 const Spring = anim.Spring;
 const Color = anim.Color;
 const appmod = @import("../app.zig");
 const App = appmod.App;
-const sys = @import("../platform/sys.zig");
-const loop = @import("../platform/loop.zig");
-const theme = @import("../theme.zig");
-const binds = @import("binds.zig");
-
+const c = @import("../c.zig");
 const MOD_SHIFT = c.RIVER_SEAT_V1_MODIFIERS_SHIFT;
 const MOD_CTRL = c.RIVER_SEAT_V1_MODIFIERS_CTRL;
 const MOD_ALT = c.RIVER_SEAT_V1_MODIFIERS_MOD1;
 const MOD_SUPER = c.RIVER_SEAT_V1_MODIFIERS_MOD4;
+const loop = @import("../platform/loop.zig");
+const sys = @import("../platform/sys.zig");
+const theme = @import("../theme.zig");
+const binds = @import("binds.zig");
+
 const BTN_LEFT = 0x110;
 const BTN_RIGHT = 0x111;
 const BTN_MIDDLE = 0x112;

@@ -4,10 +4,11 @@
 //        → /var/lib/AccountsService/icons/$USER。無ければ名前の頭文字を表示する。
 // 写真は大きいことが多いので、別スレッドで中央を正方形に切り抜いて 256px に縮めてから GPU へ送る。
 const std = @import("std");
+
+const App = @import("app.zig").App;
 const c = @import("c.zig");
 const gfx = @import("gfx.zig");
 const icons = @import("icons.zig");
-const App = @import("app.zig").App;
 
 const SIZE = 256;
 

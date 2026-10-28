@@ -1,15 +1,16 @@
 // River 0.5 セッションのキー割り当て。今の ~/.config/river/init(River 0.3)と同じ操作感にしてある。
 // ランチャー・ロック等は ame-shell の機能を直接呼ぶ(ame-ctl を起動するより速い)。
 const std = @import("std");
-const c = @import("../c.zig");
-const wm = @import("wm.zig");
-const Action = wm.Action;
-const App = @import("../app.zig").App;
 
+const App = @import("../app.zig").App;
+const c = @import("../c.zig");
 const SHIFT = c.RIVER_SEAT_V1_MODIFIERS_SHIFT;
 const CTRL = c.RIVER_SEAT_V1_MODIFIERS_CTRL;
 const ALT = c.RIVER_SEAT_V1_MODIFIERS_MOD1;
 const SUPER = c.RIVER_SEAT_V1_MODIFIERS_MOD4;
+const wm = @import("wm.zig");
+const Action = wm.Action;
+
 const NONE: u32 = 0;
 
 pub const SCRATCH: u32 = 1 << 20;

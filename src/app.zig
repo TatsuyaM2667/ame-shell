@@ -3,33 +3,34 @@
 // 1プロセス・1 EGL コンテキストで、出力ごとに「壁紙」と「バー」、全体で1つずつ
 // 「OSD」「ランチャー」「ダッシュボード」「通知」「ロック画面」を持つ。
 const std = @import("std");
-const c = @import("c.zig");
-const gfx = @import("gfx.zig");
-const text = @import("text.zig");
+
 const anim = @import("anim.zig");
+const Audio = @import("audio.zig").Audio;
+const Avatar = @import("avatar.zig").Avatar;
+const Bar = @import("bar.zig").Bar;
+const c = @import("c.zig");
 const cfgmod = @import("config.zig");
+const Dashboard = @import("dashboard.zig").Dashboard;
+const Frame = @import("frame/frame.zig").Frame;
+const gfx = @import("gfx.zig");
+const ipc = @import("ipc.zig");
+const Launcher = @import("launcher.zig").Launcher;
+const Lock = @import("lock.zig").Lock;
+const Media = @import("media.zig").Media;
+const Notifs = @import("notify.zig").Notifs;
+const Osd = @import("osd.zig").Osd;
 const loop_mod = @import("platform/loop.zig");
+const SuperTap = @import("platform/supertap.zig").SuperTap;
 const sys = @import("platform/sys.zig");
 const surface = @import("surface.zig");
 const Surface = surface.Surface;
-const Bar = @import("bar.zig").Bar;
-const Frame = @import("frame/frame.zig").Frame;
-const Wallpaper = @import("wallpaper.zig").Wallpaper;
-const Osd = @import("osd.zig").Osd;
-const Launcher = @import("launcher.zig").Launcher;
-const Dashboard = @import("dashboard.zig").Dashboard;
-const Notifs = @import("notify.zig").Notifs;
-const Lock = @import("lock.zig").Lock;
-const Media = @import("media.zig").Media;
-const WallPick = @import("wallpick.zig").WallPick;
-const Avatar = @import("avatar.zig").Avatar;
 const SysWatch = @import("syswatch.zig").SysWatch;
+const text = @import("text.zig");
 const Toplevels = @import("toplevels.zig").Toplevels;
-const Audio = @import("audio.zig").Audio;
-const ipc = @import("ipc.zig");
-const SuperTap = @import("platform/supertap.zig").SuperTap;
-const Wm = @import("wm/wm.zig").Wm;
+const Wallpaper = @import("wallpaper.zig").Wallpaper;
+const WallPick = @import("wallpick.zig").WallPick;
 const Touchpad = @import("wm/touchpad.zig");
+const Wm = @import("wm/wm.zig").Wm;
 
 const log = std.log.scoped(.app);
 
@@ -379,7 +380,7 @@ pub const App = struct {
     fn setupShell(self: *App, o: *Output) void {
         if (self.cfg.layout == .caelestia) {
             if (o.bar) |b| b.destroy();
-        if (o.frame) |f| f.destroy();
+            if (o.frame) |f| f.destroy();
             o.bar = null;
             if (o.frame == null) o.frame = Frame.create(self, o) catch |e| blk: {
                 log.err("枠を作れません: {s}", .{@errorName(e)});

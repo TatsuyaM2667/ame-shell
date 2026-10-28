@@ -14,6 +14,7 @@
 //   行内: **太字** `コード` [文字](URL) [[wiki の項目]] [[項目|表示する文字]]
 
 const std = @import("std");
+
 const refpages = @import("refpages");
 
 const Sec = enum(u32) { doc, tech, ref, wiki, blog };
