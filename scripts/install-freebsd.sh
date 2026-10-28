@@ -259,6 +259,8 @@ sh "$REPO/session/install-session.sh" --prefix /usr/local
 
 # 追加の壁紙(非公開リポジトリ。GitHub にログインしていなければ案内だけ)
 su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_DATA_HOME= sh '$REPO/scripts/fetch-wallpapers.sh'"
+# foot の見た目(半透明・fastfetch)を ame-shell のものに。元の foot.ini は foot.ini.ame-bak に残る
+su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_CONFIG_HOME= sh '$REPO/scripts/foot-config.sh'"
 
 # キーボード配列: コンソールの keymap(rc.conf の keymap="jp.kbd" など)と同じ配列を Wayland でも使う
 kbd=$(sysrc -n keymap 2>/dev/null || true)

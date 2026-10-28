@@ -70,6 +70,7 @@ foot は自分の `~/.config/foot/foot.ini` が無ければ、ame-shell の半�
 - **拡大率は自動**(River 0.5 のセッション、`wlr-randr` を使用): 画素の細かさを作者の環境(14 インチ 1920x1200、拡大率 1)と比べて 0.25 刻みで決めます。ふつうの画面は 1 のまま、14 インチ 2880x1800 なら 1.5、13 インチ 4K なら 2。
   自分で決めるときは `~/.config/ame-shell/output-scale` に `1.5` や `eDP-1 1.5`(画面ごと)、`off` で自動設定なし。
 - **foot**: 自分の `~/.config/foot/foot.ini` が無ければ ame-shell の設定(半透明、JetBrains Mono 12pt、`dpi-aware=no`)。開くと最初に `fastfetch` を表示します(`AME_FASTFETCH=0` で無効。シェルの設定で自分で呼んでいる場合は二重にしません)。
+  FreeBSD では、インストーラと ame-update が `~/.config/foot/foot.ini` をこの設定で上書きします(元のファイルは `foot.ini.ame-bak`)。
 - カーソルは未設定なら 24px(Adwaita)。
 
 ### アップデート(ame-update)

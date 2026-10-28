@@ -130,3 +130,4 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - foot の既定設定に shell=ame-term-shell: fastfetch を出してから $SHELL に。シェルの設定ファイルに fastfetch があれば出さない(二重防止)、AME_FASTFETCH=0 で無効。入れ子の River で foot → ame-term-shell → シェルの順に起動することを確認。
 - ame-display-scale: wlr-randr の物理サイズと解像度から、Chimera の環境(1920px / 300mm = 6.4 px/mm、拡大率 1)と同じ見た目になる拡大率(0.25 刻み、1.25 未満は 1)を設定。~/.config/ame-shell/output-scale・AME_OUTPUT_SCALE で上書き、off で無効。偽の wlr-randr で試験。
 - XCURSOR_SIZE=24 / XCURSOR_THEME=Adwaita(未設定のときだけ)。FreeBSD の任意パッケージに fastfetch・wlr-randr(14 / 15 の quarterly にあることを確認)、ame-update が未導入なら入れる。
+- FreeBSD: scripts/foot-config.sh で ~/.config/foot/foot.ini を ame-shell の設定に上書き(初回だけ foot.ini.ame-bak に退避、同じ内容なら何もしない)。install-freebsd.sh と ame-update から。
