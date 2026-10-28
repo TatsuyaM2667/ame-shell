@@ -138,3 +138,4 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - fastfetch: 窓の大きさが決まってから表示、FreeBSD は --logo freebsd(大きいロゴ。自分の fastfetch の設定があれば任せる)。
 - 追加の壁紙の取得はインストーラから外し、ame-update だけに。
 - fastfetch の設定(data/xdg/fastfetch/config.jsonc: logo.type=builtin で大きいロゴ、modules は fastfetch の既定と同じ。modules を省くと情報が出ないので明記)。scripts/foot-config.sh を app-config.sh にして foot と fastfetch の両方を FreeBSD で ~/.config に上書き。
+- 録画: FreeBSD の任意パッケージに wf-recorder が無く、押しても何も録れていなかった。wf-recorder を任意パッケージと ame-update に追加。無いときは録画中にせず、赤く光らせて入れ方を通知。開始・停止で保存先(~/Videos/rec_*.mp4)を通知。

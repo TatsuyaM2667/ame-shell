@@ -100,7 +100,7 @@ REQUIRED="
 "
 # あれば使う: 無ければ飛ばす(その機能だけ使えない)。"a|b" は「a が無ければ b」
 OPTIONAL="
- playerctl cava swaylock grim slurp wl-clipboard mpv ffmpeg fastfetch wlr-randr
+ playerctl cava swaylock grim slurp wl-clipboard wf-recorder mpv ffmpeg fastfetch wlr-randr
  xdg-desktop-portal xdg-desktop-portal-wlr
  noto-sans-jp nerd-fonts-symbols jetbrains-mono
 "

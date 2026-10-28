@@ -78,9 +78,9 @@ if [ "$DO_PKG" = 1 ]; then
         elif confirm "パッケージを更新しますか?"; then
             as_root pkg upgrade -y || info "pkg upgrade に失敗しました(続けます)"
         fi
-        # 後から使うようになったもの(fastfetch: 端末を開いたときの表示、wlr-randr: 画面の拡大率)
+        # 後から使うようになったもの(fastfetch: 端末を開いたときの表示、wlr-randr: 画面の拡大率、wf-recorder: 録画)
         missing=""
-        for p in fastfetch wlr-randr; do pkg info -e "$p" || missing="$missing $p"; done
+        for p in fastfetch wlr-randr wf-recorder; do pkg info -e "$p" || missing="$missing $p"; done
         if [ -n "$missing" ] && [ "$CHECK" = 0 ]; then
             info "追加のパッケージ:$missing"
             as_root pkg install -y $missing || info "pkg install に失敗しました(続けます)"

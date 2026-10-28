@@ -27,6 +27,9 @@ pub const State = struct {
     osd_drag: i32 = -1,
     profile: data.Profile = .unknown,
     recording: bool = false,
+    /// 録画中のファイル(停止したときの通知に出す)
+    rec_path: [512]u8 = undefined,
+    rec_len: usize = 0,
     inhibit: bool = false,
     scroll: f32 = 0,
 };
@@ -180,20 +183,7 @@ fn utilPress(f: *Frame, i: usize) void {
             f.sidev.inhibit = !f.sidev.inhibit;
             f.setIdleInhibit(f.sidev.inhibit);
         },
-        .record => {
-            // ユーザーの録画スクリプトがあればそれを使う(無ければ wf-recorder を直接)
-            const home = std.posix.getenv("HOME") orelse "";
-            var p: [512]u8 = undefined;
-            const script = std.fmt.bufPrintZ(&p, "{s}/.local/bin/toggle-record.sh", .{home}) catch return;
-            if (c.access(script.ptr, c.X_OK) == 0) {
-                sys.spawnDetached(script.ptr);
-            } else if (f.sidev.recording) {
-                sys.spawnDetached("pkill -INT wf-recorder");
-            } else {
-                sys.spawnDetached("mkdir -p ~/Videos && wf-recorder -f ~/Videos/rec_$(date +%Y%m%d_%H%M%S).mp4");
-            }
-            f.sidev.recording = !f.sidev.recording;
-        },
+        .record => toggleRecord(f),
         .screenshot => {
             f.closeAll();
             sys.spawnDetached("sleep 0.4; mkdir -p ~/Pictures/Screenshots && grim -g \"$(slurp)\" ~/Pictures/Screenshots/shot_$(date +%Y%m%d_%H%M%S).png");
@@ -453,4 +443,57 @@ pub fn pointer(f: *Frame, which: Which, ev: surface.PointerEvent, lx: f32, ly: f
         else => {},
     }
     return redraw or ev.kind == .press or ev.kind == .scroll or (which == .osd and st.osd_drag >= 0);
+}
+
+/// 録画の開始・停止。~/.local/bin/toggle-record.sh があればそれに任せ、無ければ wf-recorder で ~/Videos に保存する。
+/// wf-recorder が無いときは録画中にせず、入れ方を通知する(以前は黙って何も録れていなかった)
+fn toggleRecord(f: *Frame) void {
+    const home = std.posix.getenv("HOME") orelse "";
+    var p: [512]u8 = undefined;
+    const script = std.fmt.bufPrintZ(&p, "{s}/.local/bin/toggle-record.sh", .{home}) catch return;
+    if (c.access(script.ptr, c.X_OK) == 0) {
+        sys.spawnDetached(script.ptr);
+        f.sidev.recording = !f.sidev.recording;
+        return;
+    }
+    if (f.sidev.recording) {
+        sys.spawnDetached("pkill -INT -x wf-recorder");
+        f.sidev.recording = false;
+        f.app.notifs.post("ame-shell", "録画を保存しました", f.sidev.rec_path[0..f.sidev.rec_len], 0);
+        return;
+    }
+    if (!inPath("wf-recorder")) {
+        theme.flashError(f.app);
+        const hint = if (@import("builtin").os.tag == .freebsd) "wf-recorder がありません。入れてください: doas pkg install wf-recorder" else "wf-recorder がありません。パッケージを入れてください";
+        f.app.notifs.post("ame-shell", "録画できません", hint, 0);
+        return;
+    }
+    // ~/Videos/rec_YYYYmmdd_HHMMSS.mp4
+    var tm: c.struct_tm = undefined;
+    var t = c.time(null);
+    _ = c.localtime_r(&t, &tm);
+    var stamp: [32]u8 = undefined;
+    const n = c.strftime(&stamp, stamp.len, "%Y%m%d_%H%M%S", &tm);
+    var dir: [512]u8 = undefined;
+    const dirz = std.fmt.bufPrintZ(&dir, "{s}/Videos", .{home}) catch return;
+    _ = c.mkdir(dirz.ptr, 0o755);
+    const path = std.fmt.bufPrint(&f.sidev.rec_path, "{s}/rec_{s}.mp4", .{ dirz, stamp[0..n] }) catch return;
+    f.sidev.rec_len = path.len;
+    var cmd: [700]u8 = undefined;
+    const cmdz = std.fmt.bufPrintZ(&cmd, "exec wf-recorder -f '{s}' >/dev/null 2>&1", .{path}) catch return;
+    sys.spawnDetached(cmdz.ptr);
+    f.sidev.recording = true;
+    f.app.notifs.post("ame-shell", "録画を開始しました(もう一度押すと停止)", path, 0);
+}
+
+fn inPath(name: []const u8) bool {
+    const path = std.posix.getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
+    var it = std.mem.splitScalar(u8, path, ':');
+    var buf: [512]u8 = undefined;
+    while (it.next()) |d| {
+        if (d.len == 0) continue;
+        const full = std.fmt.bufPrintZ(&buf, "{s}/{s}", .{ d, name }) catch continue;
+        if (c.access(full.ptr, c.X_OK) == 0) return true;
+    }
+    return false;
 }
