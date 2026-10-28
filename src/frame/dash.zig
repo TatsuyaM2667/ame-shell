@@ -550,73 +550,99 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
             }
         },
         .synced => {
-            // 今の行だけを大きく。行が変わるたびに下からポンと弾んで出て、前の行は上へ消える
+            // 歌われた行が 1 行ずつ増えていく(これから歌う行は見せない)。新しい行は下でポンと弾んで出て、
+            // それまでの行はその高さぶん上へ押し上げられ、小さく薄くなっていく
             const cur = ly.current(pos);
             if (!std.meta.eql(cur.idx, v.lyr_idx)) {
+                // 1 行進んだときだけ押し上げる(シークで飛んだときは、その場で並べ直す)
+                const forward = cur.idx != null and v.lyr_idx != null and cur.idx.? == v.lyr_idx.? + 1;
                 v.lyr_prev = v.lyr_idx;
                 v.lyr_idx = cur.idx;
                 v.lyr_pop.snap(0);
                 v.lyr_pop.set(1);
+                v.lyr_scroll.snap(if (forward) 1 else 0);
+                v.lyr_scroll.set(0);
             }
             if (v.lyr_pop.step(dt)) animating = true;
+            if (v.lyr_scroll.step(dt)) animating = true;
             const t = v.lyr_pop.x;
-            const fsz: f32 = 23;
-            const LH: f32 = 31;
+            const s = v.lyr_scroll.x; // 1 → 0: 押し上げの残り
+            const big: f32 = 22;
+            const small: f32 = 15.5;
+            const gap: f32 = 14;
             const max_w = lw - 56;
+            const mid = lx + lw / 2;
+            const lines = ly.lines.items;
             const text_of = struct {
-                fn get(lines: anytype, idx: ?usize) []const u8 {
+                fn get(ls: anytype, idx: ?usize) []const u8 {
                     const i = idx orelse return "";
-                    if (i >= lines.len) return "";
-                    return if (lines[i].text.len > 0) lines[i].text else "♪";
+                    if (i >= ls.len) return "";
+                    return if (ls[i].text.len > 0) ls[i].text else "♪";
                 }
             }.get;
-            // 前の行: 上へ流れながら薄く
-            const prev_s = text_of(ly.lines.items, v.lyr_prev);
-            if (prev_s.len > 0 and t < 1) {
-                const k = std.math.clamp(t, 0, 1);
-                cv.save();
-                cv.translate(0, -k * 46);
-                cv.opacity(std.math.clamp(1 - k * 1.6, 0, 1));
-                const pn: f32 = @floatFromInt(cv.wrapCount(prev_s, fsz, max_w, 3));
-                _ = cv.textWrapOpts(lx + lw / 2, center_y - (pn - 1) * LH / 2 + 8, fsz, txt.alpha(0.6), prev_s, max_w, 3, LH, .{ .alignment = .center });
-                cv.restore();
-            }
-            // 今の行: 下からポップ(拡大・不透明度・位置を同じスプリングで。少し行き過ぎて戻る)
-            const cur_s = text_of(ly.lines.items, cur.idx);
-            if (cur_s.len > 0) {
-                const lines_n: f32 = @floatFromInt(cv.wrapCount(cur_s, fsz, max_w, 3));
-                const y0 = center_y - (lines_n - 1) * LH / 2 + 8;
-                cv.save();
-                cv.translate(0, (1 - t) * 34);
-                cv.scaleAbout(lx + lw / 2, center_y, 0.82 + 0.18 * t);
-                cv.opacity(std.math.clamp(t * 1.8, 0, 1));
-                // 曲の進みに合わせて少しずつアクセント色へ(行の時間の進み)
-                const col = Color.mix(txt, acc.lighten(0.5), 0.25 + 0.45 * cur.frac);
-                _ = cv.textWrapOpts(lx + lw / 2, y0, fsz, col, cur_s, max_w, 3, LH, .{ .alignment = .center, .glow = 2.5, .glow_color = acc.lighten(0.3).alpha(0.45) });
-                cv.restore();
-            } else if (cur.idx == null) {
-                _ = cv.text(lx + lw / 2, center_y + 8, 22, sub.alpha(0.6), "♪", .{ .alignment = .center });
-            }
-            // クリック: 上 = 前の行、真ん中 = 今の行の頭、下 = 次の行(カーソルを乗せるとその行が薄く見える)
             v.lyr_area = .{ lx, 20, lw, H - 32 };
             v.n_lyr_hits = 0;
-            const ci: usize = cur.idx orelse 0;
-            const n_lines = ly.lines.items.len;
-            const zones = [3]struct { idx: ?usize, y0: f32, y1: f32 }{
-                .{ .idx = if (cur.idx != null and ci > 0) ci - 1 else null, .y0 = 20, .y1 = center_y - 60 },
-                .{ .idx = cur.idx, .y0 = center_y - 60, .y1 = center_y + 60 },
-                .{ .idx = if (cur.idx == null) (if (n_lines > 0) @as(?usize, 0) else null) else if (ci + 1 < n_lines) ci + 1 else null, .y0 = center_y + 60, .y1 = H - 12 },
-            };
-            for (zones, 0..) |z, zi| {
-                const idx = z.idx orelse continue;
-                v.lyr_hits[v.n_lyr_hits] = .{ .y0 = z.y0, .y1 = z.y1, .t = ly.lines.items[idx].t, .idx = idx };
-                v.n_lyr_hits += 1;
-                if (v.lyr_hover != null and v.lyr_hover.? == idx and zi != 1) {
-                    const hy: f32 = if (zi == 0) 48 else H - 40;
-                    _ = cv.text(lx + lw / 2, hy, 13, sub.alpha(0.75), text_of(ly.lines.items, idx), .{ .alignment = .center, .max_w = max_w });
-                    _ = cv.text(lx + lw / 2, hy + (if (zi == 0) @as(f32, -18) else 18), 10.5, acc.lighten(0.3).alpha(0.8), if (zi == 0) "\u{F0143} 前の行へ" else "\u{F0140} 次の行へ", .{ .alignment = .center });
+            // 今の行の 1 行目のベースライン(下寄り。上に歌い終えた行が積み上がる)
+            const base_y = center_y + 70;
+            const cur_s = text_of(lines, cur.idx);
+            const n0: f32 = if (cur_s.len > 0) @floatFromInt(cv.wrapCount(cur_s, big, max_w, 3)) else 1;
+            const cur_top = base_y - big * 0.9;
+            const cur_bottom = base_y + (n0 - 1) * big * 1.36 + big * 0.35;
+            // 押し上げの量 = 新しい行の高さ + 行間
+            const shift = (cur_bottom - cur_top) + gap;
+            // ---- 歌い終えた行(新しい順に上へ) ----
+            if (cur.idx) |ci| {
+                var bottom = cur_top - gap;
+                var k: usize = 1;
+                while (k <= ci and k < 40) : (k += 1) {
+                    const idx = ci - k;
+                    const str = text_of(lines, idx);
+                    // 直前の行は、押し上げの間に大きい文字から小さい文字へ
+                    const sz = if (k == 1) small + (big - small) * s else small;
+                    const lh = sz * 1.36;
+                    const nl: f32 = @floatFromInt(cv.wrapCount(str, sz, max_w, 2));
+                    const y = bottom - (nl - 1) * lh - sz * 0.3 + s * shift;
+                    const top = y - sz * 0.9;
+                    if (top < -20) break; // 上の端より外(fade で消えている)
+                    // 古い行ほど薄く、上の端では消えていく
+                    const fade = std.math.clamp((top - 22) / 70, 0, 1);
+                    const age = @max(0.25, 1 - @as(f32, @floatFromInt(k - 1)) * 0.16);
+                    const hov = v.lyr_hover != null and v.lyr_hover.? == idx;
+                    const col = if (hov) acc.lighten(0.45) else if (k == 1) Color.mix(sub, txt, 0.4 + 0.6 * s) else sub;
+                    _ = cv.textWrapOpts(mid, y, sz, col.alpha(age * fade * (if (hov) @as(f32, 1.0) else 0.85)), str, max_w, 2, lh, .{ .alignment = .center });
+                    if (v.n_lyr_hits < v.lyr_hits.len) {
+                        v.lyr_hits[v.n_lyr_hits] = .{ .y0 = top - gap / 2, .y1 = y + (nl - 1) * lh + sz * 0.3 + gap / 2, .t = lines[idx].t, .idx = idx };
+                        v.n_lyr_hits += 1;
+                    }
+                    bottom = top - gap - s * shift;
                 }
             }
+            // ---- 今の行: 下からポップ(拡大・不透明度・位置を同じスプリングで。少し行き過ぎて戻る) ----
+            if (cur_s.len > 0) {
+                cv.save();
+                // 押し上げと一緒に下から上がってくる(前の行と重ならない)+ 弾み
+                cv.translate(0, s * shift + (1 - t) * 16);
+                cv.scaleAbout(mid, base_y, 0.8 + 0.2 * t);
+                cv.opacity(std.math.clamp(t * 1.8, 0, 1));
+                // 行の時間の進みに合わせて少しずつアクセント色へ
+                const col = Color.mix(txt, acc.lighten(0.5), 0.25 + 0.45 * cur.frac);
+                _ = cv.textWrapOpts(mid, base_y, big, col, cur_s, max_w, 3, big * 1.36, .{ .alignment = .center, .bold = true, .glow = 2.5, .glow_color = acc.lighten(0.3).alpha(0.45) });
+                cv.restore();
+                if (v.n_lyr_hits < v.lyr_hits.len) {
+                    v.lyr_hits[v.n_lyr_hits] = .{ .y0 = cur_top - gap / 2, .y1 = cur_bottom + gap / 2, .t = lines[cur.idx.?].t, .idx = cur.idx.? };
+                    v.n_lyr_hits += 1;
+                }
+            } else {
+                _ = cv.text(mid, base_y, big, sub.alpha(0.6), "♪", .{ .alignment = .center });
+            }
+            // ---- 下の余白: 次の行へ(カーソルを乗せると案内だけ出す。歌詞そのものは先に見せない) ----
+            const next: ?usize = if (cur.idx) |ci| (if (ci + 1 < lines.len) ci + 1 else null) else (if (lines.len > 0) @as(?usize, 0) else null);
+            if (next) |ni| if (v.n_lyr_hits < v.lyr_hits.len) {
+                v.lyr_hits[v.n_lyr_hits] = .{ .y0 = cur_bottom + gap / 2, .y1 = H - 12, .t = lines[ni].t, .idx = ni };
+                v.n_lyr_hits += 1;
+                if (v.lyr_hover != null and v.lyr_hover.? == ni)
+                    _ = cv.text(mid, H - 30, 11, acc.lighten(0.3).alpha(0.8), "\u{F0140} 次の行へ", .{ .alignment = .center });
+            };
             if (playing) animating = true; // 行の色の移り変わりを滑らかに
         },
     }
