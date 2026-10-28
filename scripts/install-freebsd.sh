@@ -260,8 +260,8 @@ su -m "$TARGET_USER" -c "cd '$REPO' && env HOME='$UHOME' PATH='$TOOLS/zig-$ZIG_V
     die "ame-shell のビルドに失敗しました"
 sh "$REPO/session/install-session.sh" --prefix /usr/local
 
-# foot の見た目(半透明・fastfetch)を ame-shell のものに。元の foot.ini は foot.ini.ame-bak に残る
-su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_CONFIG_HOME= sh '$REPO/scripts/foot-config.sh'"
+# foot・fastfetch の設定を ame-shell のものに(元のファイルは *.ame-bak に残る)
+su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_CONFIG_HOME= sh '$REPO/scripts/app-config.sh'"
 
 # キーボード配列: コンソールの keymap(rc.conf の keymap="jp.kbd" など)と同じ配列を Wayland でも使う
 kbd=$(sysrc -n keymap 2>/dev/null || true)

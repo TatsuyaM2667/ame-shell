@@ -148,8 +148,8 @@ if [ "$DO_SELF" = 1 ]; then
     fi
     # 追加の壁紙(非公開リポジトリ。GitHub にログインしていなければ案内だけ)
     [ "$CHECK" = 0 ] && [ -f "$SRC/scripts/fetch-wallpapers.sh" ] && sh "$SRC/scripts/fetch-wallpapers.sh"
-    # FreeBSD: foot の見た目を ame-shell のものに(元の foot.ini は foot.ini.ame-bak に残る)
-    [ "$CHECK" = 0 ] && [ "$OS" = FreeBSD ] && [ -f "$SRC/scripts/foot-config.sh" ] && sh "$SRC/scripts/foot-config.sh"
+    # FreeBSD: foot・fastfetch の設定を ame-shell のものに(元のファイルは *.ame-bak に残る)
+    [ "$CHECK" = 0 ] && [ "$OS" = FreeBSD ] && [ -f "$SRC/scripts/app-config.sh" ] && sh "$SRC/scripts/app-config.sh"
 fi
 
 # ---------------------------------------------------------------------------
