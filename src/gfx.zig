@@ -10,9 +10,10 @@
 //    テクスチャを持っておき、パネルは「自分の真後ろの位置」をサンプルする。縁では
 //    SDF の法線方向に UV をずらして屈折風に歪ませ、縁のハイライト・ノイズ・スパークルを足す。
 const std = @import("std");
+
 const c = @import("c.zig");
-const textmod = @import("text.zig");
 const Color = @import("anim.zig").Color;
+const textmod = @import("text.zig");
 
 // ---------------------------------------------------------------------------
 // シェーダ
@@ -888,12 +889,12 @@ pub const Canvas = struct {
         const a = self.xf.a;
         if (a <= 0.001) return;
         const v = [INST_FLOATS]f32{
-            self.xf.tx + x * s, self.xf.ty + y * s, w * s,   h * s,
-            c0.r,               c0.g,               c0.b,    c0.a * a,
-            c1.r,               c1.g,               c1.b,    c1.a * a,
-            c2.r,               c2.g,               c2.b,    c2.a * a,
-            p0[0] * s,          p0[1],              p0[2],   p0[3] * s,
-            p1[0],              p1[1],              p1[2],   p1[3],
+            self.xf.tx + x * s, self.xf.ty + y * s, w * s,        h * s,
+            c0.r,               c0.g,               c0.b,         c0.a * a,
+            c1.r,               c1.g,               c1.b,         c1.a * a,
+            c2.r,               c2.g,               c2.b,         c2.a * a,
+            p0[0] * s,          p0[1],              p0[2],        p0[3] * s,
+            p1[0],              p1[1],              p1[2],        p1[3],
             self.clip[0],       self.clip[1],       self.clip[2], self.clip[3],
         };
         self.inst.appendSlice(&v) catch {};
@@ -1038,6 +1039,17 @@ pub const Canvas = struct {
         textWrapImpl(self, x, y, size, col, str, max_w, max_lines, line_h);
     }
 
+    /// 折り返して描く(配置・グロー指定つき)。戻り値は行数
+    pub fn textWrapOpts(self: *Canvas, x: f32, y: f32, size: f32, col: Color, str: []const u8, max_w: f32, max_lines: usize, line_h: f32, o: TextOpts) usize {
+        return textWrapOptsImpl(self, x, y, size, col, str, max_w, max_lines, line_h, o);
+    }
+
+    /// 折り返したときの行数(描かない)
+    pub fn wrapCount(self: *Canvas, str: []const u8, size: f32, max_w: f32, max_lines: usize) usize {
+        var r: [8][2]usize = undefined;
+        return wrapRanges(self, str, size, max_w, max_lines, &r);
+    }
+
     pub fn measure(self: *Canvas, str: []const u8, size: f32, bold: bool) f32 {
         return self.fonts.measure(str, bold, size);
     }
@@ -1085,15 +1097,34 @@ pub const Canvas = struct {
 
 /// 折り返し付きの文字列描画。空白か、CJK 文字の間で改行する。最後の行は「…」で省略。
 pub fn textWrapImpl(self: *Canvas, x: f32, y: f32, size: f32, col: Color, str: []const u8, max_w: f32, max_lines: usize, line_h: f32) void {
+    _ = textWrapOptsImpl(self, x, y, size, col, str, max_w, max_lines, line_h, .{});
+}
+
+/// textWrap の配置・グローを指定できる版(o.alignment で各行を揃える)。戻り値は行数
+pub fn textWrapOptsImpl(self: *Canvas, x: f32, y: f32, size: f32, col: Color, str: []const u8, max_w: f32, max_lines: usize, line_h: f32, o: TextOpts) usize {
+    var ranges: [8][2]usize = undefined;
+    const n = wrapRanges(self, str, size, max_w, max_lines, &ranges);
+    var oo = o;
+    for (ranges[0..n], 0..) |r, i| {
+        // 折り返しで収めた行は省略しない(最後のグリフの送り幅のぶん僅かにはみ出すことがあるため)。
+        // 行数の上限で切った最後の行だけ「…」で省略する
+        oo.max_w = if (i + 1 == n) max_w else max_w + size;
+        const seg = std.mem.trim(u8, str[r[0]..r[1]], " ");
+        _ = self.text(x, y + @as(f32, @floatFromInt(i)) * line_h, size, col, seg, oo);
+    }
+    return n;
+}
+
+/// 折り返したときの各行の範囲(バイト位置)を求める。戻り値は行数
+pub fn wrapRanges(self: *Canvas, str: []const u8, size: f32, max_w: f32, max_lines: usize, ranges: *[8][2]usize) usize {
     const k = size / textmod.BASE_PX;
     const shaped = self.fonts.shape(str, false);
-    var ranges: [8][2]usize = undefined;
     var n: usize = 0;
     var line_start: usize = 0;
     var line_x: f32 = 0;
     var brk: ?usize = null;
     var brk_x: f32 = 0;
-    const lines_max = @min(max_lines, ranges.len);
+    const lines_max = @max(1, @min(max_lines, ranges.len));
     for (shaped.glyphs) |g| {
         const cl: usize = g.cluster;
         if (cl > line_start) {
@@ -1114,11 +1145,7 @@ pub fn textWrapImpl(self: *Canvas, x: f32, y: f32, size: f32, col: Color, str: [
         }
     }
     ranges[n] = .{ line_start, str.len };
-    n += 1;
-    for (ranges[0..n], 0..) |r, i| {
-        const seg = std.mem.trim(u8, str[r[0]..r[1]], " ");
-        _ = self.text(x, y + @as(f32, @floatFromInt(i)) * line_h, size, col, seg, .{ .max_w = max_w });
-    }
+    return n + 1;
 }
 
 /// 枠の形(frameBg に渡す)。座標はサーフェスの論理 px。

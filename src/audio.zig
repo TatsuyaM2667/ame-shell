@@ -4,9 +4,10 @@
 // 一覧の取得・切り替えは別スレッドで行い(pactl は数十 ms かかる)、終わったら pipe でメインループへ知らせる。
 // 切り替えたときは、再生中・録音中のストリームも新しい機器へ移す。
 const std = @import("std");
+
+const App = @import("app.zig").App;
 const c = @import("c.zig");
 const sys = @import("platform/sys.zig");
-const App = @import("app.zig").App;
 
 pub const MAX = 10;
 

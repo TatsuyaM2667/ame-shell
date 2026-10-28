@@ -40,6 +40,10 @@ pub const View = struct {
     vinyl_angle: f32 = 0,
     arm: Spring = Spring.init(0, 0.6, 0.85),
     lyr_scroll: Spring = Spring.init(0, 0.45, 0.9),
+    /// 同期歌詞: 今の行のポップ(弾むように少し行き過ぎる)と、前の行(上へ消える)
+    lyr_pop: Spring = Spring.init(1, 0.38, 0.55),
+    lyr_idx: ?usize = null,
+    lyr_prev: ?usize = null,
     /// 同期歌詞の各行の位置(クリックでその時間へ飛ぶ)。y はタブの中身の座標
     lyr_hits: [48]struct { y0: f32, y1: f32, t: f32, idx: usize } = undefined,
     n_lyr_hits: usize = 0,
@@ -379,18 +383,31 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         cv.imageEx(m.art_tex, cx - lr, cy - lr, lr * 2, lr * 2, lr, .{ 0, 0, 1, 1 }, 0, v.vinyl_angle, 1, 1);
     } else cv.rectGrad(cx - lr, cy - lr, lr * 2, lr * 2, lr, acc.lighten(0.3), acc);
     cv.rect(cx - 6, cy - 6, 12, 12, 6, Color.hex(0x0b0b10));
-    // トーンアーム: 再生中はレコードに乗り、止めると持ち上がって外へ
+    // トーンアーム: 再生中は針が黒い盤面(溝)に乗り、曲の進みに合わせて外周から内側へ。
+    // 止めると持ち上がってレコードの外へ戻る(針が盤面に乗っていないと音は鳴らない)
     v.arm.set(if (playing) 1 else 0);
     if (v.arm.step(dt)) animating = true;
     {
         const px = cx + R + 26;
         const py = cy - R + 6;
-        const ang = std.math.pi * (0.62 + 0.13 * v.arm.x); // 外 → 盤面へ
         const len: f32 = R * 1.25;
+        const deg = std.math.pi / 180.0;
+        // 角度と針先の位置(中心からの距離): 88° → 約 158(盤の外)、105° → 約 113(外周の溝)、115° → 約 85(内周の溝。ラベルは 70、溝は 76〜122)
+        const rest = 88 * deg;
+        const prog = if (m.length_s > 0) std.math.clamp(m.position() / m.length_s, 0, 1) else 0;
+        const on_record = (105 + 10 * prog) * deg;
+        const ang = rest + (on_record - rest) * v.arm.x;
         const ex = px + @cos(ang) * len;
         const ey = py + @sin(ang) * len;
+        // アームの影(盤面に落ちる)
+        cv.line(px + 3, py + 5, ex + 3, ey + 5, 6, Color.hex(0x000000).alpha(0.35));
         cv.line(px, py, ex, ey, 6, Color.hex(0xc8ccd6));
-        cv.line(ex, ey, ex - 10, ey + 14, 10, Color.hex(0x9aa0ad));
+        // ヘッドシェルと針先(盤面に乗っている間は針先が淡く光る)
+        const hx = ex - 10;
+        const hy = ey + 14;
+        cv.line(ex, ey, hx, hy, 10, Color.hex(0x9aa0ad));
+        if (v.arm.x > 0.5) cv.shadow(hx - 3, hy - 3, 6, 6, 3, 8, acc.alpha(0.6 * v.arm.x));
+        cv.rect(hx - 2.5, hy - 2.5, 5, 5, 2.5, Color.hex(0xe8ecf4));
         cv.rect(px - 13, py - 13, 26, 26, 13, Color.hex(0x2a2e38));
         cv.rect(px - 6, py - 6, 12, 12, 6, Color.hex(0xc8ccd6));
     }
@@ -467,46 +484,74 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
             }
         },
         .synced => {
+            // 今の行だけを大きく。行が変わるたびに下からポンと弾んで出て、前の行は上へ消える
             const cur = ly.current(pos);
-            const target: f32 = if (cur.idx) |i| @floatFromInt(i) else -1;
-            if (v.lyr_scroll.target != target) v.lyr_scroll.set(target);
-            if (v.lyr_scroll.step(dt)) animating = true;
-            const LH: f32 = 40;
-            v.n_lyr_hits = 0;
+            if (!std.meta.eql(cur.idx, v.lyr_idx)) {
+                v.lyr_prev = v.lyr_idx;
+                v.lyr_idx = cur.idx;
+                v.lyr_pop.snap(0);
+                v.lyr_pop.set(1);
+            }
+            if (v.lyr_pop.step(dt)) animating = true;
+            const t = v.lyr_pop.x;
+            const fsz: f32 = 23;
+            const LH: f32 = 31;
+            const max_w = lw - 56;
+            const text_of = struct {
+                fn get(lines: anytype, idx: ?usize) []const u8 {
+                    const i = idx orelse return "";
+                    if (i >= lines.len) return "";
+                    return if (lines[i].text.len > 0) lines[i].text else "♪";
+                }
+            }.get;
+            // 前の行: 上へ流れながら薄く
+            const prev_s = text_of(ly.lines.items, v.lyr_prev);
+            if (prev_s.len > 0 and t < 1) {
+                const k = std.math.clamp(t, 0, 1);
+                cv.save();
+                cv.translate(0, -k * 46);
+                cv.opacity(std.math.clamp(1 - k * 1.6, 0, 1));
+                const pn: f32 = @floatFromInt(cv.wrapCount(prev_s, fsz, max_w, 3));
+                _ = cv.textWrapOpts(lx + lw / 2, center_y - (pn - 1) * LH / 2 + 8, fsz, txt.alpha(0.6), prev_s, max_w, 3, LH, .{ .alignment = .center });
+                cv.restore();
+            }
+            // 今の行: 下からポップ(拡大・不透明度・位置を同じスプリングで。少し行き過ぎて戻る)
+            const cur_s = text_of(ly.lines.items, cur.idx);
+            if (cur_s.len > 0) {
+                const lines_n: f32 = @floatFromInt(cv.wrapCount(cur_s, fsz, max_w, 3));
+                const y0 = center_y - (lines_n - 1) * LH / 2 + 8;
+                cv.save();
+                cv.translate(0, (1 - t) * 34);
+                cv.scaleAbout(lx + lw / 2, center_y, 0.82 + 0.18 * t);
+                cv.opacity(std.math.clamp(t * 1.8, 0, 1));
+                // 曲の進みに合わせて少しずつアクセント色へ(行の時間の進み)
+                const col = Color.mix(txt, acc.lighten(0.5), 0.25 + 0.45 * cur.frac);
+                _ = cv.textWrapOpts(lx + lw / 2, y0, fsz, col, cur_s, max_w, 3, LH, .{ .alignment = .center, .glow = 2.5, .glow_color = acc.lighten(0.3).alpha(0.45) });
+                cv.restore();
+            } else if (cur.idx == null) {
+                _ = cv.text(lx + lw / 2, center_y + 8, 22, sub.alpha(0.6), "♪", .{ .alignment = .center });
+            }
+            // クリック: 上 = 前の行、真ん中 = 今の行の頭、下 = 次の行(カーソルを乗せるとその行が薄く見える)
             v.lyr_area = .{ lx, 20, lw, H - 32 };
-            for (ly.lines.items, 0..) |l, i| {
-                const fi: f32 = @floatFromInt(i);
-                const yy = center_y + (fi - v.lyr_scroll.x) * LH;
-                if (yy < -LH or yy > H + LH) continue;
-                if (v.n_lyr_hits < v.lyr_hits.len) {
-                    v.lyr_hits[v.n_lyr_hits] = .{ .y0 = yy - LH / 2 - 4, .y1 = yy + LH / 2 - 4, .t = l.t, .idx = i };
-                    v.n_lyr_hits += 1;
-                }
-                // カーソルが乗っている行: 薄い帯と、その行の時刻(クリックでそこへ飛ぶ)
-                if (v.lyr_hover != null and v.lyr_hover.? == i) {
-                    cv.rect(lx + 10, yy - LH / 2 - 2, lw - 20, LH - 4, 12, Color.hex(0xffffff).alpha(0.07));
-                    var tb: [16]u8 = undefined;
-                    const ts = std.fmt.bufPrint(&tb, "{d}:{d:0>2}", .{ @as(u32, @intFromFloat(l.t)) / 60, @as(u32, @intFromFloat(l.t)) % 60 }) catch "";
-                    _ = cv.text(lx + 16, yy + 4, 10.5, acc.lighten(0.3).alpha(0.9), ts, .{});
-                }
-                const dist = @abs(fi - v.lyr_scroll.x);
-                const is_cur = cur.idx != null and cur.idx.? == i;
-                const fsz: f32 = if (is_cur) 21 else 15.5 - @min(dist, 3) * 0.6;
-                const alpha = std.math.clamp(1 - dist * 0.3, 0.12, 1);
-                const text_ = if (l.text.len > 0) l.text else "♪";
-                if (is_cur) {
-                    // カラオケ風: 行の時間の進みに合わせて左から明るく塗る
-                    const tw2 = @min(cv.measure(text_, fsz, true), lw - 92);
-                    const x0 = lx + lw / 2 - tw2 / 2;
-                    _ = cv.text(lx + lw / 2, yy + 7, fsz, sub.alpha(0.55), text_, .{ .bold = true, .alignment = .center, .max_w = lw - 92 });
-                    cv.setClip(x0 - 4, yy - 30, tw2 * cur.frac + 4, 50);
-                    _ = cv.text(lx + lw / 2, yy + 7, fsz, Color.mix(txt, acc.lighten(0.5), 0.35), text_, .{ .bold = true, .alignment = .center, .max_w = lw - 92, .glow = 2.5, .glow_color = acc.lighten(0.3).alpha(0.5) });
-                    cv.setClip(lx, 20, lw, H - 32);
-                } else {
-                    _ = cv.text(lx + lw / 2, yy + 6, fsz, txt.alpha(alpha * 0.7), text_, .{ .alignment = .center, .max_w = lw - 92 });
+            v.n_lyr_hits = 0;
+            const ci: usize = cur.idx orelse 0;
+            const n_lines = ly.lines.items.len;
+            const zones = [3]struct { idx: ?usize, y0: f32, y1: f32 }{
+                .{ .idx = if (cur.idx != null and ci > 0) ci - 1 else null, .y0 = 20, .y1 = center_y - 60 },
+                .{ .idx = cur.idx, .y0 = center_y - 60, .y1 = center_y + 60 },
+                .{ .idx = if (cur.idx == null) (if (n_lines > 0) @as(?usize, 0) else null) else if (ci + 1 < n_lines) ci + 1 else null, .y0 = center_y + 60, .y1 = H - 12 },
+            };
+            for (zones, 0..) |z, zi| {
+                const idx = z.idx orelse continue;
+                v.lyr_hits[v.n_lyr_hits] = .{ .y0 = z.y0, .y1 = z.y1, .t = ly.lines.items[idx].t, .idx = idx };
+                v.n_lyr_hits += 1;
+                if (v.lyr_hover != null and v.lyr_hover.? == idx and zi != 1) {
+                    const hy: f32 = if (zi == 0) 48 else H - 40;
+                    _ = cv.text(lx + lw / 2, hy, 13, sub.alpha(0.75), text_of(ly.lines.items, idx), .{ .alignment = .center, .max_w = max_w });
+                    _ = cv.text(lx + lw / 2, hy + (if (zi == 0) @as(f32, -18) else 18), 10.5, acc.lighten(0.3).alpha(0.8), if (zi == 0) "\u{F0143} 前の行へ" else "\u{F0140} 次の行へ", .{ .alignment = .center });
                 }
             }
-            if (playing) animating = true; // カラオケの塗りを滑らかに
+            if (playing) animating = true; // 行の色の移り変わりを滑らかに
         },
     }
     cv.setClip(0, 0, 0, 0);

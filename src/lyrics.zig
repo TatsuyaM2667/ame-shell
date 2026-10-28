@@ -6,9 +6,10 @@
 //   3. JSON(std.json)から syncedLyrics(無ければ plainLyrics)を取り出して LRC を解析
 // 曲が変わるたびに 1 回だけ問い合わせ、見つからなかったことも「無し」としてキャッシュする。
 const std = @import("std");
+
+const App = @import("app.zig").App;
 const c = @import("c.zig");
 const sys = @import("platform/sys.zig");
-const App = @import("app.zig").App;
 
 pub const Line = struct { t: f32, text: []const u8 };
 

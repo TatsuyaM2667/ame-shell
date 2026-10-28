@@ -2,13 +2,14 @@
 // 使い方: ame-ctl launcher toggle / ame-ctl volume up / ame-ctl help
 // River のキーバインドから `riverctl map normal Super D spawn "ame-ctl launcher toggle"` のように呼ぶ。
 const std = @import("std");
+
+const ipc_path = @import("ipc_path.zig");
+
 const c = @cImport({
     @cInclude("sys/socket.h");
     @cInclude("sys/un.h");
     @cInclude("unistd.h");
 });
-const ipc_path = @import("ipc_path.zig");
-
 pub fn main() !u8 {
     var args = std.process.args();
     _ = args.next();

@@ -3,15 +3,16 @@
 // キャッシュへ取得(完了を pipe の EOF で検知)。読み込んだ画像から Odin で主色を抽出し、
 // テーマのアクセント色をその色へ滑らかに遷移させる。
 const std = @import("std");
-const c = @import("c.zig");
+
 const anim = @import("anim.zig");
 const Color = anim.Color;
-const gfx = @import("gfx.zig");
-const theme = @import("theme.zig");
 const App = @import("app.zig").App;
-const sys = @import("platform/sys.zig");
-const loop = @import("platform/loop.zig");
+const c = @import("c.zig");
+const gfx = @import("gfx.zig");
 const Lyrics = @import("lyrics.zig").Lyrics;
+const loop = @import("platform/loop.zig");
+const sys = @import("platform/sys.zig");
+const theme = @import("theme.zig");
 
 pub const Status = enum(u32) { none = 0, playing = 1, paused = 2 };
 

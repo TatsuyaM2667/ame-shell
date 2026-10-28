@@ -109,7 +109,10 @@ fuzzy_score :: proc "c" (pat: [^]u8, pat_len: i32, text: [^]u8, text_len: i32) -
 			bonus += 30
 		} else if is_sep(text[ti - 1]) {
 			bonus += 20
-		} else if text[ti] >= 'A' && text[ti] <= 'Z' && text[ti - 1] >= 'a' && text[ti - 1] <= 'z' {
+		} else if text[ti] >= 'A' &&
+		   text[ti] <= 'Z' &&
+		   text[ti - 1] >= 'a' &&
+		   text[ti - 1] <= 'z' {
 			bonus += 15 // camelCase の境界
 		}
 		if last_match == ti - 1 {
@@ -184,6 +187,6 @@ dominant_color :: proc "c" (rgba: [^]u8, pixel_count: i32, stride_px: i32, work:
 			best = (u32(r) << 16) | (u32(g) << 8) | u32(b)
 		}
 	}
-	if best_w < 0 {return 0x6aa8ff} // 画像が空なら既定の青
+	if best_w < 0 {return 0x6aa8ff} 	// 画像が空なら既定の青
 	return best
 }
