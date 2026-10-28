@@ -371,18 +371,62 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         const sa = @sin(a);
         cv.line(cx + ca * r0, cy + sa * r0, cx + ca * r1, cy + sa * r1, 4, Color.mix(acc, acc.lighten(0.6), val).alpha(0.5 + 0.5 * val));
     }
-    cv.shadow(cx - R, cy - R + 10, R * 2, R * 2, R, 24, Color.hex(0x000000).alpha(0.6));
-    cv.rect(cx - R, cy - R, R * 2, R * 2, R, Color.hex(0x0b0b10));
-    // 溝(細い同心円)と、光の当たり具合
-    var gr: f32 = R - 6;
-    while (gr > 76) : (gr -= 7) cv.arc(cx, cy, gr, 1, 1, Color.hex(0xffffff).alpha(0.045), .{ .a = 0 });
-    cv.rectGrad(cx - R, cy - R, R * 2, R * 2, R, Color.hex(0xffffff).alpha(0.07), Color.hex(0xffffff).alpha(0.0));
-    // 中央のラベル = 回るジャケット
-    const lr: f32 = 70;
+    // 盤: 縁の光る輪 → 溝(曲間のすき間で区切られた帯)→ 無音の溝(デッドワックス)→ ラベル
+    const lr: f32 = 46; // ラベル(本物の LP は直径の約 1/3)
+    const wax: f32 = lr + 9; // ここより内側は溝の無い部分
+    const white = Color.hex(0xffffff);
+    cv.shadow(cx - R, cy - R + 10, R * 2, R * 2, R, 26, Color.hex(0x000000).alpha(0.65));
+    cv.rect(cx - R, cy - R, R * 2, R * 2, R, Color.hex(0x0c0c11));
+    cv.arc(cx, cy, R - 1.5, 2, 1, white.alpha(0.10), .{ .a = 0 });
+    {
+        // 曲の切れ目(4 曲ぶん)は溝が無く少し明るい帯になる
+        const gaps = [_]f32{ 0.27, 0.52, 0.76 };
+        var r: f32 = R - 7;
+        var k: u32 = 0;
+        while (r > wax + 2) : (r -= 2.6) {
+            const t = (R - 7 - r) / (R - 7 - wax);
+            var in_gap = false;
+            for (gaps) |g| in_gap = in_gap or @abs(t - g) < 0.018;
+            if (in_gap) {
+                cv.arc(cx, cy, r, 2.6, 1, white.alpha(0.035), .{ .a = 0 });
+            } else {
+                cv.arc(cx, cy, r, 0.9, 1, white.alpha(if (k % 2 == 0) 0.05 else 0.028), .{ .a = 0 });
+            }
+            k += 1;
+        }
+    }
+    // 光の映り込み: 溝に沿った細い弧の光が、左上と右下に向かい合って出る(盤が回っても動かない)
+    {
+        const segs = 14;
+        for ([_]f32{ -2.25, 0.89 }) |a0| {
+            var r: f32 = wax + 3;
+            while (r < R - 4) : (r += 2) {
+                const fall = 1 - @abs((r - wax) / (R - wax) - 0.55) * 1.4; // 中ほどの半径で一番明るい
+                if (fall <= 0) continue;
+                for (0..segs) |si| {
+                    const s0 = @as(f32, @floatFromInt(si)) / segs;
+                    const s1 = @as(f32, @floatFromInt(si + 1)) / segs;
+                    const span: f32 = 0.62; // 約 35°
+                    const b0 = a0 + (s0 - 0.5) * span;
+                    const b1 = a0 + (s1 - 0.5) * span;
+                    const mid = 1 - @abs((s0 + s1) / 2 - 0.5) * 2; // 中心ほど明るい
+                    cv.line(cx + @cos(b0) * r, cy + @sin(b0) * r, cx + @cos(b1) * r, cy + @sin(b1) * r, 2.4, white.alpha(0.06 * mid * mid * fall));
+                }
+            }
+        }
+    }
+    // 中央のラベル = 回るジャケット。縁の細い影と、真ん中の軸
+    cv.arc(cx, cy, lr + 1.5, 3, 1, Color.hex(0x000000).alpha(0.55), .{ .a = 0 });
     if (m.art_tex != 0) {
         cv.imageEx(m.art_tex, cx - lr, cy - lr, lr * 2, lr * 2, lr, .{ 0, 0, 1, 1 }, 0, v.vinyl_angle, 1, 1);
-    } else cv.rectGrad(cx - lr, cy - lr, lr * 2, lr * 2, lr, acc.lighten(0.3), acc);
-    cv.rect(cx - 6, cy - 6, 12, 12, 6, Color.hex(0x0b0b10));
+    } else {
+        cv.rectGrad(cx - lr, cy - lr, lr * 2, lr * 2, lr, acc.lighten(0.3), acc);
+        // ジャケットが無いときは、回っているのが分かるようにラベルに印を付ける
+        const ma = v.vinyl_angle - std.math.pi / 2.0;
+        cv.line(cx + @cos(ma) * (lr * 0.45), cy + @sin(ma) * (lr * 0.45), cx + @cos(ma) * (lr * 0.85), cy + @sin(ma) * (lr * 0.85), 3, white.alpha(0.55));
+    }
+    cv.rect(cx - 5, cy - 5, 10, 10, 5, Color.hex(0xd4d8e0));
+    cv.rect(cx - 2, cy - 3, 3, 3, 1.5, white.alpha(0.9));
     // トーンアーム: 再生中は針が黒い盤面(溝)に乗り、曲の進みに合わせて外周から内側へ。
     // 止めると持ち上がってレコードの外へ戻る(針が盤面に乗っていないと音は鳴らない)
     v.arm.set(if (playing) 1 else 0);
@@ -392,24 +436,46 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         const py = cy - R + 6;
         const len: f32 = R * 1.25;
         const deg = std.math.pi / 180.0;
-        // 角度と針先の位置(中心からの距離): 88° → 約 158(盤の外)、105° → 約 113(外周の溝)、115° → 約 85(内周の溝。ラベルは 70、溝は 76〜122)
-        const rest = 88 * deg;
+        // 角度と針先の位置(盤の中心からの距離、ヘッドシェル 18 を含む):
+        // 86° → 約 167(盤の外で休む)、102° → 約 119(最初の溝)、119° → 約 61(最後の溝。デッドワックスは 55 まで)
+        const rest = 86 * deg;
         const prog = if (m.length_s > 0) std.math.clamp(m.position() / m.length_s, 0, 1) else 0;
-        const on_record = (105 + 10 * prog) * deg;
+        const on_record = (102 + 17 * prog) * deg;
         const ang = rest + (on_record - rest) * v.arm.x;
-        const ex = px + @cos(ang) * len;
-        const ey = py + @sin(ang) * len;
-        // アームの影(盤面に落ちる)
-        cv.line(px + 3, py + 5, ex + 3, ey + 5, 6, Color.hex(0x000000).alpha(0.35));
-        cv.line(px, py, ex, ey, 6, Color.hex(0xc8ccd6));
-        // ヘッドシェルと針先(盤面に乗っている間は針先が淡く光る)
-        const hx = ex - 10;
-        const hy = ey + 14;
-        cv.line(ex, ey, hx, hy, 10, Color.hex(0x9aa0ad));
-        if (v.arm.x > 0.5) cv.shadow(hx - 3, hy - 3, 6, 6, 3, 8, acc.alpha(0.6 * v.arm.x));
-        cv.rect(hx - 2.5, hy - 2.5, 5, 5, 2.5, Color.hex(0xe8ecf4));
-        cv.rect(px - 13, py - 13, 26, 26, 13, Color.hex(0x2a2e38));
-        cv.rect(px - 6, py - 6, 12, 12, 6, Color.hex(0xc8ccd6));
+        const ca = @cos(ang);
+        const sa = @sin(ang);
+        const ex = px + ca * len;
+        const ey = py + sa * len;
+        // ヘッドシェルはアームから約 29° 内側へ折れている(オフセット角)
+        const ha = ang + 0.5;
+        const tx = ex + @cos(ha) * 18;
+        const ty = ey + @sin(ha) * 18;
+        // 持ち上がっている間は影が離れる(盤から浮いている)
+        const lift = 1 - v.arm.x;
+        const so: f32 = 4 + 6 * lift;
+        const shadow_col = Color.hex(0x000000).alpha(0.4 - 0.15 * lift);
+        cv.line(px + so, py + so, ex + so, ey + so, 5, shadow_col);
+        cv.line(ex + so, ey + so, tx + so, ty + so, 10, shadow_col);
+        // 台座(盤の外の円盤)と、軸の後ろの重り
+        cv.shadow(px - 22, py - 20, 44, 44, 22, 10, Color.hex(0x000000).alpha(0.5));
+        cv.rect(px - 22, py - 22, 44, 44, 22, Color.hex(0x1d2028));
+        cv.arc(px, py, 21, 1.5, 1, white.alpha(0.12), .{ .a = 0 });
+        const wx = px - ca * 30;
+        const wy = py - sa * 30;
+        cv.line(px, py, wx, wy, 7, Color.hex(0x8d93a0));
+        cv.line(px - ca * 18, py - sa * 18, wx, wy, 15, Color.hex(0x3a3f4a));
+        cv.line(px - ca * 19 - sa * 3, py - sa * 19 + ca * 3, wx - sa * 3, wy + ca * 3, 2, white.alpha(0.18));
+        // アーム(金属の管: 本体 + 光の筋)
+        cv.line(px, py, ex, ey, 5, Color.hex(0xb9bec9));
+        cv.line(px - sa * 1.2, py + ca * 1.2, ex - sa * 1.2, ey + ca * 1.2, 1.4, white.alpha(0.7));
+        // ヘッドシェル・指かけ・針先(盤面に乗っている間は淡く光る)
+        cv.line(ex, ey, tx, ty, 10, Color.hex(0x2b2f38));
+        cv.line(ex - sa * 6, ey + ca * 6, ex - sa * 13 + ca * 3, ey + ca * 13 + sa * 3, 2, Color.hex(0xb9bec9));
+        if (v.arm.x > 0.5) cv.shadow(tx - 4, ty - 4, 8, 8, 4, 10, acc.alpha(0.7 * v.arm.x));
+        cv.rect(tx - 2, ty - 2, 4, 4, 2, Color.hex(0xe8ecf4));
+        // 軸受け
+        cv.rect(px - 9, py - 9, 18, 18, 9, Color.hex(0xc8ccd6));
+        cv.rect(px - 4, py - 4, 8, 8, 4, Color.hex(0x2a2e38));
     }
 
     // 右の歌詞欄の幅を先に決め、中央の曲情報はその残りに収める

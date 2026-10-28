@@ -184,7 +184,7 @@ pub const Bar = struct {
         }
         const st = &app.sys;
         const status = [_]struct { kind: HitKind, icon: []const u8, col: Color, show: bool }{
-            .{ .kind = .battery, .icon = barmod.batteryIconPub(st.battery), .col = if (st.battery.charging) theme.accent(app) else if (st.battery.percent <= 15) theme.danger(app) else txt, .show = st.battery.present },
+            .{ .kind = .battery, .icon = barmod.batteryIconPub(st.battery), .col = if (st.battery.charging) theme.accent(app) else if (st.battery.held()) Color.mix(txt, theme.accent(app), 0.5) else if (st.battery.percent <= 15) theme.danger(app) else txt, .show = st.battery.present },
             .{ .kind = .bluetooth, .icon = if (self.bt_on) "\u{F00AF}" else "\u{F00B2}", .col = if (self.bt_on) txt else sub, .show = true },
             .{ .kind = .network, .icon = switch (st.net.kind) {
                 .wifi => "\u{F0928}",
@@ -280,7 +280,7 @@ pub const Bar = struct {
             self.hover_idx = now;
             redraw = true;
             // Bluetooth の状態はアイコンに乗ったときだけ確認(常時監視はしない)
-            if (now) |i| if (self.hits[i].kind == .bluetooth) self.checkBt();
+            if (now) |i| if (self.hits[i].kind == .bluetooth) self.checkBt(f);
         }
         const i = now orelse return redraw;
         const h = self.hits[i];
@@ -328,11 +328,10 @@ pub const Bar = struct {
         return redraw;
     }
 
-    fn checkBt(self: *Bar) void {
+    fn checkBt(self: *Bar, f: *Frame) void {
         if (loop.nowMs() - self.bt_checked_ms < 5000) return;
         self.bt_checked_ms = loop.nowMs();
-        var out: [512]u8 = undefined;
-        if (sys.run(&.{ "bluetoothctl", "show" }, &out)) |s| self.bt_on = std.mem.indexOf(u8, s, "Powered: yes") != null;
+        self.bt_on = f.app.syswatch.btPowered();
     }
 };
 
@@ -494,8 +493,10 @@ pub fn drawPopout(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
             _ = cv.text(x, 28, 12, acc, "バッテリー", .{ .bold = true });
             const s = std.fmt.bufPrint(&buf, "{d}%", .{st.battery.percent}) catch "";
             _ = cv.text(x, 62, 28, txt, s, .{ .bold = true });
-            const state: []const u8 = if (st.battery.charging) "充電中" else if (st.battery.on_ac) "AC 電源" else "放電中";
-            _ = cv.text(x + 80, 62, 13, sub, state, .{});
+            const pw = cv.measure(s, 28, true);
+            _ = cv.text(x + pw + 10, 50, 12.5, if (st.battery.charging) acc else txt, barmod.batteryState(st.battery), .{ .max_w = w - x - pw - 28 });
+            var tb: [48]u8 = undefined;
+            _ = cv.text(x + pw + 10, 66, 11.5, sub, barmod.batteryTime(&tb, st.battery), .{});
             const pf = switch (f.sidev.profile) {
                 .saver => "省電力",
                 .balanced => "バランス",

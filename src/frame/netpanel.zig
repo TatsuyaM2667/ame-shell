@@ -45,7 +45,7 @@ const BtDev = struct {
     }
 };
 
-const JobKind = enum { wifi_list, wifi_saved, wifi_connect, wifi_down, wifi_radio, bt_show, bt_all, bt_paired, bt_connected, bt_scan, bt_action, bt_power };
+const JobKind = enum { wifi_list, wifi_rescan, wifi_saved, wifi_connect, wifi_down, wifi_radio, bt_show, bt_all, bt_paired, bt_connected, bt_scan, bt_action, bt_power };
 
 const Job = struct {
     kind: JobKind,
@@ -73,6 +73,9 @@ pub const State = struct {
     queue: [8]Job = undefined,
     n_queue: usize = 0,
     running: ?Job = null,
+    /// Bluetooth のスキャン(10 秒)は列の外で動かす(列に並べると、その間の接続などの操作が待たされる)
+    scan_fd: c_int = -1,
+    scan_pid: c_int = 0,
     fd: c_int = -1,
     pid: c_int = 0,
     out: [16384]u8 = undefined,
@@ -201,6 +204,10 @@ fn isSaved(st: *const State, ssid: []const u8) bool {
 fn finish(st: *State, j: Job, out: []const u8) void {
     const trimmed = std.mem.trim(u8, out, " \n");
     switch (j.kind) {
+        // スキャンを頼めなかった(直前にスキャンした等): 待っても NetworkManager のシグナルは来ないので、覚えている一覧を出す
+        .wifi_rescan => if (trimmed.len > 0) {
+            push(st, makeJob(.wifi_list, &.{ "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "no" }, ""));
+        },
         .wifi_list => {
             st.busy_scan = false;
             st.n_nets = 0;
@@ -337,6 +344,31 @@ fn finish(st: *State, j: Job, out: []const u8) void {
     }
 }
 
+fn startBtScan(st: *State) void {
+    const f = st.frame orelse return;
+    if (st.scan_fd >= 0) return;
+    st.scan_fd = sys.spawnReaderAll(&.{ "bluetoothctl", "--timeout", "10", "scan", "on" }, &st.scan_pid) orelse {
+        st.busy_scan = false;
+        return;
+    };
+    f.app.loop.add(st.scan_fd, c.EPOLLIN | c.EPOLLHUP, st, onScanRead) catch {};
+}
+
+/// 見つかった機器は BlueZ のシグナルで syswatch が一覧を読み直す。ここでは終わり(EOF)だけを見る
+fn onScanRead(ctx: *anyopaque, fd: c_int, _: u32) void {
+    const st: *State = @ptrCast(@alignCast(ctx));
+    var drain: [1024]u8 = undefined;
+    if (c.read(fd, &drain, drain.len) > 0) return;
+    const f = st.frame orelse return;
+    f.app.loop.remove(fd);
+    _ = c.close(fd);
+    st.scan_fd = -1;
+    st.busy_scan = false;
+    st.status_len = 0;
+    refreshBt(st);
+    f.schedule();
+}
+
 fn firstLine(s: []const u8) []const u8 {
     const nl = std.mem.indexOfScalar(u8, s, '\n') orelse return s;
     return s[0..nl];
@@ -351,9 +383,18 @@ pub fn refreshWifi(st: *State, rescan: bool) void {
         setStatus(st, "Wi-Fi の設定には NetworkManager(nmcli)が必要です", false);
         return;
     }
+    // 一覧は NetworkManager が覚えている結果をすぐ出し(十数 ms)、スキャンは待たずに頼むだけにする。
+    // スキャンが終わると NetworkManager のシグナルで syswatch がもう一度ここを呼ぶ(--rescan auto/yes は
+    // 終わるまで最大 5 秒ほど返らず、その間ほかの操作も列で待たされていた)
+    const watched = if (st.frame) |f| f.app.syswatch.conn != null else false;
     push(st, makeJob(.wifi_radio, &.{ "nmcli", "radio", "wifi" }, ""));
     push(st, makeJob(.wifi_saved, &.{ "nmcli", "-t", "-f", "NAME,TYPE", "connection", "show" }, ""));
-    push(st, makeJob(.wifi_list, &.{ "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", if (rescan) "yes" else "auto" }, ""));
+    if (rescan and watched) {
+        push(st, makeJob(.wifi_rescan, &.{ "nmcli", "dev", "wifi", "rescan" }, ""));
+        st.busy_scan = true;
+        return;
+    }
+    push(st, makeJob(.wifi_list, &.{ "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", if (!watched) (if (rescan) "yes" else "auto") else "no" }, ""));
     if (rescan) st.busy_scan = true;
 }
 
@@ -362,6 +403,11 @@ pub fn refreshBt(st: *State) void {
         setStatus(st, "Bluetooth の設定には BlueZ(bluetoothctl)が必要です", false);
         return;
     }
+    if (st.frame) |f| if (!f.app.syswatch.bluezRunning()) {
+        // bluetoothd が動いていないと bluetoothctl はデーモンを待って返らず、列が詰まる
+        setStatus(st, "Bluetooth のサービス(bluetoothd)が動いていません", true);
+        return;
+    };
     push(st, makeJob(.bt_show, &.{ "bluetoothctl", "show" }, ""));
     push(st, makeJob(.bt_all, &.{ "bluetoothctl", "devices" }, ""));
     push(st, makeJob(.bt_paired, &.{ "bluetoothctl", "devices", "Paired" }, ""));
@@ -373,7 +419,11 @@ pub fn onOpen(f: *Frame) void {
     st.frame = f;
     st.status_len = 0;
     st.editing = null;
-    if (st.tab == 0) refreshWifi(st, false) else refreshBt(st);
+    if (st.tab == 0) {
+        refreshWifi(st, false);
+        // 古い一覧を出したまま、裏で新しくスキャンしてもらう(終われば syswatch が一覧を読み直す)
+        if (f.app.syswatch.conn != null) push(st, makeJob(.wifi_rescan, &.{ "nmcli", "dev", "wifi", "rescan" }, ""));
+    } else refreshBt(st);
 }
 
 fn connectWifi(st: *State, i: usize, with_pw: bool) void {
@@ -581,7 +631,7 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
         if (st.tab == 0) refreshWifi(st, true) else if (!st.busy_scan) {
             st.busy_scan = true;
             setStatus(st, "周囲のデバイスを探しています(10 秒)…", false);
-            push(st, makeJob(.bt_scan, &.{ "bluetoothctl", "--timeout", "10", "scan", "on" }, ""));
+            startBtScan(st);
         }
         return true;
     }

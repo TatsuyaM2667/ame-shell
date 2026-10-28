@@ -465,10 +465,11 @@ pub fn thumbnail(path: []const u8, buf: []u8) ?[:0]const u8 {
     var h = std.hash.Wyhash.init(0);
     h.update(path);
     if (std.fs.cwd().statFile(path)) |st| h.update(std.mem.asBytes(&st.mtime)) else |_| {}
+    var db: [512]u8 = undefined; // buf とは別(同じバッファから読んで書くと重なる)
     const dir = if (std.posix.getenv("XDG_CACHE_HOME")) |x|
-        std.fmt.bufPrint(buf, "{s}/ame-shell/thumbs", .{x}) catch return null
+        std.fmt.bufPrint(&db, "{s}/ame-shell/thumbs", .{x}) catch return null
     else
-        std.fmt.bufPrint(buf, "{s}/.cache/ame-shell/thumbs", .{home}) catch return null;
+        std.fmt.bufPrint(&db, "{s}/.cache/ame-shell/thumbs", .{home}) catch return null;
     std.fs.cwd().makePath(dir) catch {};
     const out = std.fmt.bufPrintZ(buf, "{s}/{x:0>16}.png", .{ dir, h.final() }) catch return null;
     if (std.fs.cwd().access(out, .{})) |_| return out else |_| {}

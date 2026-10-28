@@ -66,6 +66,16 @@ PREFIX_DIR=$(dirname "$SELF_DIR")
 SRC="${AME_SOURCE:-}"
 [ -n "$SRC" ] || SRC=$(head -n 1 "$PREFIX_DIR/share/ame-shell/source" 2>/dev/null || true)
 [ -n "$SRC" ] && [ -f "$SRC/build.zig" ] || SRC="$HOME/ame-shell"
+# ソースの中から直接実行された(sh ~/ame-shell/session/ame-update。ame-update をまだ入れていない古いインストール):
+# ログイン画面から使っている ame-session の場所に入れ直す
+if [ -f "$PREFIX_DIR/build.zig" ]; then
+    SRC=$PREFIX_DIR
+    inst=$(command -v ame-session 2>/dev/null || true)
+    case "$inst" in
+        */bin/ame-session) PREFIX_DIR=$(dirname "$(dirname "$inst")") ;;
+        *) PREFIX_DIR=/usr/local ;;
+    esac
+fi
 
 # ---------------------------------------------------------------------------
 if [ "$DO_PKG" = 1 ]; then
@@ -107,13 +117,19 @@ if [ "$DO_SELF" = 1 ]; then
     git -C "$SRC" fetch -q || info "git fetch に失敗しました(ネットワークを確認してください)"
     local_rev=$(git -C "$SRC" rev-parse HEAD)
     remote_rev=$(git -C "$SRC" rev-parse '@{u}' 2>/dev/null || echo "$local_rev")
+    # 入っている版(インストール時に記録したコミット。記録の無い古いインストールは空 = 古い版とみなす)
+    installed_rev=$(sed -n 2p "$PREFIX_DIR/share/ame-shell/source" 2>/dev/null || true)
+    stale=0
+    [ "$installed_rev" != "$remote_rev" ] && stale=1
     if [ "$local_rev" != "$remote_rev" ]; then
         info "新しい変更:"
         git -C "$SRC" log --oneline "HEAD..@{u}" 2>/dev/null | head -n 20 | sed 's/^/      /'
+    elif [ "$stale" = 1 ]; then
+        info "ソースは最新ですが、入っている ame-shell($PREFIX_DIR/bin)は古い版です$( [ "$CHECK" = 1 ] && echo "(ame-update で入れ直せます)" || echo "。ビルドして入れ直します")"
     else
         info "ame-shell は最新です($(git -C "$SRC" log -1 --format='%h %s' | cut -c1-70))"
     fi
-    if [ "$CHECK" = 0 ] && { [ "$local_rev" != "$remote_rev" ] || [ "$FORCE" = 1 ]; }; then
+    if [ "$CHECK" = 0 ] && { [ "$local_rev" != "$remote_rev" ] || [ "$stale" = 1 ] || [ "$FORCE" = 1 ]; }; then
         if [ -n "$(git -C "$SRC" status --porcelain --untracked-files=no)" ]; then
             info "ソースに手元の変更があるため git pull はしません(手元の変更を守るため)。今のソースでビルドします"
         elif [ "$local_rev" != "$remote_rev" ]; then

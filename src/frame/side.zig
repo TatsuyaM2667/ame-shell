@@ -141,10 +141,18 @@ fn drawUtil(f: *Frame, cv: *gfx.Canvas, w: f32) bool {
     const txt = theme.text(app);
     const sub = theme.subtext(app);
     const st = &app.sys;
-    var buf: [64]u8 = undefined;
-    const bat = if (st.battery.present) (std.fmt.bufPrint(&buf, "バッテリー {d}%{s}", .{ st.battery.percent, if (st.battery.charging) "(充電中)" else "" }) catch "") else "バッテリーなし";
-    _ = cv.text(16, 28, 13, txt, bat, .{ .bold = true });
-    _ = cv.text(w - 16, 28, 11.5, sub, "ユーティリティ", .{ .alignment = .right });
+    var buf: [160]u8 = undefined;
+    var tb: [48]u8 = undefined;
+    const bt = @import("../bar.zig").batteryTime(&tb, st.battery);
+    // 「バッテリー 46%」(太字)+ 状態と残り時間(細字)。放電中は状態の言葉を省いて時間だけ
+    const bat = if (st.battery.present) (std.fmt.bufPrint(&buf, "バッテリー {d}%", .{st.battery.percent}) catch "") else "バッテリーなし";
+    const bx = 16 + cv.text(16, 28, 13, txt, bat, .{ .bold = true }) + 10;
+    if (st.battery.present) {
+        var db: [96]u8 = undefined;
+        const state = if (st.battery.on_ac or st.battery.percent <= 10) @import("../bar.zig").batteryState(st.battery) else "";
+        const detail = std.fmt.bufPrint(&db, "{s}{s}{s}", .{ state, if (state.len > 0 and bt.len > 0) "・" else "", bt }) catch "";
+        _ = cv.text(bx, 28, 11.5, if (st.battery.charging) theme.accent(app) else sub, detail, .{ .max_w = w - 16 - bx });
+    } else _ = cv.text(w - 16, 28, 11.5, sub, "ユーティリティ", .{ .alignment = .right });
     for (utilButtons(f), 0..) |b, i| {
         const r = utilRect(i, w);
         const hv: f32 = if (f.sidev.hover == @as(i32, @intCast(i))) 1 else 0;

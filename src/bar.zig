@@ -322,8 +322,8 @@ pub const Bar = struct {
         // バッテリー
         if (st.battery.present) {
             const hi = self.addHit(.battery, 0, x - gap / 2, w_bat + gap);
-            const low = st.battery.percent <= 15 and !st.battery.charging;
-            const col = if (low) theme.danger(app) else if (st.battery.charging) theme.accent(app) else Color.mix(txt, acc, self.hov(hi));
+            const low = st.battery.percent <= 15 and !st.battery.on_ac;
+            const col = if (low) theme.danger(app) else if (st.battery.charging) theme.accent(app) else if (st.battery.held()) Color.mix(txt, acc, 0.5) else Color.mix(txt, acc, self.hov(hi));
             const iw2 = cv.measure(bat_icon, icon_font, false);
             _ = cv.text(x, base + 1, icon_font, col, bat_icon, .{ .glow = if (st.battery.charging) 3 else 0, .glow_color = theme.accent(app).alpha(0.5) });
             _ = cv.text(x + iw2 + 5, base, items_font, col, bat_txt, .{});
@@ -446,10 +446,36 @@ pub fn batteryIconPub(b: sys.Battery) []const u8 {
     return batteryIcon(b);
 }
 
+/// 残量(10% 刻み)× 状態(放電中・充電中・電源につながって充電は止まっている・残りわずか)でアイコンを選ぶ
 fn batteryIcon(b: sys.Battery) []const u8 {
-    if (b.charging) return "\u{F0084}";
+    const lv = @min((@as(usize, b.percent) + 5) / 10, 10); // 四捨五入(95% 以上は満タンの絵)
+    if (b.charging) {
+        const icons = [_][]const u8{ "\u{F089F}", "\u{F089C}", "\u{F0086}", "\u{F0087}", "\u{F0088}", "\u{F089D}", "\u{F0089}", "\u{F089E}", "\u{F008A}", "\u{F008B}", "\u{F0085}" };
+        return icons[lv];
+    }
+    // 満充電、または充電の上限・保護モードで止まっている: コンセントの絵
+    if (b.held()) return if (b.full or b.percent >= 99) "\u{F06A5}" else "\u{F1211}";
+    if (b.percent <= 5) return "\u{F10CD}";
+    if (b.percent <= 10) return "\u{F0083}";
     const icons = [_][]const u8{ "\u{F008E}", "\u{F007A}", "\u{F007B}", "\u{F007C}", "\u{F007D}", "\u{F007E}", "\u{F007F}", "\u{F0080}", "\u{F0081}", "\u{F0082}", "\u{F0079}" };
-    return icons[@min(@as(usize, b.percent) / 10, 10)];
+    return icons[lv];
+}
+
+/// 「充電中」「満充電」などの状態の言葉
+pub fn batteryState(b: sys.Battery) []const u8 {
+    if (!b.present) return "バッテリーなし";
+    if (b.charging) return "充電中";
+    if (b.held()) return if (b.full or b.percent >= 99) "満充電" else "電源に接続(充電は停止中)";
+    if (b.percent <= 10) return "残りわずか";
+    return "バッテリーで動作中";
+}
+
+/// 「残り 2 時間 5 分」/「満充電まで 45 分」(分からなければ空)
+pub fn batteryTime(buf: []u8, b: sys.Battery) []const u8 {
+    const m = b.minutes orelse return "";
+    const head: []const u8 = if (b.charging) "満充電まで" else "残り";
+    if (m >= 60) return std.fmt.bufPrint(buf, "{s} {d} 時間 {d} 分", .{ head, m / 60, m % 60 }) catch "";
+    return std.fmt.bufPrint(buf, "{s} {d} 分", .{ head, m }) catch "";
 }
 
 pub fn localTime() c.struct_tm {

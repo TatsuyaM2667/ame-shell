@@ -23,6 +23,7 @@ const Lock = @import("lock.zig").Lock;
 const Media = @import("media.zig").Media;
 const WallPick = @import("wallpick.zig").WallPick;
 const Avatar = @import("avatar.zig").Avatar;
+const SysWatch = @import("syswatch.zig").SysWatch;
 const Toplevels = @import("toplevels.zig").Toplevels;
 const Audio = @import("audio.zig").Audio;
 const ipc = @import("ipc.zig");
@@ -183,6 +184,7 @@ pub const App = struct {
     notifs: *Notifs = undefined,
     lock: *Lock = undefined,
     media: *Media = undefined,
+    syswatch: *SysWatch = undefined,
     wallpick: *WallPick = undefined,
     /// ダッシュボードのユーザーの写真
     avatar: *Avatar = undefined,
@@ -263,9 +265,14 @@ pub const App = struct {
         app.media = try Media.create(app);
         app.wallpick = try WallPick.create(app);
         app.avatar = try Avatar.create(app);
+        app.syswatch = try SysWatch.create(app);
         app.audio = try Audio.create(app);
-        app.ipc_server = try ipc.Server.init(app);
-        app.ipc_server.register();
+        // 操作の窓口(ame-ctl)が作れなくてもシェル自体は動かす
+        app.ipc_server = ipc.Server.init(app) catch |e| blk: {
+            log.warn("ame-ctl のソケットを作れません({s})。ame-ctl は使えません", .{@errorName(e)});
+            break :blk .{ .app = app };
+        };
+        if (app.ipc_server.fd >= 0) app.ipc_server.register();
         app.supertap = .{ .loop = &app.loop, .ctx = app, .on_tap = onSuperTap, .enabled = app.cfg.super_launcher };
         app.supertap.start();
 

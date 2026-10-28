@@ -59,8 +59,24 @@ pub const Media = struct {
             }
         }.f;
         try app.loop.add(self.restart_timer.fd, c.EPOLLIN, self, onRestart);
+        // 再生アプリ(music-tui)が歌詞ファイルを書くのは、歌詞を取得できた後(曲が変わった通知より遅い)。
+        // 曲の情報は変わったときしか通知されないので、ファイルそのものを見張って拾う
+        if (std.posix.getenv("XDG_RUNTIME_DIR")) |rd| {
+            var db: [512]u8 = undefined;
+            if (std.fmt.bufPrintZ(&db, "{s}/lyrics", .{rd})) |d| {
+                std.fs.cwd().makePath(d) catch {};
+                app.addWatch(d, self, onLyricsFile);
+            } else |_| {}
+        }
         self.start();
         return self;
+    }
+
+    fn onLyricsFile(ctx: *anyopaque, name: []const u8) void {
+        const self: *Media = @ptrCast(@alignCast(ctx));
+        if (self.status == .none or !std.mem.endsWith(u8, name, ".lrc")) return;
+        if (!std.mem.eql(u8, name[0 .. name.len - 4], self.player[0..self.player_len])) return;
+        self.lyrics.trySidecar(self.player[0..self.player_len]);
     }
 
     fn start(self: *Media) void {

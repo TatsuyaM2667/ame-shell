@@ -36,7 +36,7 @@ pub fn kenvGet(name: [*:0]const u8, buf: []u8) ?[]const u8 {
 
 // ---- 電源(acpi_battery(4)) ----
 
-pub const Battery = struct { present: bool, percent: u8, charging: bool, on_ac: bool };
+pub const Battery = struct { present: bool, percent: u8, charging: bool, on_ac: bool, minutes: ?u32 };
 
 pub fn battery() Battery {
     const life = int("hw.acpi.battery.life");
@@ -47,8 +47,10 @@ pub fn battery() Battery {
     return .{
         .present = present,
         .percent = if (present) @intCast(std.math.clamp(life.?, 0, 100)) else 0,
-        .charging = (state & 2) != 0 or (present and life.? >= 100 and (acline orelse 0) == 1),
+        .charging = (state & 2) != 0,
         .on_ac = if (acline) |a| a == 1 else !present,
+        // hw.acpi.battery.time: 放電中の残り(分)。充電中・不明は -1
+        .minutes = if (int("hw.acpi.battery.time")) |m| (if (m > 0 and m < 48 * 60) @as(u32, @intCast(m)) else null) else null,
     };
 }
 

@@ -200,6 +200,9 @@ install_file "$HERE/ame-term-shell" "$PREFIX/bin/ame-term-shell" 755
 # ame-update が git pull してビルドし直すための、ソースの場所の記録
 tmp=$(mktemp "${TMPDIR:-/tmp}/ame-src.XXXXXX") || exit 1
 echo "$ROOT" > "$tmp"
+# 2 行目: 入れたときのコミット(ame-update が「入っている版が古い」ことに気づけるように)。
+# root で他人のリポジトリを読むと git が拒むので safe.directory を付ける
+git -c safe.directory="$ROOT" -C "$ROOT" rev-parse HEAD >> "$tmp" 2>/dev/null || true
 install_file "$tmp" "$PREFIX/share/ame-shell/source" 644
 rm -f "$tmp"
 install_file "$HERE/ame-river-init" "$PREFIX/share/ame-shell/ame-river-init" 755

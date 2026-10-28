@@ -63,17 +63,33 @@ fn readInt(path: [*:0]const u8) ?i64 {
 
 // ---------------- 電源 ----------------
 
+/// dir(末尾に / 付き)の中の数値のファイル
+fn readAttr(dir: []const u8, file: []const u8) ?i64 {
+    var p: [320]u8 = undefined;
+    return readInt(std.fmt.bufPrintZ(&p, "{s}{s}", .{ dir, file }) catch return null);
+}
+
 pub const Battery = struct {
     present: bool = false,
     percent: u8 = 0,
+    /// 充電している(電源につながっていても、満充電・充電の上限・保護モードで止まっているときは false)
     charging: bool = false,
     on_ac: bool = true,
+    /// 満充電(status = Full)
+    full: bool = false,
+    /// 放電中は残りの時間、充電中は満充電までの時間(分)。分からなければ null
+    minutes: ?u32 = null,
+
+    /// 電源につながっているが充電していない(満充電・充電の上限・保護モード)
+    pub fn held(self: Battery) bool {
+        return self.present and self.on_ac and !self.charging;
+    }
 };
 
 pub fn battery() Battery {
     if (is_bsd) {
         const x = bsd.battery();
-        return .{ .present = x.present, .percent = x.percent, .charging = x.charging, .on_ac = x.on_ac };
+        return .{ .present = x.present, .percent = x.percent, .charging = x.charging, .on_ac = x.on_ac, .full = x.on_ac and !x.charging and x.percent >= 100, .minutes = if (x.on_ac) null else x.minutes };
     }
     var b = Battery{};
     const dir = c.opendir("/sys/class/power_supply") orelse return b;
@@ -93,8 +109,20 @@ pub fn battery() Battery {
             var sbuf: [32]u8 = undefined;
             const st_path = std.fmt.bufPrintZ(&p, "/sys/class/power_supply/{s}/status", .{name}) catch continue;
             const st = readFile(st_path, &sbuf) orelse "";
-            b.charging = std.mem.eql(u8, st, "Charging") or std.mem.eql(u8, st, "Full");
+            b.charging = std.mem.eql(u8, st, "Charging");
+            b.full = std.mem.eql(u8, st, "Full");
             b.present = true;
+            // 残り時間: energy(µWh / µW)か charge(µAh / µA)のどちらかがある
+            const bat_dir = std.fmt.bufPrint(&p, "/sys/class/power_supply/{s}/", .{name}) catch continue;
+            const now = readAttr(bat_dir, "energy_now") orelse readAttr(bat_dir, "charge_now");
+            const full = readAttr(bat_dir, "energy_full") orelse readAttr(bat_dir, "charge_full");
+            const rate = readAttr(bat_dir, "power_now") orelse readAttr(bat_dir, "current_now");
+            if (now != null and rate != null and @abs(rate.?) > 0) {
+                const r: f64 = @floatFromInt(@abs(rate.?));
+                const left: f64 = if (b.charging) @floatFromInt(@max((full orelse now.?) - now.?, 0)) else if (std.mem.eql(u8, st, "Discharging")) @floatFromInt(now.?) else -1;
+                const m = left / r * 60;
+                if (left >= 0 and m >= 1 and m < 48 * 60) b.minutes = @intFromFloat(m);
+            }
         } else if (std.mem.eql(u8, ty, "Mains")) {
             ac_seen = true;
             const on = std.fmt.bufPrintZ(&p, "/sys/class/power_supply/{s}/online", .{name}) catch continue;

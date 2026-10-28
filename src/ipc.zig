@@ -23,6 +23,11 @@ pub const Server = struct {
         if (fd < 0) return error.Socket;
         var addr = std.mem.zeroes(c.struct_sockaddr_un);
         addr.sun_family = c.AF_UNIX;
+        // sun_path(108 バイト)に入らない長さの XDG_RUNTIME_DIR では作れない(落ちずに ame-ctl を無効にする)
+        if (p.len >= addr.sun_path.len) {
+            _ = c.close(fd);
+            return error.PathTooLong;
+        }
         @memcpy(addr.sun_path[0..p.len], p);
         if (c.bind(fd, @ptrCast(&addr), @sizeOf(c.struct_sockaddr_un)) != 0) return error.Bind;
         _ = c.chmod(p.ptr, 0o600);

@@ -116,6 +116,9 @@ pub const Launcher = struct {
     hover_row: ?usize = null,
     icons: *IconWorker = undefined,
     gen: u32 = 0,
+    /// 読み込み済みのアイコン・サムネイルのテクスチャ。再走査(30 秒ごと)をまたいで使い回し、
+    /// 開くたびにアイコンが消えて読み直しになるのを防ぐ。キーは "i:アイコン名" / "t:パス"、tex = 0 は「見つからない」
+    tex_cache: std.StringHashMapUnmanaged(Cached) = .{},
 
     pub fn create(app: *App) !*Launcher {
         const self = try app.alloc.create(Launcher);
@@ -137,18 +140,10 @@ pub const Launcher = struct {
     // ---------------------------------------------------------------------
 
     fn scan(self: *Launcher) void {
-        for (self.entries.items) |e| {
-            if (e.icon_tex != 0) c.glDeleteTextures(1, &e.icon_tex);
-            if (e.icon_px) |p| std.c.free(p);
-        }
-        for (self.walls.items) |w| {
-            if (w.tex != 0) c.glDeleteTextures(1, &w.tex);
-            if (w.px) |p| std.c.free(p);
-        }
-        for (self.photos.items) |w| {
-            if (w.tex != 0) c.glDeleteTextures(1, &w.tex);
-            if (w.px) |p| std.c.free(p);
-        }
+        // テクスチャは tex_cache が持つので消さない(次の走査で使い回す)
+        for (self.entries.items) |e| if (e.icon_px) |p| std.c.free(p);
+        for (self.walls.items) |w| if (w.px) |p| std.c.free(p);
+        for (self.photos.items) |w| if (w.px) |p| std.c.free(p);
         self.photos.clearRetainingCapacity();
         self.entries.clearRetainingCapacity();
         self.walls.clearRetainingCapacity();
@@ -254,6 +249,7 @@ pub const Launcher = struct {
         const ph = &self.photos.items[i];
         if (ph.tex == 0 and ph.state == 2) if (ph.px) |px| {
             ph.tex = gfx.uploadImage(px, THUMB_W, THUMB_H);
+            self.cachePut("t:", ph.path, ph.tex);
             std.c.free(px);
             ph.px = null;
         };
@@ -775,6 +771,7 @@ pub const Launcher = struct {
         const wl = &self.walls.items[i];
         if (wl.tex == 0 and wl.state == 2) if (wl.px) |px| {
             wl.tex = gfx.uploadImage(px, THUMB_W, THUMB_H);
+            self.cachePut("t:", wl.path, wl.tex);
             std.c.free(px);
             wl.px = null;
         };
@@ -800,9 +797,43 @@ pub const Launcher = struct {
         return best;
     }
 
-    pub fn entryIcon(_: *Launcher, e: *Entry) c.GLuint {
-        if (e.icon_state == 2 and e.icon_tex == 0) e.icon_tex = gfx.uploadImage(e.icon_px.?, ICON_PX, ICON_PX);
+    pub fn entryIcon(self: *Launcher, e: *Entry) c.GLuint {
+        self.uploadIcon(e);
         return e.icon_tex;
+    }
+
+    fn uploadIcon(self: *Launcher, e: *Entry) void {
+        if (e.icon_state != 2 or e.icon_tex != 0) return;
+        const px = e.icon_px orelse return;
+        e.icon_tex = gfx.uploadImage(px, ICON_PX, ICON_PX);
+        std.c.free(px);
+        e.icon_px = null;
+        self.cachePut("i:", e.icon, e.icon_tex);
+    }
+
+    fn cachePut(self: *Launcher, comptime kind: []const u8, name: []const u8, tex: c.GLuint) void {
+        var kb: [700]u8 = undefined;
+        const k = std.fmt.bufPrint(&kb, kind ++ "{s}", .{name}) catch return;
+        const a = std.heap.c_allocator;
+        const gop = self.tex_cache.getOrPut(a, k) catch return;
+        if (gop.found_existing) {
+            if (gop.value_ptr.tex != 0 and gop.value_ptr.tex != tex) c.glDeleteTextures(1, &gop.value_ptr.tex);
+        } else {
+            gop.key_ptr.* = a.dupe(u8, k) catch {
+                self.tex_cache.removeByPtr(gop.key_ptr);
+                return;
+            };
+        }
+        gop.value_ptr.* = .{ .tex = tex, .gen = self.gen };
+    }
+
+    /// キャッシュにあればそのテクスチャ(0 = 見つからないと分かっている)。使ったしるしに今の世代を付ける
+    fn cacheGet(self: *Launcher, comptime kind: []const u8, name: []const u8) ?c.GLuint {
+        var kb: [700]u8 = undefined;
+        const k = std.fmt.bufPrint(&kb, kind ++ "{s}", .{name}) catch return null;
+        const v = self.tex_cache.getPtr(k) orelse return null;
+        v.gen = self.gen;
+        return v.tex;
     }
 
     /// 一覧が無い/古ければ読み直す(壁紙ピッカーから)
@@ -1017,9 +1048,8 @@ pub const Launcher = struct {
 
     /// アイコン: PNG が見つかればそれを、無ければ頭文字の丸アイコン(名前から色を決める)。
     fn drawIcon(self: *Launcher, cv: *gfx.Canvas, e: *Entry, x: f32, y: f32, size: f32) void {
-        _ = self;
         // 縮小済み 64x64 の転送は数十µs なので描画中に行ってよい
-        if (e.icon_state == 2 and e.icon_tex == 0) e.icon_tex = gfx.uploadImage(e.icon_px.?, ICON_PX, ICON_PX);
+        self.uploadIcon(e);
         if (e.icon_tex != 0) {
             cv.image(e.icon_tex, x, y, size, size, 9);
             return;
@@ -1100,6 +1130,7 @@ fn parseDesktop(a: std.mem.Allocator, id: []const u8, data: []const u8) ?Entry {
 const ICON_PX = 64;
 
 const IconJob = struct { idx: u32, name: []u8, thumb: bool, photo: bool = false };
+const Cached = struct { tex: c.GLuint, gen: u32 };
 const IconResult = struct { idx: u32, gen: u32, thumb: bool, photo: bool = false, px: ?[*]u8 };
 
 const IconWorker = struct {
@@ -1155,14 +1186,17 @@ fn onIconsReady(ctx: *anyopaque, fd: c_int, _: u32) void {
             const e = &self.entries.items[r.idx];
             e.icon_px = r.px;
             e.icon_state = if (r.px != null) 2 else 1;
+            if (r.px == null) self.cachePut("i:", e.icon, 0);
         } else if (r.gen == self.gen and r.photo and r.idx < self.photos.items.len) {
             const ph = &self.photos.items[r.idx];
             ph.px = r.px;
             ph.state = if (r.px != null) 2 else 1;
+            if (r.px == null) self.cachePut("t:", ph.path, 0);
         } else if (r.gen == self.gen and r.thumb and !r.photo and r.idx < self.walls.items.len) {
             const wl = &self.walls.items[r.idx];
             wl.px = r.px;
             wl.state = if (r.px != null) 2 else 1;
+            if (r.px == null) self.cachePut("t:", wl.path, 0);
         } else if (r.px) |p| std.c.free(p); // 古い走査の結果
     }
     w.results.clearRetainingCapacity();
@@ -1172,35 +1206,72 @@ fn onIconsReady(ctx: *anyopaque, fd: c_int, _: u32) void {
 fn startIconWorkerImpl(self: *Launcher) void {
     self.gen +%= 1;
     const a = std.heap.c_allocator;
-    var jobs = std.ArrayList(IconJob).init(a);
-    // 壁紙のサムネイルを先に(壁紙ピッカーは開いた瞬間に全部見えるため)
-    for (self.walls.items, 0..) |wl, i| {
-        if (wl.path.len == 0) {
-            self.walls.items[i].state = 1;
+    // アプリのアイコンと、壁紙・写真のサムネイルは別のスレッドで(動画のサムネイルは ffmpeg で数百 ms
+    // かかるので、同じ列に並べるとアイコンがその後ろで待たされる)。読み込み済みのものはキャッシュから
+    var icon_jobs = std.ArrayList(IconJob).init(a);
+    var thumb_jobs = std.ArrayList(IconJob).init(a);
+    for (self.entries.items, 0..) |*e, i| {
+        if (e.icon.len == 0) {
+            e.icon_state = 1;
             continue;
         }
-        const name = a.dupe(u8, wl.path) catch continue;
-        jobs.append(.{ .idx = @intCast(i), .name = name, .thumb = true }) catch a.free(name);
-    }
-    for (self.photos.items, 0..) |ph, i| {
-        const name = a.dupe(u8, ph.path) catch continue;
-        jobs.append(.{ .idx = @intCast(i), .name = name, .thumb = true, .photo = true }) catch a.free(name);
-    }
-    for (self.entries.items, 0..) |e, i| {
-        if (e.icon.len == 0) {
-            self.entries.items[i].icon_state = 1;
+        if (self.cacheGet("i:", e.icon)) |tex| {
+            e.icon_tex = tex;
+            e.icon_state = if (tex != 0) 2 else 1;
             continue;
         }
         const name = a.dupe(u8, e.icon) catch continue;
-        jobs.append(.{ .idx = @intCast(i), .name = name, .thumb = false }) catch a.free(name);
+        icon_jobs.append(.{ .idx = @intCast(i), .name = name, .thumb = false }) catch a.free(name);
     }
-    const owned = jobs.toOwnedSlice() catch return;
-    const t = std.Thread.spawn(.{}, IconWorker.run, .{ self.icons, owned, self.gen }) catch {
-        for (owned) |j| a.free(j.name);
-        a.free(owned);
-        return;
-    };
-    t.detach();
+    for (self.walls.items, 0..) |*wl, i| {
+        if (wl.path.len == 0) {
+            wl.state = 1;
+            continue;
+        }
+        if (self.cacheGet("t:", wl.path)) |tex| {
+            wl.tex = tex;
+            wl.state = if (tex != 0) 2 else 1;
+            continue;
+        }
+        const name = a.dupe(u8, wl.path) catch continue;
+        thumb_jobs.append(.{ .idx = @intCast(i), .name = name, .thumb = true }) catch a.free(name);
+    }
+    for (self.photos.items, 0..) |*ph, i| {
+        if (self.cacheGet("t:", ph.path)) |tex| {
+            ph.tex = tex;
+            ph.state = if (tex != 0) 2 else 1;
+            continue;
+        }
+        const name = a.dupe(u8, ph.path) catch continue;
+        thumb_jobs.append(.{ .idx = @intCast(i), .name = name, .thumb = true, .photo = true }) catch a.free(name);
+    }
+    // 今回の一覧で使われなくなったもの(消えたアプリ・壁紙)を捨てる
+    var it = self.tex_cache.iterator();
+    var stale: [64][]const u8 = undefined;
+    var n_stale: usize = 0;
+    while (it.next()) |kv| {
+        if (kv.value_ptr.gen == self.gen or n_stale == stale.len) continue;
+        if (kv.value_ptr.tex != 0) c.glDeleteTextures(1, &kv.value_ptr.tex);
+        stale[n_stale] = kv.key_ptr.*;
+        n_stale += 1;
+    }
+    for (stale[0..n_stale]) |k| {
+        _ = self.tex_cache.remove(k);
+        a.free(k);
+    }
+    for ([_]*std.ArrayList(IconJob){ &icon_jobs, &thumb_jobs }) |jobs| {
+        if (jobs.items.len == 0) {
+            jobs.deinit();
+            continue;
+        }
+        const owned = jobs.toOwnedSlice() catch continue;
+        const t = std.Thread.spawn(.{}, IconWorker.run, .{ self.icons, owned, self.gen }) catch {
+            for (owned) |j| a.free(j.name);
+            a.free(owned);
+            continue;
+        };
+        t.detach();
+    }
 }
 
 /// よく使う順の点数: 起動回数 × 最近使ったかどうかの重み(Firefox の frecency の考え方を簡略化)

@@ -159,15 +159,15 @@ pub const Dashboard = struct {
                 _ = sys.run(&.{ "brightnessctl", "-q", "set", a.ptr }, &out);
                 app.sys.brightness = sys.brightness();
             },
+            // 切り替えは待たずに(アダプタの電源を入れるのに 1 秒近くかかることがある)表示だけ先に変える。
+            // 実際の状態は syswatch が NetworkManager / BlueZ のシグナルで受け取って直す
             .toggle_wifi => {
-                var out: [8]u8 = undefined;
-                _ = sys.run(&.{ "nmcli", "radio", "wifi", if (self.store.wifi_on != 0) "off" else "on" }, &out);
-                self.queryRadios();
+                sys.spawnDetached(if (self.store.wifi_on != 0) "nmcli radio wifi off" else "nmcli radio wifi on");
+                self.store.wifi_on ^= 1;
             },
-            .toggle_bt => {
-                var out: [64]u8 = undefined;
-                _ = sys.run(&.{ "bluetoothctl", "power", if (self.store.bt_on != 0) "off" else "on" }, &out);
-                self.queryRadios();
+            .toggle_bt => if (app.syswatch.bluezRunning()) {
+                sys.spawnDetached(if (self.store.bt_on != 0) "bluetoothctl power off" else "bluetoothctl power on");
+                self.store.bt_on ^= 1;
             },
             .toggle_dnd => self.dnd = !self.dnd,
             .open_launcher => {
@@ -183,7 +183,7 @@ pub const Dashboard = struct {
     fn queryRadios(self: *Dashboard) void {
         var out: [256]u8 = undefined;
         if (sys.run(&.{ "nmcli", "radio", "wifi" }, &out)) |s| self.store.wifi_on = @intFromBool(std.mem.startsWith(u8, s, "enabled"));
-        if (sys.run(&.{ "bluetoothctl", "show" }, &out)) |s| self.store.bt_on = @intFromBool(std.mem.indexOf(u8, s, "Powered: yes") != null);
+        self.store.bt_on = @intFromBool(self.app.syswatch.btPowered());
     }
 
     fn fillStore(self: *Dashboard) void {
