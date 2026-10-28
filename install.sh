@@ -6,6 +6,7 @@
 #   sh install.sh --uninstall [--user]
 #
 # オプション: --no-deps(パッケージを入れない)/ --no-river(River が無くても作らない)/ --yes(確認しない)
+#           --debug(デバッグ情報つき・安全検査ありでビルド。クラッシュのバックトレースに関数名が出る)
 # FreeBSD では scripts/install-freebsd.sh(完全自動)に任せる。
 #
 # Linux で行うこと:
@@ -21,13 +22,16 @@ UNINSTALL=0
 NO_DEPS=0
 NO_RIVER=0
 ASSUME_YES=0
+BUILD_OPTS="-Doptimize=ReleaseFast"
+FWD=""
 for a in "$@"; do
     case "$a" in
         --user) USER_MODE=1 ;;
         --uninstall) UNINSTALL=1 ;;
         --no-deps) NO_DEPS=1 ;;
         --no-river) NO_RIVER=1 ;;
-        --yes|-y) ASSUME_YES=1 ;;
+        --yes|-y) ASSUME_YES=1; FWD="$FWD --yes" ;;
+        --debug) BUILD_OPTS="-Doptimize=ReleaseSafe -Dstrip=false"; FWD="$FWD --debug" ;;
         -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
         *) echo "unknown option: $a" >&2; exit 2 ;;
     esac
@@ -42,8 +46,8 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 if [ "$(uname -s)" = FreeBSD ]; then
     if [ "$UNINSTALL" = 1 ]; then exec sh "$REPO/session/install-session.sh" --uninstall; fi
     [ "$USER_MODE" = 1 ] && info "FreeBSD では全ユーザー用のインストールのみ対応です(--user は無視します)"
-    if [ "$ASSUME_YES" = 1 ]; then exec sh "$REPO/scripts/install-freebsd.sh" --yes; fi
-    exec sh "$REPO/scripts/install-freebsd.sh"
+    # shellcheck disable=SC2086  # FWD は空白区切りのオプション
+    exec sh "$REPO/scripts/install-freebsd.sh" $FWD
 fi
 [ "$(uname -s)" = Linux ] || die "Linux と FreeBSD に対応しています($(uname -s) は未対応)"
 
@@ -182,7 +186,7 @@ fi
 
 # ---------------------------------------------------------------------------
 say "4/4 ame-shell のビルドとインストール"
-(cd "$REPO" && PATH="$TOOLPATH" "$ZIG" build -Doptimize=ReleaseFast) || die "ame-shell のビルドに失敗しました"
+(cd "$REPO" && PATH="$TOOLPATH" "$ZIG" build $BUILD_OPTS) || die "ame-shell のビルドに失敗しました"
 if [ "$USER_MODE" = 1 ]; then
     sh "$REPO/session/install-session.sh" --user
 else

@@ -59,7 +59,17 @@ pub const Timer = struct {
 
     /// first_ms 後に1回、interval_ms>0 ならその後周期的に発火。first_ms=0 で停止。
     pub fn arm(self: Timer, first_ms: u64, interval_ms: u64) void {
-        // musl の struct timespec は translate-c で不透明型になるため、std の定義でシステムコールを直接呼ぶ
+        if (@import("builtin").os.tag != .linux) {
+            // FreeBSD 14 以降は timerfd が libc にある(std.os.linux の直接のシステムコールは番号が違い SIGSYS で落ちる)
+            var spec = std.mem.zeroes(c.struct_itimerspec);
+            spec.it_value.tv_sec = @intCast(first_ms / 1000);
+            spec.it_value.tv_nsec = @intCast((first_ms % 1000) * 1_000_000);
+            spec.it_interval.tv_sec = @intCast(interval_ms / 1000);
+            spec.it_interval.tv_nsec = @intCast((interval_ms % 1000) * 1_000_000);
+            if (c.timerfd_settime(self.fd, 0, &spec, null) != 0) std.log.warn("timerfd_settime failed (fd={d})", .{self.fd});
+            return;
+        }
+        // musl の struct timespec は translate-c で不透明型になるため、std の定義でシステムコールを直接呼ぶ(Linux 専用)
         const linux = std.os.linux;
         const spec = linux.itimerspec{
             .it_value = .{ .tv_sec = @intCast(first_ms / 1000), .tv_nsec = @intCast((first_ms % 1000) * 1_000_000) },

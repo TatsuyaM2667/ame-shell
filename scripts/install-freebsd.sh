@@ -18,6 +18,7 @@
 #   --no-gpu        GPU ドライバを触らない(VM や、自分で設定済みのとき)
 #   --no-ja         日本語入力(fcitx5 + mozc)を入れない(日本語フォントは入れる)
 #   --no-super-tap  Super 単独でランチャーを開く機能のための入力デバイスの権限を設定しない
+#   --debug         デバッグ情報つき・安全検査ありでビルドする(クラッシュ時のバックトレースに関数名が出る)
 #   --yes           確認せずに進める
 
 set -eu
@@ -27,6 +28,7 @@ JOBS=""
 DO_GPU=1
 DO_JA=1
 DO_TAP=1
+BUILD_OPTS="-Doptimize=ReleaseFast"
 ASSUME_YES=0
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -35,6 +37,7 @@ while [ $# -gt 0 ]; do
         --no-gpu) DO_GPU=0; shift ;;
         --no-ja) DO_JA=0; shift ;;
         --no-super-tap) DO_TAP=0; shift ;;
+        --debug) BUILD_OPTS="-Doptimize=ReleaseSafe -Dstrip=false"; shift ;;
         --yes|-y) ASSUME_YES=1; shift ;;
         -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -90,7 +93,7 @@ pkg -N >/dev/null 2>&1 || pkg bootstrap -y
 pkg update -q
 # 必須: これが無いとビルドできない / セッションが動かない
 REQUIRED="
- git cmake ninja gmake bash pkgconf llvm18 wayland wayland-protocols
+ git cmake ninja gmake bash pkgconf llvm18 zstd wayland wayland-protocols
  mesa-libs mesa-dri libglvnd libxkbcommon xkeyboard-config freetype2 harfbuzz fontconfig dbus
  libepoll-shim libinotify
  river sddm xorg-minimal seatd foot curl
@@ -221,11 +224,16 @@ else
     tar -xf "zig-$ZIG_VER.tar.xz"
     mkdir -p "zig-$ZIG_VER/build"
     cd "zig-$ZIG_VER/build"
+    # LLVM 18 は -lzstd を要求する。FreeBSD の base の zstd は private 名(libprivatezstd)なので、
+    # pkg の zstd(/usr/local/lib)を見つけられるよう、検索パスとリンクのパスに /usr/local を足す
     cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_PREFIX_PATH=/usr/local/llvm18 \
+        -DCMAKE_PREFIX_PATH="/usr/local/llvm18;/usr/local" \
+        -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/lib" \
         -DCMAKE_INSTALL_PREFIX="$TOOLS/zig-$ZIG_VER" \
-        -DZIG_STATIC_LLVM=OFF -DZIG_NO_LIB=OFF
-    ninja -j "$JOBS" install
+        -DZIG_STATIC_LLVM=OFF -DZIG_NO_LIB=OFF ||
+        die "Zig の cmake に失敗しました。root で再実行してください: sh $SELF"
+    ninja -j "$JOBS" install ||
+        die "Zig のビルドに失敗しました(ビルドディレクトリは root の持ち物なので、再実行は root で: sh $SELF)"
     [ "$("$ZIG" version)" = "$ZIG_VER" ] || die "Zig のビルドに失敗しました"
 fi
 ODIN_DIR="$TOOLS/odin-$ODIN_TAG"
@@ -245,7 +253,8 @@ chmod -R a+rX "$TOOLS"
 say "5/5 ame-shell のビルドとインストール"
 # ビルドは本人の権限で(リポジトリのキャッシュが root の持ち物にならないように)
 chown -R "$TARGET_USER" "$REPO"
-su -m "$TARGET_USER" -c "cd '$REPO' && env HOME='$UHOME' PATH='$TOOLS/zig-$ZIG_VER/bin:$ODIN_DIR:$PATH' zig build -Doptimize=ReleaseFast"
+su -m "$TARGET_USER" -c "cd '$REPO' && env HOME='$UHOME' PATH='$TOOLS/zig-$ZIG_VER/bin:$ODIN_DIR:$PATH' zig build $BUILD_OPTS" ||
+    die "ame-shell のビルドに失敗しました"
 sh "$REPO/session/install-session.sh" --prefix /usr/local
 
 # キーボード配列: コンソールの keymap(rc.conf の keymap="jp.kbd" など)と同じ配列を Wayland でも使う

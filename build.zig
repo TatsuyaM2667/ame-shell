@@ -28,6 +28,8 @@ const protocols = [_][]const u8{
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    // -Dstrip=false で、リリースでもデバッグ情報(関数名)を残す(クラッシュのバックトレース用)
+    const strip = b.option(bool, "strip", "Strip debug info (default: true except Debug)") orelse (optimize != .Debug);
 
     // --- Wayland プロトコル: XML から C のヘッダと glue コードを生成 ---
     // 生成物は全て1つのディレクトリに集め、そこを include パスにする。
@@ -77,7 +79,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-        .strip = optimize != .Debug, // リリースはデバッグ情報を落として小さく
+        .strip = strip, // リリースはデバッグ情報を落として小さく
     });
     exe.linkLibC();
     exe.addIncludePath(gen.getDirectory());
@@ -146,7 +148,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/ctl.zig"),
         .target = target,
         .optimize = optimize,
-        .strip = optimize != .Debug,
+        .strip = strip,
     });
     ctl.linkLibC();
     if (bsd and sr.len > 0) {

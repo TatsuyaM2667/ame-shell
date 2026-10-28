@@ -34,7 +34,30 @@ fi
 
 # ---- ame-shell(シェル + ウィンドウマネージャ)の監督 ----
 # River 0.5 は WM がいないと窓を表示できない。落ちたら再起動し(窓はそのまま残る)、
-# 30 秒以内に 3 回落ちたらセッションを終了して SDDM に戻す(操作不能な画面に閉じ込めないため)。
+# 30 秒以内に 3 回落ちたら River ごと終了して SDDM に戻す(操作できない黒い画面に閉じ込めないため)。
+# ログは TTY でも読めるよう ASCII を併記する。
+
+# River(このスクリプトの祖先プロセス)を終了させて、セッションを終える
+stop_river() {
+    pid=$$
+    i=0
+    while [ "$i" -lt 6 ]; do
+        pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+        [ -n "$pid" ] && [ "$pid" -gt 1 ] || break
+        comm=$(ps -o comm= -p "$pid" 2>/dev/null)
+        case "$comm" in
+            river|*/river)
+                log "stopping River (pid $pid) to return to the login screen / River を終了して SDDM に戻ります"
+                kill -TERM "$pid"
+                return 0
+                ;;
+        esac
+        i=$((i + 1))
+    done
+    log "River process not found; exiting init only / River のプロセスが見つかりません"
+    return 1
+}
+
 crashes=""
 while :; do
     start=$(date +%s)
@@ -42,16 +65,27 @@ while :; do
     rc=$?
     now=$(date +%s)
     if [ "$rc" -eq 0 ]; then
-        log "ame-shell exited normally"
-        break
+        log "ame-shell exited normally / 正常に終了しました"
+        # WM がいなくなった River は操作できないので、セッションも終える
+        stop_river
+        exit 0
     fi
-    log "ame-shell crashed rc=$rc after $((now - start))s"
+    if [ "$rc" -gt 128 ]; then
+        # 128 + シグナル番号(FreeBSD の 140 = SIGSYS、Linux の 139 = SIGSEGV など)
+        sig=$((rc - 128))
+        signame=$(kill -l "$sig" 2>/dev/null || echo "?")
+        [ "$signame" = UNUSED ] && signame=SYS   # Linux の一部のシェルは SIGSYS(31)を古い名前で返す
+        log "ame-shell killed by signal SIG$signame ($sig), rc=$rc, after $((now - start))s / シグナル SIG$signame で落ちました"
+    else
+        log "ame-shell exited with error rc=$rc after $((now - start))s / 異常終了しました"
+    fi
     kept=""
     for t in $crashes; do [ $((now - t)) -lt 30 ] && kept="$kept $t"; done
     crashes="$kept $now"
     set -- $crashes
     if [ "$#" -ge 3 ]; then
-        log "30 秒以内に 3 回落ちたためセッションを終了します"
+        log "ame-shell crashed 3 times within 30s, giving up / 30 秒以内に 3 回落ちたためセッションを終了します"
+        stop_river
         exit 1
     fi
     sleep 1

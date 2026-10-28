@@ -106,3 +106,10 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - `scripts/install-freebsd.sh`: pkg・GPU ドライバ(pciconf で判別)・dbus/seatd/sddm・video グループ・入力デバイスの devfs 規則・Zig 0.13 と Odin のソースビルド(LLVM 18)・ビルドとインストールを全自動。
 - FreeBSD 対応のコード: platform/bsd.zig、statvfs の並び、EVIOCGBIT の ioctl 番号(FreeBSD は IOC_OUT = 1<<30)、ioctl の request の型、ロックは swaylock(pam_unix が root 必須のため)、nmcli / bluetoothctl / pactl が無いときはパネルに表示。
 - 検証: FreeBSD 14.5 の base.txz と pkg のパッケージ(wayland・mesa・libglvnd・xkbcommon・freetype・harfbuzz・fontconfig・dbus・libepoll-shim・libinotify と依存)で sysroot を作り、x86_64-freebsd 向けにビルド・リンクが通ることを確認(ELF FreeBSD 14.5、必要なライブラリは libepoll-shim / libinotify を含めて解決)。FreeBSD の実機での実行は未確認。
+
+## 2026-10-28 FreeBSD 15.1 の不具合報告への対応
+- SIGSYS で起動直後に落ちる: `Timer.arm` が `std.os.linux.timerfd_settime`(生のシステムコール 286)を使っていた。Linux 以外は libc の timerfd_settime に。FreeBSD 向けバイナリに `syscall` 命令と `os.linux.*` が 0 であることを逆アセンブルで確認。
+- 診断: `-Dstrip=false`(install.sh / install-freebsd.sh の `--debug` = ReleaseSafe + 関数名つき)、致命的シグナルを ASCII でログに出すハンドラ、起動の最初に ASCII の 1 行。
+- ame-river5-init: シグナルで落ちたらシグナル名をログに、3 回落ちたら(正常終了でも)River を終了してログイン画面に戻る(黒画面に閉じ込めない)。入れ子の River 0.5 で確認。
+- Zig 0.13 のソースビルド: zstd を必須パッケージに、cmake に /usr/local の検索パスとリンクのパス。失敗時は root で再実行するよう案内。
+- 確認手順: docs/freebsd-test.md。
