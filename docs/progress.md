@@ -152,3 +152,4 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 
 ## 2026-10-28(追記 6)ドキュメントサイト
 - site/: 本文(site/src/content/*.md、Markdown の部分集合 + ::video / ::img / ::demo / ::stats / ::cards)を Zig の wasm(site/src/main.zig、約 76KB)がブラウザで HTML に。デモ(ばね vs ベジェ・あいまい検索・主色抽出)は anim/anim.odin を freestanding_wasm32 にしたもの(約 2KB)を app.js から直接呼ぶ。zig build site → zig-out/site、site/deploy.sh で Cloudflare Pages(npx wrangler)。動画は入れ子の River 0.5(D-Bus とホームを分け、壁紙は ffmpeg で生成)で wf-recorder 録画。Chromium のヘッドレスで表示を確認(wrangler pages dev の workerd は musl で動かない)。
+- サイトに「技術解説」の章(19 ページ)を追加: 全体像・言語・ビルド・ループ・Wayland・GPU・ガラスと配色・文字・ばね・WM・枠・ランチャー・メディア・通知とロック・WebAssembly・OS 対応・設定・セッション・このサイト。各ページで実際のコードを引用し、何を・なぜ・結果・ほかの方法との違いを書く。書きながら実装と照合し、旧ページの誤り(配色をばねと書いていた、アクセントを Odin の主色と書いていた、ウィジェットの例のコードが架空だった等)を修正。配色のデモを theme.zig と同じ計算(主色は Odin、アクセントは vividHue → accentHue を JS に移植)に。render_toc の defer が return の後に動いて閉じタグが落ちる不具合、### の {#id} を修正。

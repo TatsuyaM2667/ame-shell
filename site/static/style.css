@@ -207,3 +207,32 @@ main[data-page=compare] .table th:nth-child(2) { color: var(--accent); }
 /* 数字のカード: 値は折り返さない */
 .stats { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
 .stat b { white-space: nowrap; font-size: clamp(19px, 2.2vw, 24px); }
+
+/* 技術解説: 章の一覧(横)とナビの入口 */
+#nav a.tech { margin-left: 8px; border: 1px solid var(--rim-hi); }
+#nav a.tech.on { border-color: transparent; }
+.toc:not(:empty)::before { content: none; }
+.toc .here::before { content: "このページ"; display: block; color: var(--dim); font-size: 12px; letter-spacing: .1em; margin: 0 0 8px; }
+.toc .chap { margin-bottom: 22px; }
+.toc .chap p { color: var(--dim); font-size: 12px; letter-spacing: .1em; margin: 0 0 8px; }
+.toc .chap a { border-left-color: transparent; font-size: 13px; padding: 3px 10px; }
+.toc .chap a.cur { color: var(--text); font-weight: 700; border-left-color: var(--accent2); background: rgba(154,140,255,.08); }
+.layout { grid-template-columns: minmax(0, var(--max)) 250px; }
+main[data-page^=tech] h3 { color: #cfe0ff; }
+.file { font-family: "JetBrains Mono", monospace; font-size: 13px; color: var(--sub); }
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: minmax(0, var(--max)); }
+  .toc { display: block; position: static; max-height: none; padding-top: 0; order: -1; }
+  .toc .here { display: none; }
+  .toc .chap { display: flex; flex-wrap: wrap; gap: 4px; }
+  .toc .chap p { flex-basis: 100%; }
+  .toc .chap a { border: 1px solid var(--rim); border-radius: 999px; }
+  main:not([data-page^=tech]) + .toc { display: none; }
+}
+.cl-preview { display: grid; gap: 10px; }
+.cl-sw { display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--sub); line-height: 1.6; }
+.cl-sw i { flex: none; width: 40px; height: 40px; border-radius: 12px; box-shadow: 0 0 18px currentColor; border: 1px solid rgba(255,255,255,.2); }
+.cl-sw b { color: var(--text); }
+.cl-sw small { color: var(--dim); margin-left: 6px; }
+.demo button.cl-item { border-radius: 12px; padding: 0; background: #0a1024; font-weight: 400; }
+.demo button.cl-item:hover { border-color: var(--rim-hi); background: #0d1530; }

@@ -17,18 +17,36 @@
 
 const std = @import("std");
 
-const Page = struct { slug: []const u8, title: []const u8, src: []const u8 };
+const Page = struct { slug: []const u8, title: []const u8, src: []const u8, tech: bool = false };
 
 const pages = [_]Page{
     .{ .slug = "", .title = "ホーム", .src = @embedFile("content/home.md") },
     .{ .slug = "animation", .title = "アニメーション", .src = @embedFile("content/animation.md") },
     .{ .slug = "shell", .title = "シェルの機能", .src = @embedFile("content/shell.md") },
-    .{ .slug = "rendering", .title = "描画とガラス", .src = @embedFile("content/rendering.md") },
     .{ .slug = "performance", .title = "性能", .src = @embedFile("content/performance.md") },
     .{ .slug = "compare", .title = "ほかの WM と比較", .src = @embedFile("content/compare.md") },
     .{ .slug = "install", .title = "インストール", .src = @embedFile("content/install.md") },
     .{ .slug = "reference", .title = "リファレンス", .src = @embedFile("content/reference.md") },
-    .{ .slug = "architecture", .title = "設計", .src = @embedFile("content/architecture.md") },
+    // ---- 技術解説(コードごとに: 何を・なぜ・結果・ほかの方法との違い)----
+    .{ .tech = true, .slug = "tech", .title = "技術解説: 全体像", .src = @embedFile("content/tech/index.md") },
+    .{ .tech = true, .slug = "tech-lang", .title = "言語とツールチェイン", .src = @embedFile("content/tech/lang.md") },
+    .{ .tech = true, .slug = "tech-build", .title = "ビルド(build.zig)", .src = @embedFile("content/tech/build.md") },
+    .{ .tech = true, .slug = "tech-loop", .title = "起動とイベントループ", .src = @embedFile("content/tech/loop.md") },
+    .{ .tech = true, .slug = "tech-wayland", .title = "Wayland とサーフェス", .src = @embedFile("content/tech/wayland.md") },
+    .{ .tech = true, .slug = "tech-gpu", .title = "GPU レンダラ", .src = @embedFile("content/tech/gpu.md") },
+    .{ .tech = true, .slug = "tech-glass", .title = "ガラス・壁紙・配色", .src = @embedFile("content/tech/glass.md") },
+    .{ .tech = true, .slug = "tech-text", .title = "文字の描画", .src = @embedFile("content/tech/text.md") },
+    .{ .tech = true, .slug = "tech-anim", .title = "ばねとアニメーションの中核", .src = @embedFile("content/tech/anim.md") },
+    .{ .tech = true, .slug = "tech-wm", .title = "ウィンドウマネージャ", .src = @embedFile("content/tech/wm.md") },
+    .{ .tech = true, .slug = "tech-frame", .title = "枠とドロワー", .src = @embedFile("content/tech/frame.md") },
+    .{ .tech = true, .slug = "tech-launcher", .title = "ランチャーとアイコン", .src = @embedFile("content/tech/launcher.md") },
+    .{ .tech = true, .slug = "tech-media", .title = "メディア・歌詞・音・動画", .src = @embedFile("content/tech/media.md") },
+    .{ .tech = true, .slug = "tech-notify-lock", .title = "通知とロック画面", .src = @embedFile("content/tech/notify-lock.md") },
+    .{ .tech = true, .slug = "tech-wasm", .title = "WebAssembly ウィジェット", .src = @embedFile("content/tech/wasm.md") },
+    .{ .tech = true, .slug = "tech-platform", .title = "OS 対応(Linux と FreeBSD)", .src = @embedFile("content/tech/platform.md") },
+    .{ .tech = true, .slug = "tech-config", .title = "設定と ame-ctl", .src = @embedFile("content/tech/config.md") },
+    .{ .tech = true, .slug = "tech-session", .title = "セッションとインストーラ", .src = @embedFile("content/tech/session.md") },
+    .{ .tech = true, .slug = "tech-site", .title = "このサイトの作り", .src = @embedFile("content/tech/site.md") },
 };
 
 // ---- JS とのやりとり用のバッファ ----
@@ -65,6 +83,7 @@ export fn page_title(i: u32) u32 {
 export fn render_nav(cur: u32) u32 {
     reset();
     for (pages, 0..) |p, i| {
+        if (p.tech) continue;
         raw("<a href=\"#/");
         raw(p.slug);
         raw("\"");
@@ -73,6 +92,10 @@ export fn render_nav(cur: u32) u32 {
         esc(p.title);
         raw("</a>");
     }
+    // 技術解説は 1 つの入口にまとめ、章の一覧は横(render_toc)に出す
+    raw("<a href=\"#/tech\" class=\"tech");
+    if (cur < pages.len and pages[cur].tech) raw(" on");
+    raw("\">技術解説</a>");
     return @intCast(out_len);
 }
 
@@ -109,6 +132,28 @@ export fn render_page(i: u32) u32 {
 export fn render_toc(i: u32) u32 {
     reset();
     if (i >= pages.len) return 0;
+    // 技術解説のページ: 章の一覧を先に
+    if (pages[i].tech) {
+        raw("<div class=\"chap\"><p>技術解説</p>");
+        var k: usize = 0;
+        for (pages, 0..) |p, j| {
+            if (!p.tech) continue;
+            raw("<a href=\"#/");
+            raw(p.slug);
+            raw("\"");
+            if (j == i) raw(" class=\"cur\"");
+            raw(">");
+            if (k > 0) {
+                var nb: [8]u8 = undefined;
+                raw(std.fmt.bufPrint(&nb, "{d}. ", .{k}) catch "");
+            }
+            esc(p.title);
+            raw("</a>");
+            k += 1;
+        }
+        raw("</div>");
+    }
+    raw("<div class=\"here\">");
     var it = std.mem.splitScalar(u8, pages[i].src, '\n');
     var n: u32 = 0;
     var in_code = false;
@@ -123,6 +168,7 @@ export fn render_toc(i: u32) u32 {
         inlineText(h.text);
         raw("</a>");
     }
+    raw("</div>");
     return @intCast(out_len);
 }
 
@@ -388,8 +434,16 @@ fn renderDoc(src: []const u8) void {
                 const tag = if (lvl <= 1) "h1" else "h3";
                 raw("<");
                 raw(tag);
+                // 「見出し {#id}」なら id を付ける(番号の自動の id は ## だけ)
+                var text = body;
+                if (std.mem.endsWith(u8, body, "}")) if (std.mem.lastIndexOf(u8, body, " {#")) |k| {
+                    raw(" id=\"");
+                    esc(body[k + 3 .. body.len - 1]);
+                    raw("\"");
+                    text = body[0..k];
+                };
                 raw(">");
-                inlineText(body);
+                inlineText(text);
                 raw("</");
                 raw(tag);
                 raw(">");
