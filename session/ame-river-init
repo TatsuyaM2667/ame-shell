@@ -46,6 +46,11 @@ for i in 1 2 3 4 5 6 7 8 9; do
     riverctl map normal Super+Control "$i" toggle-focused-tags $tags
 done
 
+# スクリーンショット(範囲 / 全画面 / 全画面をコピーだけ)。足りないコマンドは ame-shell が通知で知らせる
+riverctl map normal None Print spawn "ame-ctl screenshot region"
+riverctl map normal Shift Print spawn "ame-ctl screenshot full"
+riverctl map normal Super Print spawn "ame-ctl screenshot clip"
+
 # メディアキー(OSD 付き)。ロック中でも効くよう locked モードにも割り当てる
 for mode in normal locked; do
     riverctl map $mode None XF86AudioRaiseVolume spawn "ame-ctl volume up"

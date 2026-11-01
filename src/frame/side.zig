@@ -194,7 +194,8 @@ fn utilPress(f: *Frame, i: usize) void {
         .record => toggleRecord(f),
         .screenshot => {
             f.closeAll();
-            sys.spawnDetached("sleep 0.4; mkdir -p ~/Pictures/Screenshots && grim -g \"$(slurp)\" ~/Pictures/Screenshots/shot_$(date +%Y%m%d_%H%M%S).png");
+            // パネルが閉じ終わってから範囲を選ぶ(保存してコピー。足りないコマンドは通知で知らせる)
+            @import("../shot.zig").take(app, .region, 400);
         },
         .saver => data.setPowerProfile(.saver),
         .balanced => data.setPowerProfile(.balanced),

@@ -18,9 +18,6 @@ const ALL_TAGS: u32 = (1 << 9) - 1;
 
 pub const Bind = struct { keysym: u32, mods: u32, action: Action };
 
-const shot_region = "FILE=$HOME/Pictures/Screenshots/shot_$(date +%Y%m%d_%H%M%S).png; mkdir -p $HOME/Pictures/Screenshots; grim -g \"$(slurp)\" $FILE && wl-copy < $FILE";
-const shot_full = "FILE=$HOME/Pictures/Screenshots/shot_$(date +%Y%m%d_%H%M%S).png; mkdir -p $HOME/Pictures/Screenshots; grim $FILE && wl-copy < $FILE";
-
 const fixed = [_]Bind{
     // アプリ
     .{ .keysym = c.XKB_KEY_Return, .mods = SUPER, .action = .{ .spawn = "foot" } },
@@ -66,9 +63,9 @@ const fixed = [_]Bind{
     .{ .keysym = c.XKB_KEY_p, .mods = SUPER, .action = .{ .toggle_tags = SCRATCH } },
     .{ .keysym = c.XKB_KEY_p, .mods = SUPER | SHIFT, .action = .{ .move_tags = SCRATCH } },
     // スクリーンショット
-    .{ .keysym = c.XKB_KEY_Print, .mods = NONE, .action = .{ .spawn = shot_region } },
-    .{ .keysym = c.XKB_KEY_Print, .mods = SHIFT, .action = .{ .spawn = shot_full } },
-    .{ .keysym = c.XKB_KEY_Print, .mods = SUPER, .action = .{ .spawn = "grim - | wl-copy" } },
+    .{ .keysym = c.XKB_KEY_Print, .mods = NONE, .action = .{ .ame = "screenshot region" } },
+    .{ .keysym = c.XKB_KEY_Print, .mods = SHIFT, .action = .{ .ame = "screenshot full" } },
+    .{ .keysym = c.XKB_KEY_Print, .mods = SUPER, .action = .{ .ame = "screenshot clip" } },
     // メディアキー(OSD 付き)
     .{ .keysym = c.XKB_KEY_XF86AudioRaiseVolume, .mods = NONE, .action = .{ .ame = "volume up" } },
     .{ .keysym = c.XKB_KEY_XF86AudioLowerVolume, .mods = NONE, .action = .{ .ame = "volume down" } },

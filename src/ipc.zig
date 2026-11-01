@@ -85,6 +85,7 @@ const help =
     \\  wallpaper-picker        (全画面の壁紙ピッカー)
     \\  workspace <1-9>        (ワークスペース切替)
     \\  window close|fullscreen|float|focus-next|focus-prev|swap-next|swap-prev
+    \\  screenshot region|full|clip   (範囲 / 全体を ~/Pictures/Screenshots に保存してコピー / 全体をコピーだけ)
     \\  lock
     \\  reload                 (設定の再読込)
     \\  widgets reload
@@ -205,6 +206,9 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
         app.notifs.post("ame-ctl", if (rest.len > 0) rest else "テスト通知", "これは ame-ctl からのテスト通知です。日本語も表示できます 🌧", 0);
     } else if (eq(u8, cmd, "notifications")) {
         if (eq(u8, arg, "clear")) app.notifs.clearAll() else app.notifs.toggleCenter();
+    } else if (eq(u8, cmd, "screenshot")) {
+        const k = @import("shot.zig").Kind.parse(if (arg.len > 0) arg else "region") orelse return "error: screenshot region|full|clip";
+        @import("shot.zig").take(app, k, 0);
     } else if (eq(u8, cmd, "lock")) {
         return app.lock.lock();
     } else if (eq(u8, cmd, "reload")) {
