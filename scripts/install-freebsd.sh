@@ -101,7 +101,7 @@ REQUIRED="
 "
 # あれば使う: 無ければ飛ばす(その機能だけ使えない)。"a|b" は「a が無ければ b」
 OPTIONAL="
- wf-recorder mpv ffmpeg fastfetch wlr-randr thunar tumbler xdg-utils
+ wf-recorder mpv ffmpeg fastfetch wlr-randr thunar tumbler xdg-utils upower polkit greetd
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  noto-sans-jp nerd-fonts-symbols|nerd-fonts jetbrains-mono
 "

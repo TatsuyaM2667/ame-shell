@@ -40,7 +40,7 @@ RIVER="river xorg-xwayland"
 # 動かすのに必要なもの・あると使うもの
 # (pipewire-audio: Bluetooth のイヤホン・スピーカー(bluez5 のプラグイン)/ libpulse: pactl /
 #  ttf-nerd-fonts-symbols: バーのアイコン / hicolor・adwaita: アプリのアイコン)
-RUN="greetd foot polkit playerctl cava pipewire pipewire-audio pipewire-pulse wireplumber libpulse mpv ffmpeg grim slurp wl-clipboard swaylock
+RUN="greetd foot polkit upower power-profiles-daemon playerctl cava pipewire pipewire-audio pipewire-pulse wireplumber libpulse mpv ffmpeg grim slurp wl-clipboard swaylock
  brightnessctl networkmanager bluez bluez-utils util-linux thunar tumbler gvfs xdg-utils
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  noto-fonts-cjk ttf-jetbrains-mono-nerd ttf-nerd-fonts-symbols hicolor-icon-theme adwaita-icon-theme
