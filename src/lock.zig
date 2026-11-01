@@ -96,6 +96,9 @@ pub const Lock = struct {
     /// 歌詞: 出ている割合と、流れる位置(行の番号)
     lyr_s: Spring = Spring.init(0, 0.45, 0.9),
     lyr_pos: Spring = Spring.init(0, 0.38, 0.82),
+    /// ロック画面の歌詞(ダッシュボードと同じ見せ方): 今の行のポップと、歌い終えた行の押し上げ
+    lk_pop: Spring = Spring.init(1, 0.38, 0.55),
+    lk_scroll: Spring = Spring.init(0, 0.45, 0.9),
     lyr_idx: i32 = -1,
     hits: lockui.Hits = .{},
     cava: framedata.Cava,
