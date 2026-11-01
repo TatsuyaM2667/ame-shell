@@ -303,7 +303,11 @@ fn finish(st: *State, j: Job, out: []const u8) void {
                     line;
                 setStatus(st, std.fmt.bufPrint(&msg, "失敗: {s}", .{pretty}) catch "失敗", true);
             } else {
-                setStatus(st, j.ok_msg[0..j.ok_len], false);
+                // つながったが音の出力先にできなかった(pactl が無い・PipeWire に現れない)ときは、その理由を出す
+                if (std.mem.indexOf(u8, out, "audio: pactl") != null or std.mem.indexOf(u8, out, "audio: PipeWire") != null) {
+                    const at = std.mem.indexOf(u8, out, "audio: ").?;
+                    setStatus(st, firstLine(out[at + 7 ..]), true);
+                } else setStatus(st, j.ok_msg[0..j.ok_len], false);
                 st.editing = null;
             }
             // 状態を取り直す
@@ -311,6 +315,9 @@ fn finish(st: *State, j: Job, out: []const u8) void {
         },
         .bt_show => {
             st.bt_on = std.mem.indexOf(u8, out, "Powered: yes") != null;
+            // rfkill でソフトブロックされている(電源ボタンで入れるとスクリプトが外す)
+            if (!st.bt_on and std.mem.indexOf(u8, out, "off-blocked") != null)
+                setStatus(st, "Bluetooth がブロックされています。電源を入れると解除します", false);
         },
         .bt_all => {
             st.n_devs = 0;
@@ -363,7 +370,10 @@ fn finish(st: *State, j: Job, out: []const u8) void {
 fn startBtScan(st: *State) void {
     const f = st.frame orelse return;
     if (st.scan_fd >= 0) return;
-    st.scan_fd = sys.spawnReaderAll(&.{ "bluetoothctl", "--timeout", "10", "scan", "on" }, &st.scan_pid) orelse {
+    var sb: [128]u8 = undefined;
+    var zb: [129]u8 = undefined;
+    const script = std.fmt.bufPrintZ(&zb, "{s}", .{btScript(f, &sb)}) catch return;
+    st.scan_fd = sys.spawnReaderAll(&.{ "sh", script.ptr, "--scan", "10" }, &st.scan_pid) orelse {
         st.busy_scan = false;
         return;
     };
@@ -384,6 +394,11 @@ fn onScanRead(ctx: *anyopaque, fd: c_int, _: u32) void {
     // Bluetooth のスキャンが終わった / FreeBSD は待ち時間が過ぎた: 一覧を読み直す
     if (st.tab == 0) refreshWifi(st, false) else refreshBt(st);
     f.schedule();
+}
+
+/// Bluetooth の操作をまとめたスクリプト(data/bt-connect.sh: rfkill の解除・電源・ペアリング・音の出力先)
+fn btScript(f: *Frame, buf: []u8) []const u8 {
+    return std.fmt.bufPrint(buf, "{s}/bt-connect.sh", .{f.app.shareDir()}) catch "bt-connect.sh";
 }
 
 fn firstLine(s: []const u8) []const u8 {
@@ -920,7 +935,9 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
             push(st, makeJob(.wifi_down, &.{ "nmcli", "radio", "wifi", if (st.wifi_on) "on" else "off" }, if (st.wifi_on) "Wi-Fi をオンにしました" else "Wi-Fi をオフにしました"));
         } else {
             st.bt_on = !st.bt_on;
-            push(st, makeJob(.bt_power, &.{ "bluetoothctl", "power", if (st.bt_on) "on" else "off" }, if (st.bt_on) "Bluetooth をオンにしました" else "Bluetooth をオフにしました"));
+            var sb: [128]u8 = undefined;
+            const script = btScript(f, &sb);
+            push(st, makeJob(.bt_power, &.{ "sh", script, "--power", if (st.bt_on) "on" else "off" }, if (st.bt_on) "Bluetooth をオンにしました" else "Bluetooth をオフにしました"));
         }
         return true;
     }
@@ -977,7 +994,7 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
             setStatus(st, "ペアリングしています…", false);
             var sb: [128]u8 = undefined;
             const script = std.fmt.bufPrint(&sb, "{s}/bt-connect.sh", .{f.app.shareDir()}) catch "bt-connect.sh";
-            push(st, makeJob(.bt_action, &.{ "sh", "-c", "bluetoothctl pair \"$1\" && sh \"$2\" \"$1\"", "ame-bt", mac, script }, std.fmt.bufPrint(&msg, "{s} とペアリングしました", .{d.name()}) catch "ペアリングしました"));
+            push(st, makeJob(.bt_action, &.{ "sh", script, "--pair", mac }, std.fmt.bufPrint(&msg, "{s} とペアリングしました", .{d.name()}) catch "ペアリングしました"));
         }
     }
     return true;

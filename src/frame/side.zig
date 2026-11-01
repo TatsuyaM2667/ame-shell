@@ -182,7 +182,11 @@ fn utilPress(f: *Frame, i: usize) void {
             app.dashboard.queryRadiosPub();
         },
         .bt => {
-            _ = sys.run(&.{ "bluetoothctl", "power", if (app.dashboard.store.bt_on != 0) "off" else "on" }, &out);
+            // data/bt-connect.sh: 入れるときは rfkill のブロックも外す(外さないと BlueZ は電源を入れられない)
+            var sb: [160]u8 = undefined;
+            if (std.fmt.bufPrintZ(&sb, "{s}/bt-connect.sh", .{app.shareDir()})) |script| {
+                _ = sys.run(&.{ "sh", script.ptr, "--power", if (app.dashboard.store.bt_on != 0) "off" else "on" }, &out);
+            } else |_| {}
             app.dashboard.queryRadiosPub();
             f.bar.bt_on = app.dashboard.store.bt_on != 0;
         },

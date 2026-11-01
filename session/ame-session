@@ -132,15 +132,27 @@ fi
 
 # ---- 無線のブロックを解除(rfkill unblock all)----
 # 前のセッションや電源を切る前の状態で Wi-Fi / Bluetooth がソフトブロックされたままになっていることがある。
-# /dev/rfkill はログイン中の本人に使える(udev の uaccess)。FreeBSD には rfkill が無いので何もしない
+# /dev/rfkill はログイン中の本人に使える(udev の uaccess)が、その権限は elogind がセッションを
+# 有効にした後で付くので、ログイン直後は失敗することがある。裏で数秒おきに 10 回まで試す。
+# FreeBSD には rfkill が無いので何もしない
 if [ "${AME_SESSION_NESTED:-0}" != "1" ] && command -v rfkill >/dev/null 2>&1; then
-    if rfkill unblock all 2>/dev/null; then
-        log "rfkill: unblock all"
-        # Bluetooth のアダプタを電源オンに(BlueZ が AutoEnable でない場合のため。少し待ってから裏で)
-        command -v bluetoothctl >/dev/null 2>&1 && (sleep 2; bluetoothctl power on >/dev/null 2>&1) &
-    else
-        log "rfkill: unblock all に失敗(/dev/rfkill の権限)"
-    fi
+    (
+        i=0
+        while [ "$i" -lt 10 ]; do
+            if rfkill unblock all 2>/dev/null; then
+                log "rfkill: unblock all (try $((i + 1)))"
+                # Bluetooth のアダプタを電源オンに(BlueZ が AutoEnable でない場合のため)
+                if command -v bluetoothctl >/dev/null 2>&1; then
+                    sleep 2
+                    bluetoothctl power on >/dev/null 2>&1 && log "bluetooth: power on"
+                fi
+                exit 0
+            fi
+            i=$((i + 1))
+            sleep 2
+        done
+        log "rfkill: unblock all に失敗しました(/dev/rfkill の権限 / permission denied)"
+    ) &
 fi
 
 # 以前の版が残した「セーフモードで起動する」印は使わなくなったので消す
