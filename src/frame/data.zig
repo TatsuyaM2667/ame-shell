@@ -296,6 +296,8 @@ pub const Cava = struct {
     fd: c_int = -1,
     wfd: c_int = -1,
     values: [BARS]f32 = [_]f32{0} ** BARS,
+    /// 試験用(ame-ctl debug-spectrum): 録音せずに、与えた値を出している扱いにする
+    fake: bool = false,
     on_frame: ?*const fn (ctx: *anyopaque) void = null,
     ctx: *anyopaque = undefined,
     /// 波形が出せない理由(メディアタブに表示する)
@@ -322,7 +324,7 @@ pub const Cava = struct {
     const RETRY_MS = 10_000;
 
     pub fn running(self: *const Cava) bool {
-        return self.fd >= 0;
+        return self.fd >= 0 or self.fake;
     }
 
     /// 波形の代わりに出す説明(出せているときは null)

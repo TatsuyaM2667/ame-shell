@@ -454,6 +454,55 @@ const up_fs =
     \\}
 ;
 
+/// 液体のオーディオビジュアライザー(Canvas.liquid): 中心の周りを、音のスペクトル(48 帯)で膨らむ
+/// 3 枚の液体の膜がゆっくり揺れながら回る。帯の間は Catmull-Rom でなめらかにつなぎ、縁に光、外にぼんやり光る。
+/// 小さな四角だけを描く(u_rect は NDC)。出力は乗算済みアルファ。
+const liquid_vs =
+    \\#version 300 es
+    \\uniform vec4 u_rect;
+    \\void main(){
+    \\  vec2 p = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1));
+    \\  gl_Position = vec4(mix(u_rect.xy, u_rect.zw, p), 0.0, 1.0);
+    \\}
+;
+const liquid_fs =
+    \\#version 300 es
+    \\precision highp float;
+    \\uniform vec2 u_c; uniform float u_r; uniform float u_amp; uniform float u_t; uniform float u_rot;
+    \\uniform float u_v[48]; uniform vec3 u_ca; uniform vec3 u_cb; uniform float u_a; uniform float u_px;
+    \\out vec4 o;
+    \\float band(float ang){
+    \\  float f = fract(ang / 6.2831853 + u_rot) * 48.0;
+    \\  int i = int(floor(f)); float t = fract(f);
+    \\  float p0 = u_v[(i + 47) % 48]; float p1 = u_v[i % 48]; float p2 = u_v[(i + 1) % 48]; float p3 = u_v[(i + 2) % 48];
+    \\  return 0.5 * (2.0 * p1 + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t * t * t);
+    \\}
+    \\void main(){
+    \\  vec2 d = gl_FragCoord.xy - u_c;
+    \\  float dist = length(d);
+    \\  float ang = atan(d.y, d.x);
+    \\  vec3 col = vec3(0.0); float al = 0.0;
+    \\  for (int k = 0; k < 3; k++) {
+    \\    float fk = float(k);
+    \\    float v = clamp(band(ang + fk * 0.42 + u_t * 0.05 * (fk - 1.0)), 0.0, 1.2);
+    \\    float wob = sin(ang * 3.0 + u_t * (0.7 + 0.25 * fk) + fk * 2.1) * 0.55 + sin(ang * 5.0 - u_t * (1.1 + 0.2 * fk) + fk) * 0.30 + sin(ang * 2.0 + u_t * 0.4 - fk) * 0.4;
+    \\    float edge = u_r + u_amp * (0.10 + 0.06 * wob + v * (1.0 - 0.22 * fk) * (1.0 + 0.15 * wob));
+    \\    float aa = 1.2 * u_px;
+    \\    float fill = smoothstep(edge + aa, edge - aa, dist);
+    \\    float rim = fill * smoothstep(edge - 12.0 * u_px, edge - 0.5 * u_px, dist);
+    \\    float glow = exp(-max(dist - edge, 0.0) / (14.0 * u_px)) * (1.0 - fill) * 0.22;
+    \\    vec3 c = mix(u_ca, u_cb, fk * 0.5);
+    \\    float depth = pow(clamp(dist / max(edge, 1.0), 0.0, 1.0), 6.0);
+    \\    float body = fill * (0.16 + 0.42 * depth) * (1.0 - 0.18 * fk);
+    \\    float la = body + rim * 0.30 + glow;
+    \\    col += c * (body + glow) + mix(c, vec3(1.0), 0.55) * rim * 0.30;
+    \\    al += la;
+    \\  }
+    \\  al = min(al, 1.0) * u_a;
+    \\  o = vec4(col * u_a, al);
+    \\}
+;
+
 /// ロック解除の水の波紋(ripple.zig): ロック画面の写し(u_tex)を、中心から広がる波で押し流して透かす。
 /// 波の前はロック画面、通り過ぎた所は透けてデスクトップが見え、その上に同心円の波紋が少し残って消える。
 /// 出力は乗算済みアルファ。
@@ -498,6 +547,7 @@ pub const Gpu = struct {
     ui: c.GLuint = 0,
     wall: c.GLuint = 0,
     ripple: c.GLuint = 0,
+    liquid: c.GLuint = 0,
     down: c.GLuint = 0,
     up: c.GLuint = 0,
     blit: c.GLuint = 0,
@@ -554,6 +604,7 @@ pub const Gpu = struct {
         g.blit = try program(fs_vs, blit_fs);
         g.frame = try program(fs_vs, frame_fs);
         g.ripple = try program(fs_vs, ripple_fs);
+        g.liquid = try program(liquid_vs, liquid_fs);
         g.u.size = c.glGetUniformLocation(g.ui, "u_size");
         g.u.origin = c.glGetUniformLocation(g.ui, "u_origin");
         g.u.output = c.glGetUniformLocation(g.ui, "u_output");
@@ -951,6 +1002,42 @@ pub const Canvas = struct {
         // ガラスのアルファは opacity をそのまま掛ける(p1.y)。色ではなく合成率で扱う。
         self.push(x, y, w, h, st.tint, st.sheen, st.rim, .{ r, 2, 0, 0 }, .{ st.refraction * self.xf.s, self.xf.a, st.sparkle, 0 });
     }
+    /// 液体のオーディオビジュアライザー: (cx, cy) の周りに、半径 r から最大 amp だけ膨らむ液体の輪。
+    /// vals は 48 帯のスペクトル(0〜1)。rot は回転(0〜1 で 1 周)。それまでに積んだ図形は先に描く
+    pub fn liquid(self: *Canvas, cx: f32, cy: f32, r: f32, amp: f32, vals: []const f32, ca: Color, cb: Color, rot: f32) void {
+        const a = self.xf.a;
+        if (a <= 0.001 or vals.len < 48) return;
+        self.flush();
+        const g = self.gpu;
+        const s = self.xf.s * self.scale;
+        const fbw = self.size[0] * self.scale;
+        const fbh = self.size[1] * self.scale;
+        // 既定のフレームバッファは下が y=0
+        const px = (self.xf.tx + cx * self.xf.s) * self.scale;
+        const py = fbh - (self.xf.ty + cy * self.xf.s) * self.scale;
+        const rr = r * s;
+        const am = amp * s;
+        const ext = rr + am * 1.4 + 60 * s;
+        c.glEnable(c.GL_BLEND);
+        c.glBlendFunc(c.GL_ONE, c.GL_ONE_MINUS_SRC_ALPHA);
+        c.glUseProgram(g.liquid);
+        const P = g.liquid;
+        c.glUniform4f(c.glGetUniformLocation(P, "u_rect"), (px - ext) / fbw * 2 - 1, (py - ext) / fbh * 2 - 1, (px + ext) / fbw * 2 - 1, (py + ext) / fbh * 2 - 1);
+        c.glUniform2f(c.glGetUniformLocation(P, "u_c"), px, py);
+        c.glUniform1f(c.glGetUniformLocation(P, "u_r"), rr);
+        c.glUniform1f(c.glGetUniformLocation(P, "u_amp"), am);
+        c.glUniform1f(c.glGetUniformLocation(P, "u_t"), self.time);
+        c.glUniform1f(c.glGetUniformLocation(P, "u_rot"), rot);
+        c.glUniform1f(c.glGetUniformLocation(P, "u_px"), s);
+        c.glUniform1f(c.glGetUniformLocation(P, "u_a"), a);
+        c.glUniform3f(c.glGetUniformLocation(P, "u_ca"), ca.r, ca.g, ca.b);
+        c.glUniform3f(c.glGetUniformLocation(P, "u_cb"), cb.r, cb.g, cb.b);
+        c.glUniform1fv(c.glGetUniformLocation(P, "u_v"), 48, vals.ptr);
+        c.glBindVertexArray(g.empty_vao);
+        c.glDrawArrays(c.GL_TRIANGLE_STRIP, 0, 4);
+        c.glBindVertexArray(0);
+    }
+
     pub fn arc(self: *Canvas, cx: f32, cy: f32, radius: f32, thick: f32, progress: f32, fg: Color, track: Color) void {
         self.push(cx - radius, cy - radius, radius * 2, radius * 2, fg, track, fg, .{ 0, 4, 0, 0 }, .{ std.math.clamp(progress, 0, 1), thick * self.xf.s, 0, 0 });
     }

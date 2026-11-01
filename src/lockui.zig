@@ -293,13 +293,10 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         if (ps > 0.02) {
             cv.save();
             cv.opacity(ps);
-            for (0..nb) |i| {
-                const ang = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(nb)) * std.math.tau - std.math.pi / 2.0 + self.vinyl * 0.25;
-                const val = if (self.cava.running()) self.cava.values[i] else 0.06;
-                const r0 = R + 5 * k;
-                const r1 = r0 + 3 * k + val * 24 * k;
-                cv.line(dcx + @cos(ang) * r0, dcy + @sin(ang) * r0, dcx + @cos(ang) * r1, dcy + @sin(ang) * r1, 2.6 * k, Color.mix(acc, acc.lighten(0.6), val).alpha(0.5 + 0.5 * val));
-            }
+            // 液体のビジュアライザー: レコードの外周を包み、音で膨らんで揺れる(gfx.zig の liquid_fs)
+            const zeros = [_]f32{0} ** data.BARS;
+            const vals: []const f32 = if (self.cava.running()) &self.cava.values else &zeros;
+            cv.liquid(dcx, dcy, R + 2 * k, 34 * k, vals, acc, acc.lighten(0.55), self.vinyl / std.math.tau * 0.25);
             cv.restore();
         }
         cv.shadow(dcx - R, dcy - R + 5, R * 2, R * 2, R, 14, black.alpha(0.55));

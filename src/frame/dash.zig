@@ -378,19 +378,12 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         if (v.vinyl_angle > std.math.tau) v.vinyl_angle -= std.math.tau;
         animating = true;
     }
-    // スペクトラム(cava)をレコードの外周に放射状に
-    const n = data.BARS;
-    // cava が無い・起動できない・音を拾えないときは、平らな輪にして理由をレコードの下に書く
+    // スペクトラム: レコードの外周を包む液体(音で膨らみ、ゆっくり揺れて回る。gfx.zig の liquid_fs)
+    // cava が無い・起動できない・音を拾えないときは、静かに揺れるだけにして理由をレコードの下に書く
     const cava_problem = if (playing) f.cava.problem() else null;
-    for (0..n) |i| {
-        const a = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(n)) * std.math.tau - std.math.pi / 2.0 + v.vinyl_angle * 0.25;
-        const val = if (f.cava.running() and cava_problem == null) f.cava.values[i] else 0.05;
-        const r0 = R + 10;
-        const r1 = r0 + 4 + val * 44;
-        const ca = @cos(a);
-        const sa = @sin(a);
-        cv.line(cx + ca * r0, cy + sa * r0, cx + ca * r1, cy + sa * r1, 4, Color.mix(acc, acc.lighten(0.6), val).alpha(0.5 + 0.5 * val));
-    }
+    const zeros = [_]f32{0} ** data.BARS;
+    const vals: []const f32 = if (f.cava.running() and cava_problem == null) &f.cava.values else &zeros;
+    cv.liquid(cx, cy, R + 4, 54, vals, acc, acc.lighten(0.55), v.vinyl_angle / std.math.tau * 0.25);
     if (cava_problem) |msg| {
         _ = cv.text(cx, cy + R + 34, 12, sub.alpha(0.85), msg, .{ .alignment = .center });
     }
