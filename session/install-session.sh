@@ -101,7 +101,7 @@ if [ "$UNINSTALL" = 1 ]; then
     done < "$MANIFEST"
     run rm -f "$MANIFEST"
     # 自分で作った空ディレクトリだけ片付ける(他のファイルがあれば残る)
-    for d in "$DESTDIR$PREFIX/share/icons/ame/cursors" "$DESTDIR$PREFIX/share/icons/ame" "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell/xdg/foot" "$DESTDIR$PREFIX/share/ame-shell/xdg/fastfetch" "$DESTDIR$PREFIX/share/ame-shell/xdg/xdg-desktop-portal" "$DESTDIR$PREFIX/share/ame-shell/examples" "$DESTDIR$PREFIX/share/ame-shell/ghostty" "$DESTDIR$PREFIX/share/ame-shell/zsh" "$DESTDIR$PREFIX/share/ame-shell/xdg" "$DESTDIR$PREFIX/share/ame-shell" "$DESTDIR/usr/share/sddm/themes/ame" "$DESTDIR/usr/local/share/sddm/themes/ame" "$DESTDIR$PREFIX/opt/river-0.5/bin" "$DESTDIR$PREFIX/opt/river-0.5"; do
+    for d in "$DESTDIR$PREFIX/share/icons/ame/cursors" "$DESTDIR$PREFIX/share/icons/ame" "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell/xdg/foot" "$DESTDIR$PREFIX/share/ame-shell/xdg/fastfetch" "$DESTDIR$PREFIX/share/ame-shell/xdg/xdg-desktop-portal" "$DESTDIR$PREFIX/share/ame-shell/examples" "$DESTDIR$PREFIX/share/ame-shell/ghostty" "$DESTDIR$PREFIX/share/ame-shell/zsh" "$DESTDIR$PREFIX/share/ame-shell/bash" "$DESTDIR$PREFIX/share/ame-shell/xdg" "$DESTDIR$PREFIX/share/ame-shell" "$DESTDIR/usr/share/sddm/themes/ame" "$DESTDIR/usr/local/share/sddm/themes/ame" "$DESTDIR$PREFIX/opt/river-0.5/bin" "$DESTDIR$PREFIX/opt/river-0.5"; do
         [ -d "$d" ] && run rmdir "$d" 2>/dev/null
     done
     say "完了しました。"
@@ -253,6 +253,8 @@ install_file "$OUT/share/ame-shell/xdg/fastfetch/config.jsonc" "$PREFIX/share/am
 # 端末(ghostty)と zsh の ame-shell の設定(自分の ~/.config/ghostty/config・~/.zshrc があればそちらが使われる)
 install_file "$OUT/share/ame-shell/ghostty/config" "$PREFIX/share/ame-shell/ghostty/config" 644
 install_file "$OUT/share/ame-shell/zsh/.zshrc" "$PREFIX/share/ame-shell/zsh/.zshrc" 644
+install_file "$OUT/share/ame-shell/zsh/.zprofile" "$PREFIX/share/ame-shell/zsh/.zprofile" 644
+install_file "$OUT/share/ame-shell/bash/bashrc" "$PREFIX/share/ame-shell/bash/bashrc" 644
 install_file "$OUT/share/ame-shell/xdg/xdg-desktop-portal/river-portals.conf" "$PREFIX/share/ame-shell/xdg/xdg-desktop-portal/river-portals.conf" 644
 # ユーザー設定の例(~/.config/ame-shell/environment・autostart。README を参照)
 install_file "$OUT/share/ame-shell/examples/environment" "$PREFIX/share/ame-shell/examples/environment" 644

@@ -370,10 +370,10 @@ pub const Wallpaper = struct {
 
     /// ロック画面・ログイン画面の下では壁紙のサーフェスに frame が来ない(描かれない)ので、
     /// ロック画面の描画から壁紙のシーンを進める(オーロラが動き続け、切り替えも最後まで進む)。
-    /// 動画は EGL の current を切り替える必要があるので進めない(止まったコマのまま)
+    /// 動画もロック画面の描画中に新しいコマを FBO へ描く(EGL の current はロック画面のまま。描き先は FBO なので
+    /// 壁紙のサーフェスに切り替えなくてよい)。ホームと同じく動き続ける
     pub fn advanceForLock(self: *Wallpaper, dt: f32) void {
         const s = self.surf;
-        if (self.player != null or self.prev_player != null) return;
         _ = self.frame(s, dt, false);
     }
 
@@ -394,7 +394,7 @@ pub const Wallpaper = struct {
         // 画像は等倍で(縮小すると細部が潰れる)
         if ((self.mode == .image or self.mode == .video) and !transitioning) scale = 1.0;
         // 動画: 新しいコマを描いてから、そのテクスチャを「画像」としてシーンに渡す
-        if (self.player != null or self.prev_player != null) app.gpu.makeCurrent(s.egl_surf);
+        if (to_screen and (self.player != null or self.prev_player != null)) app.gpu.makeCurrent(s.egl_surf);
         if (self.player) |p| {
             p.render();
             if (p.tex != 0) {

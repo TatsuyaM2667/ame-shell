@@ -21,3 +21,6 @@ export SDL_IM_MODULE=fcitx
 
 # ---- キーボード配列(River 0.5 のセッション)----
 # export XKB_DEFAULT_LAYOUT=jp
+
+# ---- 端末のシェル(既定は zsh。bash にするなら)----
+# export AME_TERM_SHELL=bash

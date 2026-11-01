@@ -50,7 +50,7 @@ bindkey '^[[3~' delete-char
 bindkey '^H' backward-kill-word     # Ctrl+Backspace
 
 # ---- プロンプト ----
-# ╭─  ~/ame-shell   main ●
+# ╭─ tatsuya@chimeralinux in  ~/ame-shell   main ●
 # ╰─❯                                     2.3s  23:05
 autoload -Uz vcs_info add-zsh-hook
 zstyle ':vcs_info:*' enable git
@@ -78,7 +78,7 @@ zmodload zsh/datetime 2>/dev/null
 add-zsh-hook preexec _ame_preexec
 add-zsh-hook precmd _ame_precmd
 
-PROMPT=$'\n%F{#4b5675}╭─%f %F{#7ab8ff}%B %(4~|…/%3~|%~)%b%f${vcs_info_msg_0_}\n%F{#4b5675}╰─%f%(?.%F{#7ab8ff}.%F{#ff7a8a})❯%f '
+PROMPT=$'\n%F{#4b5675}╭─%f %F{#c8a2ff}%n@%m%f %F{#4b5675}in%f %F{#7ab8ff}%B %(4~|…/%3~|%~)%b%f${vcs_info_msg_0_}\n%F{#4b5675}╰─%f%(?.%F{#7ab8ff}.%F{#ff7a8a})❯%f '
 RPROMPT='${_ame_took}%(?..%F{#ff7a8a}✘ %?%f  )%F{#4b5675}%*%f'
 # 2 行目の右のプロンプトを、入力が終わったら消す(コピーしたときに混ざらないように)
 setopt transient_rprompt

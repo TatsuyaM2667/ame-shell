@@ -1,8 +1,9 @@
 #!/bin/sh
 # ame-term-shell: ame-shell の端末(ghostty / foot の既定設定の command / shell)から起動されるシェル。
 # 端末を開いたら最初に fastfetch でシステムの情報を出し、それから zsh(無ければいつものシェル $SHELL)になる。POSIX sh。
-#   - zsh は、自分の ~/.zshrc が無ければ ame-shell の設定(share/ame-shell/zsh/.zshrc: 2 行のプロンプト・
-#     git の状態・補完・履歴の候補・色分け)で起動する。AME_TERM_SHELL でシェルを指定できる
+#   - zsh / bash は、自分の ~/.zshrc / ~/.bashrc が無ければ ame-shell の設定(share/ame-shell/zsh/.zshrc・bash/bashrc:
+#     ユーザー名@ホスト名・場所・git の状態の 2 行のプロンプト、補完、履歴)で起動する。
+#   - シェルは AME_TERM_SHELL で選べる(例: ~/.config/ame-shell/environment に export AME_TERM_SHELL=bash)
 #   - fastfetch が無い、AME_FASTFETCH=0、すでに出した(FASTFETCH_SHOWN)ときは出さない
 #   - シェルの設定ファイルで自分で fastfetch を呼んでいる場合も、二重にならないよう出さない
 
@@ -36,6 +37,8 @@ case "$0" in
     *) SELF_DIR=$(dirname "$(command -v "$0")") ;;
 esac
 ZSHDIR="$(dirname "$SELF_DIR")/share/ame-shell/zsh"
+BASHRC="$(dirname "$SELF_DIR")/share/ame-shell/bash/bashrc"
+[ -f "$BASHRC" ] || BASHRC="$SELF_DIR/../data/bash/bashrc"
 [ -d "$ZSHDIR" ] || ZSHDIR="$SELF_DIR/../data/zsh"
 
 # 使うシェル: AME_TERM_SHELL → zsh → $SHELL
@@ -49,6 +52,12 @@ case "$sh_cmd" in
             export ZDOTDIR="$ZSHDIR"
         fi
         exec "$sh_cmd" -l
+        ;;
+    */bash|bash)
+        export SHELL="$sh_cmd"
+        # 自分の ~/.bashrc が無ければ ame-shell の設定(zsh と同じ見た目)で
+        if [ ! -f "$HOME/.bashrc" ] && [ -f "$BASHRC" ]; then exec "$sh_cmd" --rcfile "$BASHRC" -i; fi
+        exec "$sh_cmd" -i
         ;;
     ?*) exec "$sh_cmd" ;;
 esac

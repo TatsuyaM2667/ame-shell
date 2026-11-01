@@ -1,0 +1,80 @@
+# ame-shell の bash の設定(ame-term-shell が、端末のシェルを bash にしていて ~/.bashrc が無いときに --rcfile で読ませる)。
+# 端末のシェルを bash にする: ~/.config/ame-shell/environment に  export AME_TERM_SHELL=bash
+# zsh の設定(share/ame-shell/zsh/.zshrc)と同じ見た目の 2 行のプロンプト・履歴・補完。
+
+# ログインシェルと同じ環境(PATH など)
+[ -r /etc/profile ] && . /etc/profile
+[ -r "$HOME/.profile" ] && . "$HOME/.profile"
+for _d in "$HOME/.local/bin" "$HOME/bin"; do
+    case ":$PATH:" in *":$_d:"*) ;; *) [ -d "$_d" ] && PATH="$_d:$PATH" ;; esac
+done
+unset _d
+export PATH
+
+# ---- 履歴 ----
+mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/bash" 2>/dev/null
+HISTFILE="${XDG_STATE_HOME:-$HOME/.local/state}/bash/history"
+HISTSIZE=50000
+HISTFILESIZE=50000
+HISTCONTROL=ignoreboth:erasedups
+shopt -s histappend checkwinsize autocd cdspell 2>/dev/null
+# ↑↓ で入力中の文字から始まる履歴
+bind '"\e[A": history-search-backward' 2>/dev/null
+bind '"\e[B": history-search-forward' 2>/dev/null
+bind 'set completion-ignore-case on' 2>/dev/null
+bind 'set show-all-if-ambiguous on' 2>/dev/null
+bind 'set colored-stats on' 2>/dev/null
+
+# ---- 補完 ----
+for f in /usr/share/bash-completion/bash_completion /etc/bash_completion /usr/local/share/bash-completion/bash_completion; do
+    [ -r "$f" ] && { . "$f"; break; }
+done
+
+# ---- プロンプト(zsh の設定と同じ見た目)----
+# ╭─ tatsuya@chimeralinux in  ~/ame-shell   main ●
+# ╰─❯
+_ame_c() { printf '\[\e[38;2;%sm\]' "$1"; }
+_ame_git() {
+    local b
+    b=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null) || return
+    local dirty=""
+    git diff --quiet --ignore-submodules 2>/dev/null || dirty=" $(_ame_c '255;213;138')●"
+    git diff --cached --quiet --ignore-submodules 2>/dev/null || dirty="$dirty $(_ame_c '126;224;161')●"
+    printf '  %s %s%s' "$(_ame_c '200;162;255')" "$b" "$dirty"
+}
+_ame_prompt() {
+    local st=$?
+    local reset='\[\e[0m\]' dim; dim=$(_ame_c '75;86;117')
+    local arrow; if [ $st -eq 0 ]; then arrow=$(_ame_c '122;184;255'); else arrow=$(_ame_c '255;122;138'); fi
+    local code=""; [ $st -ne 0 ] && code=" $(_ame_c '255;122;138')✘ $st"
+    PS1="\n${dim}╭─${reset} $(_ame_c '200;162;255')\u@\h${reset} ${dim}in${reset} $(_ame_c '122;184;255')\[\e[1m\] \w${reset}$(_ame_git)${reset}${code}${reset}\n${dim}╰─${reset}${arrow}❯${reset} "
+    # 端末の題名: いる場所
+    printf '\e]0;%s\a' "${PWD/#$HOME/\~}"
+    history -a
+}
+PROMPT_COMMAND=_ame_prompt
+
+# ---- あれば使うもの ----
+export CLICOLOR=1
+if command -v fzf >/dev/null; then
+    export FZF_DEFAULT_OPTS="--height=40% --layout=reverse --border=rounded --color=bg+:#1b2236,fg+:#ffffff,hl:#7ab8ff,hl+:#a3cfff,pointer:#7ab8ff,prompt:#c8a2ff,border:#4b5675"
+    eval "$(fzf --bash 2>/dev/null)" 2>/dev/null
+fi
+command -v zoxide >/dev/null && eval "$(zoxide init bash)"
+if command -v eza >/dev/null; then
+    alias ls='eza --icons=auto --group-directories-first'
+    alias ll='eza -l --icons=auto --group-directories-first --git'
+    alias la='eza -la --icons=auto --group-directories-first --git'
+    alias lt='eza --tree --level=2 --icons=auto'
+else
+    alias ls='ls --color=auto'
+    alias ll='ls -l'
+    alias la='ls -la'
+fi
+command -v bat >/dev/null && alias b='bat --style=plain'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias grep='grep --color=auto'
+
+# 自分で足したい設定は ~/.config/ame-shell/bashrc.local に
+[ -r "${XDG_CONFIG_HOME:-$HOME/.config}/ame-shell/bashrc.local" ] && . "${XDG_CONFIG_HOME:-$HOME/.config}/ame-shell/bashrc.local"
