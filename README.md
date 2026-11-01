@@ -82,7 +82,7 @@ Chimera のリポジトリには River 0.3 が無いので、`install.sh` が Ri
    ```
 2. `sh install.sh` を実行する。次のことを順に行います
    - **パッケージ**(`doas apk add`): ビルドに要るもの(clang・llvm-devel・linux-headers・pkgconf・wayland / mesa / libdrm / xkbcommon / freetype / harfbuzz / fontconfig / dbus / linux-pam の -devel)、
-     River 0.5 のビルドに要るもの(wlroots0.20-devel など)、動かすのに要るもの(greetd・foot・mesa-dri・polkit・pipewire・wireplumber・libpulse-progs・playerctl・cava・grim・slurp・wl-clipboard・swaylock・brightnessctl・util-linux-rfkill・networkmanager・bluez・thunar・tumbler・xdg-desktop-portal(-gtk・-wlr)・fonts-noto-sans-cjk-otf・fonts-nerd-jetbrains-mono・fonts-nerd-symbols-only・adwaita / hicolor のアイコンテーマ)。
+     River 0.5 のビルドに要るもの(wlroots0.20-devel など)、動かすのに要るもの(greetd・foot・mesa-dri・polkit・pipewire・wireplumber・libpulse-progs・swaylock・brightnessctl・util-linux-rfkill・networkmanager・bluez・thunar・tumbler・xdg-desktop-portal(-gtk・-wlr)・fonts-noto-sans-cjk-otf・fonts-nerd-jetbrains-mono・fonts-nerd-symbols-only・adwaita / hicolor のアイコンテーマ)。
      どれかが入らないとそこで止まります(足りないまま進めて、スクショや波形が動かないことが無いように)
    - Zig 0.13 と Odin、River 0.5 のビルド、ame-shell のビルドとインストール
    - **インストール後の設定**(1 つずつ `[y/N]` で確認。`--yes` で全部、`--no-setup` で何もしない):
@@ -167,7 +167,7 @@ FreeBSD での違い:
 ### 手動でビルドする
 
 必要: Zig 0.13、Odin、wayland-scanner、wayland / EGL / GLESv2 / xkbcommon / freetype / harfbuzz / fontconfig / dbus の開発ファイル(FreeBSD は加えて libepoll-shim・libinotify)。
-実行時に使うもの: `playerctl`・`wpctl` / `pactl`(PipeWire)・`nmcli`・`bluetoothctl`・`rfkill`・`curl`・`cava`(メディアの波形)・`grim` / `slurp` / `wl-copy`(スクリーンショット)・`xdg-desktop-portal` と `-gtk`(ユーザーの写真を選ぶ画面)・`libmpv`(動画壁紙、任意)・`ffmpeg`(動画のサムネイル、任意)・`wf-recorder`(録画、`~/Videos` に保存、任意)。
+実行時に使うもの: `wpctl` / `pactl`(PipeWire)・`nmcli`・`bluetoothctl`・`rfkill`・`curl`・`xdg-desktop-portal` と `-gtk`(ユーザーの写真を選ぶ画面)・`libmpv`(動画壁紙、任意)・`ffmpeg`(動画のサムネイル、任意)・`wf-recorder`(録画、`~/Videos` に保存、任意)。
 フォント: 日本語(Noto Sans CJK)と Nerd Font のアイコン(JetBrainsMono Nerd Font か Symbols Nerd Font)。無いと起動時にログ(`session.log`)へ入れるパッケージ名を出します。
 スクショのコマンドが無いときは通知で、cava が無い・音を拾えないときはメディアの波形の場所に理由を表示します。
 
@@ -225,7 +225,7 @@ PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5
 | Super+Ctrl+1〜9 | ワークスペースの表示を足す |
 | Super+P / Super+Shift+P | スクラッチパッド |
 | Super+ドラッグ(左 / 右)/ Super+中クリック | 移動 / 大きさ変更 / フロート |
-| Print / Shift+Print / Super+Print | 範囲 / 全画面のスクリーンショット(~/Pictures/Screenshots + クリップボード)/ 全画面をクリップボードだけ。grim・slurp・wl-copy が無ければ通知で知らせる |
+| Print / Shift+Print / Super+Print | 範囲 / 全画面のスクリーンショット(~/Pictures/Screenshots + クリップボード)/ 全画面をクリップボードだけ。ame-shell が自前で撮る(止めた画面の上でドラッグ、Enter で全体、Esc でやめる)。ext-image-copy-capture の無い River 0.3 などでは grim・slurp・wl-copy を使う |
 | 音量・明るさ・メディアキー | OSD つき |
 | Super+Shift+E | セッションを終了 |
 

@@ -40,6 +40,9 @@ pub usingnamespace @cImport({
     @cInclude("river-input-management-v1-client-protocol.h");
     @cInclude("river-libinput-config-v1-client-protocol.h");
     @cInclude("wlr-foreign-toplevel-management-unstable-v1-client-protocol.h");
+    @cInclude("ext-image-capture-source-v1-client-protocol.h");
+    @cInclude("ext-image-copy-capture-v1-client-protocol.h");
+    @cInclude("ext-data-control-v1-client-protocol.h");
     @cInclude("xkbcommon/xkbcommon.h");
     // GPU
     @cInclude("EGL/egl.h");

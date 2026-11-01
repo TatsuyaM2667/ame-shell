@@ -117,6 +117,11 @@ pub const App = struct {
     lock_mgr: ?*c.struct_ext_session_lock_manager_v1 = null,
     cursor_mgr: ?*c.struct_wp_cursor_shape_manager_v1 = null,
     idle_mgr: ?*c.struct_zwp_idle_inhibit_manager_v1 = null,
+    /// スクリーンショット(src/shot.zig): 画面の撮影とクリップボード
+    shm: ?*c.struct_wl_shm = null,
+    icc_mgr: ?*c.struct_ext_image_copy_capture_manager_v1 = null,
+    ics_mgr: ?*c.struct_ext_output_image_capture_source_manager_v1 = null,
+    dc_mgr: ?*c.struct_ext_data_control_manager_v1 = null,
     /// River 0.5 以降: ame-shell 自身がウィンドウマネージャ(src/wm)
     wm: ?*Wm = null,
     wm_xkb: ?*c.struct_river_xkb_bindings_v1 = null,
@@ -318,6 +323,7 @@ pub const App = struct {
                 self.notifs.reap();
                 self.lock.reap();
                 self.wallpick.reap();
+                @import("shot.zig").reap(self);
             }
         }
     }
@@ -778,6 +784,14 @@ fn onGlobal(data: ?*anyopaque, reg: ?*c.struct_wl_registry, name: u32, interface
         app.idle_mgr = @ptrCast(bind(reg, name, &c.zwp_idle_inhibit_manager_v1_interface, ver, 1));
     } else if (iface(interface, &c.wp_cursor_shape_manager_v1_interface)) {
         app.cursor_mgr = @ptrCast(bind(reg, name, &c.wp_cursor_shape_manager_v1_interface, ver, 1));
+    } else if (iface(interface, &c.wl_shm_interface)) {
+        app.shm = @ptrCast(bind(reg, name, &c.wl_shm_interface, ver, 1));
+    } else if (iface(interface, &c.ext_image_copy_capture_manager_v1_interface)) {
+        app.icc_mgr = @ptrCast(bind(reg, name, &c.ext_image_copy_capture_manager_v1_interface, ver, 1));
+    } else if (iface(interface, &c.ext_output_image_capture_source_manager_v1_interface)) {
+        app.ics_mgr = @ptrCast(bind(reg, name, &c.ext_output_image_capture_source_manager_v1_interface, ver, 1));
+    } else if (iface(interface, &c.ext_data_control_manager_v1_interface)) {
+        app.dc_mgr = @ptrCast(bind(reg, name, &c.ext_data_control_manager_v1_interface, ver, 1));
     } else if (iface(interface, &c.wl_seat_interface)) {
         if (app.seat == null) {
             app.seat = @ptrCast(bind(reg, name, &c.wl_seat_interface, ver, 7));

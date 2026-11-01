@@ -5,6 +5,7 @@ test {
     _ = @import("config.zig");
     _ = @import("portal.zig");
     _ = @import("greeter.zig");
+    _ = @import("png.zig");
 }
 
 test "spring converges and is velocity-continuous" {

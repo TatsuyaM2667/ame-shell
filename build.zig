@@ -26,6 +26,10 @@ const protocols = [_][]const u8{
     "protocol/river-input-management-v1.xml",
     "protocol/river-libinput-config-v1.xml",
     "protocol/wlr-foreign-toplevel-management-unstable-v1.xml",
+    "protocol/ext-foreign-toplevel-list-v1.xml",
+    "protocol/ext-image-capture-source-v1.xml",
+    "protocol/ext-image-copy-capture-v1.xml",
+    "protocol/ext-data-control-v1.xml",
 };
 
 pub fn build(b: *std.Build) void {
