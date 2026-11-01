@@ -9,7 +9,6 @@ _ame_autostart="${XDG_CONFIG_HOME:-$HOME/.config}/ame-shell/autostart"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ame-shell"
 LOG="$STATE_DIR/session.log"
 log() { printf '%s [river-init] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
-SAFE="${AME_SAFE_MODE:-0}"
 
 # ---- 基本 ----
 riverctl background-color 0x050a18
@@ -64,12 +63,6 @@ riverctl default-layout rivertile
 command -v rivertile >/dev/null 2>&1 && rivertile -view-padding 6 -outer-padding 8 &
 
 [ -f "$HOME/.config/ame-shell/river-extra.sh" ] && . "$HOME/.config/ame-shell/river-extra.sh"
-
-if [ "$SAFE" = "1" ]; then
-    log "safe mode: ame-shell は起動しません"
-    foot &
-    exit 0
-fi
 
 # ---- ame-shell の監督: 30 秒以内に 3 回落ちたら再起動をやめて foot で知らせる ----
 (

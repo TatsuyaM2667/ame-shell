@@ -1,23 +1,18 @@
 #!/bin/sh
 # ame-session: SDDM から起動される Ame Shell セッション(POSIX sh。bash/GNU 拡張に依存しない)
 #
-#   ame-session          通常(River + ame-shell)
-#   ame-session --safe   セーフモード(River + foot + rivertile のみ)
+#   ame-session          River 0.3 があれば River 0.3 + ame-shell、無ければ --river5 と同じ
 #   ame-session --river5 River 0.5(ame-shell がウィンドウマネージャを兼ねる。窓のアニメーション付き)
 #   AME_SESSION_NESTED=1 ame-session   既存の Wayland セッション内でネスト試験
 #
 # ログ: ${XDG_STATE_HOME:-$HOME/.local/state}/ame-shell/session.log
 
-SAFE=0
 RIVER5=0
-[ "${1:-}" = "--safe" ] && SAFE=1
 [ "${1:-}" = "--river5" ] && RIVER5=1
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ame-shell"
 mkdir -p "$STATE_DIR" 2>/dev/null
 LOG="$STATE_DIR/session.log"
-CRASH="$STATE_DIR/crashloop"
-FAILS="$STATE_DIR/quick-fails"
 
 # ログが 1MB を超えたら 1 世代だけ退避
 if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 1048576 ]; then
@@ -37,7 +32,7 @@ INIT5="$PREFIX_DIR/share/ame-shell/ame-river5-init"
 [ -x "$INIT5" ] || INIT5="$SELF_DIR/ame-river5-init"
 export PATH="$SELF_DIR:$PATH"
 
-log "=== start (river5=$RIVER5 safe=$SAFE nested=${AME_SESSION_NESTED:-0} pid=$$) ==="
+log "=== start (river5=$RIVER5 nested=${AME_SESSION_NESTED:-0} pid=$$) ==="
 
 # ---- 環境変数 ----
 export XDG_SESSION_TYPE=wayland
@@ -148,88 +143,73 @@ if [ "${AME_SESSION_NESTED:-0}" != "1" ] && command -v rfkill >/dev/null 2>&1; t
     fi
 fi
 
-# ---- クラッシュループ検出: 5 秒未満で終了する失敗が 3 回続いたら次回はセーフモード ----
-if [ -f "$CRASH" ] && [ "$SAFE" = "0" ]; then
-    log "crashloop マーカーがあるためセーフモードで起動します(削除: rm $CRASH)"
-    SAFE=1
-fi
-export AME_SAFE_MODE="$SAFE"
+# 以前の版が残した「セーフモードで起動する」印は使わなくなったので消す
+rm -f "$STATE_DIR/crashloop" "$STATE_DIR/quick-fails"
 
 if [ "${AME_SESSION_NESTED:-0}" != "1" ] && command -v dbus-update-activation-environment >/dev/null 2>&1; then
     dbus-update-activation-environment XDG_SESSION_TYPE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS PATH >/dev/null 2>&1
 fi
 
-# システムの river が 0.4 以降(FreeBSD の river パッケージなど)なら、River 0.3 用の init は動かない
-# (River 0.4 以降は riverctl の無い別物)。内蔵ウィンドウマネージャで起動する方法(--river5)に切り替える
-if [ "$RIVER5" = "0" ] && command -v river >/dev/null 2>&1; then
+# ---- どの River で起動するか ----
+# River 0.3: PATH の river が 0.3 系のとき(riverctl で設定する従来のセッション)。
+# River 0.5: $AME_RIVER5 → ~/.local/opt/river-0.5 → $PREFIX/opt/river-0.5 → PATH の river(0.4 以降)。
+#            ame-shell がウィンドウマネージャを兼ねる。
+# Chimera Linux や FreeBSD のリポジトリには River 0.3 が無いので、0.3 を頼まれても無ければ 0.5 で起動する。
+RIVER03=""
+RIVER5_BIN=""
+if command -v river >/dev/null 2>&1; then
     case "$(river -version 2>&1)" in
-        0.[4-9]*|[1-9]*)
-            log "river $(river -version 2>&1) は River 0.4 以降なので、内蔵ウィンドウマネージャで起動します"
-            RIVER5=1
-            SAFE=0
-            ;;
+        0.[4-9]*|[1-9]*) RIVER5_BIN=river ;;
+        *) RIVER03=river ;;
     esac
 fi
+for r in "${AME_RIVER5:-}" "$HOME/.local/opt/river-0.5/bin/river" "$PREFIX_DIR/opt/river-0.5/bin/river"; do
+    [ -n "$r" ] && [ -x "$r" ] && { RIVER5_BIN="$r"; break; }
+done
+[ -x "$INIT5" ] || RIVER5_BIN=""
 
-RIVER=river
-if [ "$RIVER5" = "1" ]; then
-    # River 0.5 の場所: $AME_RIVER5 → ~/.local/opt/river-0.5 → PATH の river(0.4 以降なら)
-    RIVER=""
-    for r in "${AME_RIVER5:-}" "$HOME/.local/opt/river-0.5/bin/river" "$PREFIX_DIR/opt/river-0.5/bin/river"; do
-        [ -n "$r" ] && [ -x "$r" ] && { RIVER="$r"; break; }
-    done
-    if [ -z "$RIVER" ] && command -v river >/dev/null 2>&1; then
-        case "$(river -version 2>&1)" in 0.[4-9]*|[1-9]*) RIVER=river ;; esac
-    fi
-    if [ -z "$RIVER" ] || [ ! -x "$INIT5" ]; then
-        log "ERROR: River 0.5 または ame-river5-init が見つかりません。通常の Ame Shell(River 0.3)で起動します"
+if [ "$RIVER5" = "1" ] && [ -z "$RIVER5_BIN" ]; then
+    if [ -n "$RIVER03" ]; then
+        log "River 0.5 または ame-river5-init が見つかりません。River 0.3 で起動します / River 0.5 not found, using River 0.3"
         RIVER5=0
-        RIVER=river
-    elif [ "$SAFE" = "1" ]; then
-        log "セーフモード指定のため River 0.3 のセーフモードで起動します"
-        RIVER5=0
-        RIVER=river
     else
-        INIT="$INIT5"
-        # River 0.5 には riverctl keyboard-layout が無いので xkbcommon の環境変数で渡す。
-        # 未設定なら ~/.config/ame-shell/xkb-layout(1 行で "jp" など)→ ~/.config/river/init の keyboard-layout の順に読む
-        if [ -z "${XKB_DEFAULT_LAYOUT:-}" ] && [ -s "$HOME/.config/ame-shell/xkb-layout" ]; then
-            kl=$(head -n 1 "$HOME/.config/ame-shell/xkb-layout" | tr -d ' \t\r')
-            [ -n "$kl" ] && export XKB_DEFAULT_LAYOUT="$kl"
-        fi
-        if [ -z "${XKB_DEFAULT_LAYOUT:-}" ] && [ -f "$HOME/.config/river/init" ]; then
-            kl=$(awk '$1=="riverctl" && $2=="keyboard-layout" {print $NF}' "$HOME/.config/river/init" | tail -n 1 | tr -d '"'"'")
-            [ -n "$kl" ] && export XKB_DEFAULT_LAYOUT="$kl"
-        fi
-        log "keyboard layout: ${XKB_DEFAULT_LAYOUT:-(既定)}"
+        log "ERROR: River 0.5 も River 0.3 も見つかりません / no usable river found"
+        exit 1
+    fi
+elif [ "$RIVER5" = "0" ] && [ -z "$RIVER03" ]; then
+    if [ -n "$RIVER5_BIN" ]; then
+        log "River 0.3 が無いため River 0.5(内蔵ウィンドウマネージャ)で起動します / River 0.3 not found, using River 0.5"
+        RIVER5=1
+    else
+        log "ERROR: river が見つかりません / river not found"
+        exit 1
     fi
 fi
 
-if ! command -v "$RIVER" >/dev/null 2>&1; then
-    log "ERROR: river が見つかりません"
-    exit 1
+if [ "$RIVER5" = "1" ]; then
+    RIVER="$RIVER5_BIN"
+    INIT="$INIT5"
+    # River 0.5 には riverctl keyboard-layout が無いので xkbcommon の環境変数で渡す。
+    # 未設定なら ~/.config/ame-shell/xkb-layout(1 行で "jp" など)→ ~/.config/river/init の keyboard-layout の順に読む
+    if [ -z "${XKB_DEFAULT_LAYOUT:-}" ] && [ -s "$HOME/.config/ame-shell/xkb-layout" ]; then
+        kl=$(head -n 1 "$HOME/.config/ame-shell/xkb-layout" | tr -d ' \t\r')
+        [ -n "$kl" ] && export XKB_DEFAULT_LAYOUT="$kl"
+    fi
+    if [ -z "${XKB_DEFAULT_LAYOUT:-}" ] && [ -f "$HOME/.config/river/init" ]; then
+        kl=$(awk '$1=="riverctl" && $2=="keyboard-layout" {print $NF}' "$HOME/.config/river/init" | tail -n 1 | tr -d '"'"'")
+        [ -n "$kl" ] && export XKB_DEFAULT_LAYOUT="$kl"
+    fi
+    log "keyboard layout: ${XKB_DEFAULT_LAYOUT:-(既定)}"
+else
+    RIVER="$RIVER03"
 fi
-log "river $("$RIVER" -version 2>&1) ($RIVER) / init=$INIT / safe=$SAFE"
+log "river $("$RIVER" -version 2>&1) ($RIVER) / init=$INIT"
 
 # River は -c <コマンド> で init を差し替えられる。~/.config/river/init は読まない。
 started=$(date +%s)
 # shellcheck disable=SC2086  # SEAT_WRAP は意図的に単語分割する
 $SEAT_WRAP "$RIVER" -c "$INIT" >> "$LOG" 2>&1
 rc=$?
-dur=$(( $(date +%s) - started ))
-log "river exited rc=$rc after ${dur}s"
-
-if [ "$dur" -lt 5 ] && [ "${AME_SESSION_NESTED:-0}" != "1" ]; then
-    n=$(( $(cat "$FAILS" 2>/dev/null || echo 0) + 1 ))
-    echo "$n" > "$FAILS"
-    log "quick failure #$n"
-    if [ "$n" -ge 3 ]; then
-        : > "$CRASH"
-        log "3 回連続で起動直後に終了したため crashloop を記録しました(次回はセーフモード)"
-    fi
-elif [ "$dur" -ge 60 ]; then
-    # 正常に長く動いたので失敗記録を消す
-    rm -f "$FAILS" "$CRASH"
-fi
+log "river exited rc=$rc after $(( $(date +%s) - started ))s"
 log "=== end ==="
 exit $rc

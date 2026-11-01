@@ -114,11 +114,13 @@ done
 U="${DOAS_USER:-${SUDO_USER:-$(id -un)}}"
 UHOME=$(eval echo "~$U")
 
-# システムの river が 0.4 以降か(FreeBSD の river パッケージなど)。0.4 以降は River 0.3 用の init が動かないので、
-# 内蔵ウィンドウマネージャで動くセッションだけを入れる
+# システムの river が 0.4 以降か(FreeBSD の river パッケージなど)。
+# River 0.3 が無ければ(0.4 以降しか無い・Chimera のように river パッケージが無い)、River 0.3 用の
+# セッションは動かないので、内蔵ウィンドウマネージャで動くセッションだけを「Ame Shell」として入れる
 NEW_RIVER=0
+HAVE_RIVER03=0
 if command -v river >/dev/null 2>&1; then
-    case "$(river -version 2>&1)" in 0.[4-9]*|[1-9]*) NEW_RIVER=1 ;; esac
+    case "$(river -version 2>&1)" in 0.[4-9]*|[1-9]*) NEW_RIVER=1 ;; *) HAVE_RIVER03=1 ;; esac
 fi
 
 # ---- SDDM が読むセッションディレクトリ ----
@@ -191,6 +193,23 @@ install_file() {
     echo "$dst" >> "$TMP_MANIFEST"
 }
 
+# retire <dst(DESTDIR抜き)>: 以前の版が入れたが今は使わないファイルを消し、記録からも外す
+# (自分が入れたもの=記録にあるものだけ。退避した元のファイルがあれば戻す)
+RETIRED=""
+retire() {
+    dst=$1; t="$DESTDIR$dst"
+    grep -qx "$dst" "$MANIFEST" 2>/dev/null || return 0
+    if [ -e "$t.ame-bak" ]; then
+        say "  restore $dst(使わなくなったため)"
+        run mv -f "$t.ame-bak" "$t"
+    elif [ -e "$t" ]; then
+        say "  rm $dst(使わなくなったため)"
+        run rm -f "$t"
+    fi
+    RETIRED="$RETIRED
+$dst"
+}
+
 # install_link <リンク先> <dst(DESTDIR抜き)>: シンボリックリンク(カーソルの古い名前など)
 install_link() {
     tgt=$1; dst=$2; t="$DESTDIR$dst"
@@ -251,15 +270,18 @@ fi
 # .desktop: @PREFIX@ を実際のパスに置換(sed -i は使わない: BSD/GNU で書式が違うため)。
 # SDDM はホームの下を読まないので、自分用インストールでは作らない
 if [ "$USER_MODE" = 0 ]; then
-    if [ "$NEW_RIVER" = 1 ]; then
-        # River 0.4 以降しか無い: 内蔵 WM のセッションだけを「Ame Shell」として入れる
-        DESKTOPS="ame-shell-river5"
+    # セーフモード(ame-shell-safe)は廃止。以前の版が入れたものは消す
+    retire "$SESS_DIR/ame-shell-safe.desktop"
+    if [ "$HAVE_RIVER03" = 1 ]; then
+        DESKTOPS="ame-shell ame-shell-river5"
     else
-        DESKTOPS="ame-shell ame-shell-safe ame-shell-river5"
+        # River 0.3 が無い: 内蔵 WM のセッションだけを「Ame Shell」として入れる
+        DESKTOPS="ame-shell-river5"
+        retire "$SESS_DIR/ame-shell.desktop"
     fi
     for d in $DESKTOPS; do
         tmp=$(mktemp "${TMPDIR:-/tmp}/ame-desktop.XXXXXX") || exit 1
-        if [ "$NEW_RIVER" = 1 ]; then
+        if [ "$HAVE_RIVER03" = 0 ]; then
             sed -e "s|@PREFIX@|$PREFIX|g" -e 's|^Name=.*|Name=Ame Shell|' -e 's|^Name\[ja\]=.*|Name[ja]=Ame Shell(雨)|' "$HERE/$d.desktop" > "$tmp"
         else
             sed "s|@PREFIX@|$PREFIX|g" "$HERE/$d.desktop" > "$tmp"
@@ -294,7 +316,10 @@ fi
 # 記録(前回分とマージして重複を除く)
 if [ "$DRY" = 0 ]; then
     mkdir -p "$(dirname "$MANIFEST")"
-    { [ -f "$MANIFEST" ] && cat "$MANIFEST"; cat "$TMP_MANIFEST"; echo "$MANIFEST_REL"; } | sort -u > "$MANIFEST.new"
+    printf '%s\n' "$RETIRED" | grep -v '^$' > "$TMP_MANIFEST.retired"
+    { [ -f "$MANIFEST" ] && cat "$MANIFEST"; cat "$TMP_MANIFEST"; echo "$MANIFEST_REL"; } | sort -u |
+        grep -vxF -f "$TMP_MANIFEST.retired" > "$MANIFEST.new"
+    rm -f "$TMP_MANIFEST.retired"
     mv -f "$MANIFEST.new" "$MANIFEST"
     chmod 644 "$MANIFEST"
 fi
@@ -306,7 +331,6 @@ say ""
 say "== 前提チェック =="
 if [ "$OS" = FreeBSD ]; then PKG="pkg install"; else PKG="apk add"; fi
 chk() { if command -v "$1" >/dev/null 2>&1; then say "  [ok] $1"; else warn "$1 がありません ($2)"; fi; }
-chk river "$PKG river"
 [ "$USER_MODE" = 0 ] && chk sddm "$PKG sddm"
 chk foot "$PKG foot"
 chk dbus-run-session "$PKG dbus"
@@ -316,7 +340,11 @@ if [ "$NEW_RIVER" = 1 ]; then
 elif [ -x "$UHOME/.local/opt/river-0.5/bin/river" ] || [ -x "$DESTDIR$PREFIX/opt/river-0.5/bin/river" ]; then
     say "  [ok] River 0.5(ウィンドウアニメーションつきのセッションが使えます)"
 else
-    say "  (River 0.5 が無いため「Ame Shell (River 0.5)」は River 0.3 で起動します)"
+    if [ "$HAVE_RIVER03" = 1 ]; then
+        say "  [ok] river $(river -version 2>&1)(River 0.5 が無いので「Ame Shell」だけが使えます)"
+    else
+        warn "River 0.5 も River 0.3 もありません(sh install.sh が River 0.5 をビルドします)"
+    fi
 fi
 if [ "$OS" = FreeBSD ]; then
     for svc in dbus seatd sddm; do
@@ -354,10 +382,10 @@ if [ "$USER_MODE" = 1 ]; then
     say "  (SDDM の一覧に出すには、全ユーザー用のインストールが必要です: sh $0)"
     say "元に戻す: sh $0 --uninstall --user"
 else
-    if [ "$NEW_RIVER" = 1 ]; then
+    if [ "$HAVE_RIVER03" = 0 ]; then
         say "インストール完了(警告 $WARN 件)。SDDM で \"Ame Shell\" を選んでください。"
     else
-        say "インストール完了(警告 $WARN 件)。SDDM で \"Ame Shell (Safe Mode)\" → \"Ame Shell\" の順に試してください。"
+        say "インストール完了(警告 $WARN 件)。SDDM で \"Ame Shell\"(River 0.3)か \"Ame Shell (River 0.5)\" を選んでください。"
     fi
     say "元に戻す: sh $0 --uninstall"
 fi

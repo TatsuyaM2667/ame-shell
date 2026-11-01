@@ -25,7 +25,7 @@ ame-shell が万一落ちても、見張り役のスクリプトがすぐに起�
 | D-Bus | 既存のセッションバス → `$XDG_RUNTIME_DIR/bus` → `dbus-run-session` で自分を起動し直す、の順 |
 | シート(libseat) | elogind のセッションがある → seatd のソケットに読み書きできる → `seatd-launch` 経由、の順で判定(FreeBSD は `/var/run/seatd.sock`) |
 | `rfkill unblock all`(Linux) | 前回のセッションの状態で Wi-Fi / Bluetooth がブロックされたままのことがある。`/dev/rfkill` はログイン中の本人に許可されている(udev の uaccess) |
-| クラッシュループの検出 | 5 秒以内に終わる失敗が 3 回続いたら、次回はセーフモードで起動する(印のファイル `crashloop`) |
+| River の選択 | River 0.3 があれば従来のセッション、無ければ River 0.5(ame-shell がウィンドウマネージャを兼ねる)で起動する |
 | River の版を見分ける | `river -version` が 0.4 以降なら、ame-shell が WM を兼ねるセッションにする |
 | キーボード配列 | `XKB_DEFAULT_LAYOUT` → `~/.config/ame-shell/xkb-layout` → River 0.3 の init の設定、の順 |
 
