@@ -101,7 +101,7 @@ if [ "$UNINSTALL" = 1 ]; then
     done < "$MANIFEST"
     run rm -f "$MANIFEST"
     # 自分で作った空ディレクトリだけ片付ける(他のファイルがあれば残る)
-    for d in "$DESTDIR$PREFIX/share/icons/ame/cursors" "$DESTDIR$PREFIX/share/icons/ame" "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell/xdg/foot" "$DESTDIR$PREFIX/share/ame-shell/xdg/fastfetch" "$DESTDIR$PREFIX/share/ame-shell/xdg/xdg-desktop-portal" "$DESTDIR$PREFIX/share/ame-shell/examples" "$DESTDIR$PREFIX/share/ame-shell/ghostty" "$DESTDIR$PREFIX/share/ame-shell/zsh" "$DESTDIR$PREFIX/share/ame-shell/bash" "$DESTDIR$PREFIX/share/ame-shell/xdg" "$DESTDIR$PREFIX/share/ame-shell" "$DESTDIR/usr/share/sddm/themes/ame" "$DESTDIR/usr/local/share/sddm/themes/ame" "$DESTDIR$PREFIX/opt/river-0.5/bin" "$DESTDIR$PREFIX/opt/river-0.5"; do
+    for d in "$DESTDIR$PREFIX/share/icons/ame/cursors" "$DESTDIR$PREFIX/share/icons/ame" "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell/xdg/foot" "$DESTDIR$PREFIX/share/ame-shell/xdg/fastfetch" "$DESTDIR$PREFIX/share/ame-shell/xdg/xdg-desktop-portal" "$DESTDIR$PREFIX/share/ame-shell/examples" "$DESTDIR$PREFIX/share/ame-shell/ghostty" "$DESTDIR$PREFIX/share/ame-shell/zsh" "$DESTDIR$PREFIX/share/ame-shell/bash" "$DESTDIR$PREFIX/share/ame-shell/xdg" "$DESTDIR$PREFIX/share/ame-shell" "$DESTDIR/usr/share/sddm/themes/ame" "$DESTDIR/usr/local/share/sddm/themes/ame" "$DESTDIR$PREFIX/opt/river-0.5/bin" "$DESTDIR$PREFIX/opt/river-0.5" "$DESTDIR$PREFIX/libexec/ame-shell" "$DESTDIR$PREFIX/share/themes/AmeGlass/gtk-3.0" "$DESTDIR$PREFIX/share/themes/AmeGlass"; do
         [ -d "$d" ] && run rmdir "$d" 2>/dev/null
     done
     say "完了しました。"
@@ -235,6 +235,9 @@ install_file "$HERE/ame-update" "$PREFIX/bin/ame-update" 755
 install_file "$HERE/ame-term-shell" "$PREFIX/bin/ame-term-shell" 755
 install_file "$HERE/ame-greeter" "$PREFIX/bin/ame-greeter" 755
 install_file "$HERE/ame-terminal" "$PREFIX/bin/ame-terminal" 755
+# ファイルアプリ(Thunar)を端末と同じ半透明のテーマで開く入口と、そのテーマ(AmeGlass)
+install_file "$HERE/libexec/thunar" "$PREFIX/libexec/ame-shell/thunar" 755
+install_file "$OUT/share/ame-shell/themes/AmeGlass/gtk-3.0/gtk.css" "$PREFIX/share/themes/AmeGlass/gtk-3.0/gtk.css" 644
 # ame-update が git pull してビルドし直すための、ソースの場所の記録
 tmp=$(mktemp "${TMPDIR:-/tmp}/ame-src.XXXXXX") || exit 1
 echo "$ROOT" > "$tmp"

@@ -1,0 +1,118 @@
+/* AmeGlass: ame-shell のファイルアプリ(Thunar)用の GTK3 テーマ。
+ * 端末(foot / ghostty)と同じ、半透明の夜空色に壁紙が透ける見た目にする。
+ * Adwaita のダークを土台に、背景だけを透かす。session/ame-files が GTK_THEME=AmeGlass で Thunar を起動する
+ * (ほかの GTK アプリの見た目は変えない)。 */
+@import url("resource:///org/gtk/libgtk/theme/Adwaita/gtk-contained-dark.css");
+
+@define-color ame_bg rgba(6, 9, 19, 0.66);
+@define-color ame_fg #cdd6f4;
+@define-color ame_sub #a6adc8;
+@define-color ame_acc #89b4fa;
+@define-color ame_line rgba(205, 214, 244, 0.08);
+
+/* 窓全体: 端末と同じ透け具合 */
+window.background,
+window.thunar,
+.thunar {
+  background-color: @ame_bg;
+  color: @ame_fg;
+}
+
+/* 中身はすべて透明にして、窓の背景(半透明)を見せる */
+.thunar scrolledwindow,
+.thunar viewport,
+.thunar paned,
+.thunar notebook,
+.thunar notebook > stack,
+.thunar notebook > header,
+.thunar .view,
+.thunar treeview.view,
+.thunar iconview,
+.thunar .sidebar,
+.thunar placessidebar,
+.thunar placessidebar list,
+.thunar placessidebar row,
+.thunar menubar,
+.thunar toolbar,
+.thunar .toolbar,
+.thunar statusbar,
+.thunar box,
+.thunar grid,
+.thunar frame > border {
+  background-color: transparent;
+  background-image: none;
+  border-color: @ame_line;
+}
+
+/* タイトルバー・ツールバー: ほんの少しだけ明るいガラス */
+.thunar headerbar,
+.thunar .titlebar,
+.thunar toolbar,
+.thunar menubar {
+  background-color: rgba(255, 255, 255, 0.035);
+  background-image: none;
+  box-shadow: none;
+  border-bottom: 1px solid @ame_line;
+}
+
+/* 左の場所の一覧 */
+.thunar .sidebar,
+.thunar placessidebar {
+  background-color: rgba(255, 255, 255, 0.025);
+  border-right: 1px solid @ame_line;
+}
+.thunar placessidebar row:selected,
+.thunar .sidebar row:selected {
+  background-color: rgba(137, 180, 250, 0.22);
+  color: @ame_fg;
+}
+
+/* 選んだファイル */
+.thunar .view:selected,
+.thunar .view:selected:focus,
+.thunar iconview:selected,
+.thunar treeview.view:selected {
+  background-color: rgba(137, 180, 250, 0.30);
+  color: #ffffff;
+  border-radius: 8px;
+}
+.thunar treeview.view:hover,
+.thunar iconview:hover { background-color: rgba(255, 255, 255, 0.05); }
+.thunar treeview.view header button {
+  background-color: transparent;
+  background-image: none;
+  color: @ame_sub;
+  border-color: @ame_line;
+}
+
+/* 入力欄(場所のバー・検索) */
+.thunar entry {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: @ame_fg;
+  border: 1px solid rgba(205, 214, 244, 0.10);
+  border-radius: 10px;
+  box-shadow: none;
+}
+.thunar entry:focus { border-color: rgba(137, 180, 250, 0.6); }
+.thunar button {
+  background-color: transparent;
+  background-image: none;
+  border-color: transparent;
+  box-shadow: none;
+  color: @ame_fg;
+}
+.thunar button:hover { background-color: rgba(255, 255, 255, 0.07); }
+.thunar button:checked,
+.thunar button:active { background-color: rgba(137, 180, 250, 0.22); }
+
+/* 状態表示・区切り */
+.thunar statusbar { color: @ame_sub; border-top: 1px solid @ame_line; }
+.thunar separator { background-color: @ame_line; }
+.thunar scrollbar, .thunar scrollbar trough { background-color: transparent; border: none; }
+.thunar scrollbar slider { background-color: rgba(205, 214, 244, 0.25); border-radius: 8px; min-width: 6px; min-height: 6px; }
+
+/* 右クリックのメニュー・ツールチップは読みやすさ優先で濃いめに */
+menu, .menu, .context-menu, popover.background, tooltip.background {
+  background-color: rgba(14, 18, 32, 0.96);
+  color: @ame_fg;
+}

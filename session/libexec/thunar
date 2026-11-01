@@ -1,0 +1,18 @@
+#!/bin/sh
+# ame-shell のセッションでだけ PATH の先頭に入る Thunar の入口(ame-session が $PREFIX/libexec/ame-shell を前に足す)。
+# Thunar を、端末と同じ半透明のテーマ(AmeGlass: share/themes/AmeGlass/gtk-3.0/gtk.css)で開く。ほかの GTK アプリは変えない。
+# AME_FILES_THEME=0 で、いつものテーマのまま開く。
+self_dir=$(cd "$(dirname "$0")" && pwd)
+real=""
+IFS=:
+for d in $PATH; do
+    [ "$d" = "$self_dir" ] && continue
+    if [ -x "$d/thunar" ]; then real="$d/thunar"; break; fi
+done
+unset IFS
+[ -n "$real" ] || { echo "thunar が見つかりません" >&2; exit 127; }
+if [ "${AME_FILES_THEME:-1}" != 0 ] && [ -z "${GTK_THEME:-}" ]; then
+    GTK_THEME=AmeGlass
+    export GTK_THEME
+fi
+exec "$real" "$@"

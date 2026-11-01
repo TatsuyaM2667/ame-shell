@@ -31,6 +31,8 @@ INIT="$PREFIX_DIR/share/ame-shell/ame-river-init"
 INIT5="$PREFIX_DIR/share/ame-shell/ame-river5-init"
 [ -x "$INIT5" ] || INIT5="$SELF_DIR/ame-river5-init"
 export PATH="$SELF_DIR:$PATH"
+# Thunar を半透明のテーマで開く入口(libexec/ame-shell/thunar)を、本物の thunar より前に
+[ -d "$PREFIX_DIR/libexec/ame-shell" ] && export PATH="$PREFIX_DIR/libexec/ame-shell:$PATH"
 
 log "=== start (river5=$RIVER5 nested=${AME_SESSION_NESTED:-0} pid=$$) ==="
 
