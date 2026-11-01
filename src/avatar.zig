@@ -65,6 +65,8 @@ pub const Avatar = struct {
 
     fn work(self: *Avatar, path: [:0]u8) void {
         const px = icons.decode(path, SIZE, SIZE, true);
+        // ログイン画面(SDDM)にも同じ写真を出す(置き場があるときだけ)
+        if (px) |p| @import("sddmshare.zig").saveAvatar(p, SIZE);
         std.heap.c_allocator.free(path);
         self.mutex.lock();
         if (self.pending) |old| std.c.free(old);

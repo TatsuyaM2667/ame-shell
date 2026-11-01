@@ -669,6 +669,10 @@ pub const Backdrop = struct {
     levels: [5]Target = .{ .{}, .{}, .{}, .{}, .{} },
     /// パネルがサンプルする最終ブラー
     blurred: c.GLuint = 0,
+    /// 最終ブラーのフレームバッファと大きさ(ログイン画面用に読み出す: sddmshare.zig)
+    blurred_fbo: c.GLuint = 0,
+    blurred_w: c_int = 0,
+    blurred_h: c_int = 0,
 
     /// 壁紙を (pw, ph) の解像度で描き、その後ブラー段を作る。
     pub fn render(self: *Backdrop, gpu: *Gpu, pw: c_int, ph: c_int, p: WallParams, passes: u32) void {
@@ -716,6 +720,9 @@ pub const Backdrop = struct {
             src = dst;
         }
         self.blurred = src.tex;
+        self.blurred_fbo = src.fbo;
+        self.blurred_w = src.w;
+        self.blurred_h = src.h;
         c.glBindFramebuffer(c.GL_FRAMEBUFFER, 0);
     }
 

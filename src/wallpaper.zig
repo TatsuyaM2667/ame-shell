@@ -49,6 +49,8 @@ pub const Wallpaper = struct {
     scene_time: f32 = 0,
     last_ms: u64 = 0,
     first_frames: u8 = 0,
+    /// ログイン画面(SDDM)用に、ぼかした壁紙を書き出す(起動時と壁紙を変えたとき。sddmshare.zig)
+    sddm_pending: bool = true,
     /// 切り替え演出(0=波紋 1=円 2=斜めワイプ 3=短冊)と円の中心(uv、下が 0)
     fx: c_int = 0,
     /// 表示中の画像のパス(ピッカーで「いまの壁紙」を選ぶため)
@@ -159,6 +161,7 @@ pub const Wallpaper = struct {
 
     /// 演出を指定して切り替える(fx < 0 なら円・斜めワイプ・短冊からランダム)。origin は出力上の uv。
     pub fn switchFx(self: *Wallpaper, mode: cfgmod.WallMode, image_path: []const u8, fx: c_int, origin: [2]f32) void {
+        self.sddm_pending = true;
         self.fx = if (fx >= 0) fx else @intCast(1 + @mod(loop.nowMs() / 7, 3));
         self.fx_origin = .{ origin[0], 1 - origin[1] };
         // 円の演出は時間をかけた方が映えるので応答を遅めに
@@ -419,6 +422,14 @@ pub const Wallpaper = struct {
         if (!transitioning and (self.prev_img.tex != 0 or self.prev_player != null)) self.dropPrev();
         // ガラス面は壁紙が変わった直後だけ描き直す(ライブ壁紙の毎フレームでは描き直さない:
         // ブラーの微小な変化のためにバーを再描画するのは割に合わない)
+        // 切り替えが終わり、画像・動画なら絵が出てから(黒い画面を書き出さないように)。最初の画面だけ
+        if (self.sddm_pending and !transitioning and (self.img.tex != 0 or (self.mode != .image and self.mode != .video)) and
+            app.outputs.items.len > 0 and app.outputs.items[0] == self.out)
+        {
+            self.sddm_pending = false;
+            const bd = &self.out.backdrop;
+            @import("sddmshare.zig").saveFramebuffer(bd.blurred_fbo, bd.blurred_w, bd.blurred_h, theme.accent(app), false);
+        }
         if (transitioning or self.first_frames < 2) {
             app.backdropChanged(self.out);
             self.first_frames += 1;

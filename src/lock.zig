@@ -51,6 +51,8 @@ pub const Lock = struct {
     session: ?*c.struct_ext_session_lock_v1 = null,
     views: [MAX_OUT]?LockView = [_]?LockView{null} ** MAX_OUT,
     locked: bool = false,
+    /// このロックで、ログイン画面(SDDM)用の背景をもう書き出したか(sddmshare.zig)
+    sddm_saved: bool = false,
     pam: ?Pam = null,
     service: [:0]const u8 = "ame-shell",
     pw: [256]u8 = undefined,
@@ -134,6 +136,7 @@ pub const Lock = struct {
         self.session = sess;
         _ = c.ext_session_lock_v1_add_listener(sess, &session_listener, self);
         self.locked = true;
+        self.sddm_saved = false;
         self.unlocking = false;
         self.pw_len = 0;
         self.msg_len = 0;
@@ -322,6 +325,13 @@ pub const Lock = struct {
         gl.sparkle = 1.0;
         cv.glass(0, 0, W, H, 0, gl);
         cv.rect(0, 0, W, H, 0, Color.hex(0x000000).alpha(0.25 * (1 - t)));
+        // 出そろったら 1 回だけ、この背景(ぼかした壁紙 + ガラスの色味・星)をログイン画面用に書き出す
+        if (primary and !self.sddm_saved and self.appear.x > 0.999 and !self.unlocking) {
+            self.sddm_saved = true;
+            cv.flush();
+            const sc: f32 = cv.scale;
+            @import("sddmshare.zig").saveFramebuffer(0, @intFromFloat(W * sc), @intFromFloat(H * sc), acc, true);
+        }
 
         cv.save();
         cv.translate(0, (1 - t) * 30 - self.unlock_s.x * 60);
