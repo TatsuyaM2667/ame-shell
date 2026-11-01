@@ -375,14 +375,19 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
     }
     // スペクトラム(cava)をレコードの外周に放射状に
     const n = data.BARS;
+    // cava が無い・起動できない・音を拾えないときは、平らな輪にして理由をレコードの下に書く
+    const cava_problem = if (playing) f.cava.problem() else null;
     for (0..n) |i| {
         const a = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(n)) * std.math.tau - std.math.pi / 2.0 + v.vinyl_angle * 0.25;
-        const val = if (f.cava.running()) f.cava.values[i] else 0.05;
+        const val = if (f.cava.running() and cava_problem == null) f.cava.values[i] else 0.05;
         const r0 = R + 10;
         const r1 = r0 + 4 + val * 44;
         const ca = @cos(a);
         const sa = @sin(a);
         cv.line(cx + ca * r0, cy + sa * r0, cx + ca * r1, cy + sa * r1, 4, Color.mix(acc, acc.lighten(0.6), val).alpha(0.5 + 0.5 * val));
+    }
+    if (cava_problem) |msg| {
+        _ = cv.text(cx, cy + R + 34, 12, sub.alpha(0.85), msg, .{ .alignment = .center });
     }
     // 盤: 縁の光る輪 → 溝(曲間のすき間で区切られた帯)→ 無音の溝(デッドワックス)→ ラベル
     const lr: f32 = 68; // ラベル = ジャケット(見やすさを優先して本物の LP より大きく、直径の約半分)

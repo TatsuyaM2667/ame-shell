@@ -233,13 +233,46 @@ pub const Cava = struct {
     values: [BARS]f32 = [_]f32{0} ** BARS,
     on_frame: ?*const fn (ctx: *anyopaque) void = null,
     ctx: *anyopaque = undefined,
+    /// 波形が出せない理由(メディアタブに表示する)
+    state: State = .idle,
+    started_ms: u64 = 0,
+    /// 最後に 0 でない値が来た時刻
+    sound_ms: u64 = 0,
+    /// 失敗したときは、しばらく起動し直さない(毎フレーム起動を試みないように)
+    retry_ms: u64 = 0,
+
+    pub const State = enum { idle, ok, missing, failed };
+
+    /// 再生中なのにこれだけの間ずっと無音なら「音を拾えていない」とみなす
+    const SILENT_MS = 3000;
+    const RETRY_MS = 10_000;
 
     pub fn running(self: *const Cava) bool {
         return self.fd >= 0;
     }
 
+    /// 波形の代わりに出す説明(出せているときは null)
+    pub fn problem(self: *const Cava) ?[]const u8 {
+        return switch (self.state) {
+            .missing => "cava が無いため波形を表示できません",
+            .failed => "cava が起動できませんでした(音声の入力を確認)",
+            .ok, .idle => if (self.running() and loop.nowMs() -| @max(self.started_ms, self.sound_ms) > SILENT_MS)
+                "cava が音を拾えていません(PipeWire / PulseAudio を確認)"
+            else
+                null,
+        };
+    }
+
     pub fn start(self: *Cava) void {
         if (self.fd >= 0) return;
+        const now = loop.nowMs();
+        if ((self.state == .missing or self.state == .failed) and now < self.retry_ms) return;
+        self.retry_ms = now + RETRY_MS;
+        if (!sys.hasCommand("cava")) {
+            if (self.state != .missing) std.log.warn("cava が見つかりません。メディアの波形は表示されません({s} cava)", .{@import("../deps.zig").installCmd()});
+            self.state = .missing;
+            return;
+        }
         // 設定ファイルを XDG_RUNTIME_DIR に書く(raw 出力、ASCII、; 区切り、改行でフレーム)
         const rt = std.posix.getenv("XDG_RUNTIME_DIR") orelse return;
         var pbuf: [256]u8 = undefined;
@@ -259,7 +292,13 @@ pub const Cava = struct {
             \\
         , .{BARS}) catch {};
         f.close();
-        self.fd = sys.spawnReader(&.{ "cava", "-p", path.ptr }, &self.pid) orelse return;
+        self.fd = sys.spawnReader(&.{ "cava", "-p", path.ptr }, &self.pid) orelse {
+            self.state = .failed;
+            return;
+        };
+        self.started_ms = now;
+        self.sound_ms = 0;
+        if (self.state != .ok) self.state = .idle;
         self.app.loop.add(self.fd, c.EPOLLIN | c.EPOLLHUP, self, onRead) catch {};
     }
 
@@ -277,7 +316,14 @@ pub const Cava = struct {
         const self: *Cava = @ptrCast(@alignCast(ctx));
         const n = c.read(fd, self.buf[self.len..].ptr, self.buf.len - self.len);
         if (n <= 0) {
-            if (n == 0 or ev & c.EPOLLHUP != 0) self.stop();
+            if (n == 0 or ev & c.EPOLLHUP != 0) {
+                // 自分で止めたのではなく cava が終わった(入力の機器を開けないなど)
+                const ran = loop.nowMs() -| self.started_ms;
+                std.log.warn("cava が {d} ms で終了しました(音声の入力を開けない可能性があります)", .{ran});
+                self.state = .failed;
+                self.stop();
+                if (self.on_frame) |f| f(self.ctx);
+            }
             return;
         }
         self.len += @intCast(n);
@@ -290,6 +336,10 @@ pub const Cava = struct {
                 if (i >= BARS) break;
                 if (v.len == 0) continue;
                 self.values[i] = (std.fmt.parseFloat(f32, v) catch 0) / 100;
+                if (self.values[i] > 0) {
+                    self.sound_ms = loop.nowMs();
+                    self.state = .ok;
+                }
                 i += 1;
             }
             const rest = self.len - nl - 1;
