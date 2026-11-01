@@ -43,9 +43,16 @@ export QT_QPA_PLATFORM="wayland;xcb"
 export SDL_VIDEODRIVER="wayland,x11"
 export _JAVA_AWT_WM_NONREPARENTING=1
 export ELECTRON_OZONE_PLATFORM_HINT=auto
-# ユーザーの環境変数(~/.config/ame-shell/environment)
+# ユーザーの環境変数(~/.config/ame-shell/environment。例は share/ame-shell/examples/environment)
 _ame_env="${XDG_CONFIG_HOME:-$HOME/.config}/ame-shell/environment"
 [ -r "$_ame_env" ] && . "$_ame_env"
+# Flatpak のアプリ(.desktop・アイコン)をランチャーやポータルが見つけられるように、
+# XDG_DATA_DIRS にエクスポート先を足す(既に入っていれば足さない。ユーザーの設定の後に足す)
+XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+for d in "$HOME/.local/share/flatpak/exports/share" /var/lib/flatpak/exports/share; do
+    case ":$XDG_DATA_DIRS:" in *":$d:"*|*":$d/:"*) ;; *) XDG_DATA_DIRS="$XDG_DATA_DIRS:$d" ;; esac
+done
+export XDG_DATA_DIRS
 # カーソルの大きさ(未設定のときだけ。GNOME の既定と同じ 24)
 export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
 # カーソルのテーマ: ame-shell のもの(share/icons/ame)。無ければ Adwaita。XCURSOR_THEME を自分で決めていればそのまま

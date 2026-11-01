@@ -1,0 +1,16 @@
+#!/bin/sh
+# ~/.config/ame-shell/autostart の例(ame-shell が入れたもの: share/ame-shell/examples/autostart)
+#
+# セッションの開始時に River の init が 1 回だけ実行する(画面と D-Bus の準備ができた後)。
+# 使うには: cp この ファイル ~/.config/ame-shell/autostart && chmod +x ~/.config/ame-shell/autostart
+# (実行権限が無くても sh で実行される)。ここに書くコマンドは、終わらないものは末尾に & を付ける。
+# 出力は捨てられるので、ログを見たいものは自分でファイルに書き出すこと。
+
+# 日本語入力: 既に動いているものを置き換えて起動(-d は裏で動く)
+command -v fcitx5 >/dev/null 2>&1 && fcitx5 -d --replace
+
+# 例: 起動時に端末を 1 つ開く
+# foot &
+
+# 例: クリップボードの履歴(cliphist を入れている場合)
+# wl-paste --watch cliphist store &

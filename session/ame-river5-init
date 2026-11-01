@@ -1,7 +1,4 @@
 #!/bin/sh
-# ユーザーの自動起動(~/.config/ame-shell/autostart)
-_ame_autostart="${XDG_CONFIG_HOME:-$HOME/.config}/ame-shell/autostart"
-[ -x "$_ame_autostart" ] && "$_ame_autostart" >/dev/null 2>&1 &
 # ame-river5-init: River 0.5 用の初期化スクリプト(POSIX sh)。
 # River 0.5 ではウィンドウの配置・キー操作・アニメーションを ame-shell(内蔵 WM)が担当する。
 # River 0.3 用の設定コマンドやレイアウト生成器は使わない(River 0.5 はその文字列を含む init を拒否する)。ユーザーの ~/.config/river/init は読まず、触りもしない。
@@ -43,6 +40,17 @@ if [ "${AME_SESSION_NESTED:-0}" != "1" ]; then
 
     # ---- 日本語入力 ----
     command -v fcitx5 >/dev/null 2>&1 && fcitx5 -d >/dev/null 2>&1
+
+    # ユーザーの自動起動(~/.config/ame-shell/autostart。例は share/ame-shell/examples/autostart)。
+    # D-Bus に WAYLAND_DISPLAY を伝えた後に動かす(fcitx5 などが画面とつながれるように)
+    _ame_autostart="${XDG_CONFIG_HOME:-$HOME/.config}/ame-shell/autostart"
+    if [ -x "$_ame_autostart" ]; then
+        log "autostart: $_ame_autostart"
+        "$_ame_autostart" >/dev/null 2>&1 &
+    elif [ -f "$_ame_autostart" ]; then
+        log "autostart: sh $_ame_autostart(実行権限が無いので sh で)"
+        sh "$_ame_autostart" >/dev/null 2>&1 &
+    fi
 
     [ -f "$HOME/.config/ame-shell/river5-extra.sh" ] && . "$HOME/.config/ame-shell/river5-extra.sh"
 

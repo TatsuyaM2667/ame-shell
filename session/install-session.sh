@@ -100,7 +100,7 @@ if [ "$UNINSTALL" = 1 ]; then
     done < "$MANIFEST"
     run rm -f "$MANIFEST"
     # 自分で作った空ディレクトリだけ片付ける(他のファイルがあれば残る)
-    for d in "$DESTDIR$PREFIX/share/icons/ame/cursors" "$DESTDIR$PREFIX/share/icons/ame" "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell/xdg/foot" "$DESTDIR$PREFIX/share/ame-shell/xdg/fastfetch" "$DESTDIR$PREFIX/share/ame-shell/xdg" "$DESTDIR$PREFIX/share/ame-shell" "$DESTDIR$PREFIX/opt/river-0.5/bin" "$DESTDIR$PREFIX/opt/river-0.5"; do
+    for d in "$DESTDIR$PREFIX/share/icons/ame/cursors" "$DESTDIR$PREFIX/share/icons/ame" "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell/xdg/foot" "$DESTDIR$PREFIX/share/ame-shell/xdg/fastfetch" "$DESTDIR$PREFIX/share/ame-shell/xdg/xdg-desktop-portal" "$DESTDIR$PREFIX/share/ame-shell/examples" "$DESTDIR$PREFIX/share/ame-shell/xdg" "$DESTDIR$PREFIX/share/ame-shell" "$DESTDIR$PREFIX/opt/river-0.5/bin" "$DESTDIR$PREFIX/opt/river-0.5"; do
         [ -d "$d" ] && run rmdir "$d" 2>/dev/null
     done
     say "完了しました。"
@@ -247,6 +247,10 @@ install_file "$OUT/share/ame-shell/config.ame" "$PREFIX/share/ame-shell/config.a
 install_file "$OUT/share/ame-shell/bt-connect.sh" "$PREFIX/share/ame-shell/bt-connect.sh" 755
 install_file "$OUT/share/ame-shell/xdg/foot/foot.ini" "$PREFIX/share/ame-shell/xdg/foot/foot.ini" 644
 install_file "$OUT/share/ame-shell/xdg/fastfetch/config.jsonc" "$PREFIX/share/ame-shell/xdg/fastfetch/config.jsonc" 644
+install_file "$OUT/share/ame-shell/xdg/xdg-desktop-portal/river-portals.conf" "$PREFIX/share/ame-shell/xdg/xdg-desktop-portal/river-portals.conf" 644
+# ユーザー設定の例(~/.config/ame-shell/environment・autostart。README を参照)
+install_file "$OUT/share/ame-shell/examples/environment" "$PREFIX/share/ame-shell/examples/environment" 644
+install_file "$OUT/share/ame-shell/examples/autostart" "$PREFIX/share/ame-shell/examples/autostart" 755
 for w in "$OUT"/share/ame-shell/widgets/*.wasm; do
     [ -f "$w" ] || continue
     install_file "$w" "$PREFIX/share/ame-shell/widgets/$(basename "$w")" 644

@@ -1,0 +1,23 @@
+# ~/.config/ame-shell/environment の例(ame-shell が入れたもの: share/ame-shell/examples/environment)
+#
+# ame-session がログインのたびに読み込む(POSIX sh の文として . で読む)。
+# ここで export した変数は、River・ame-shell・そこから起動するすべてのアプリに渡る。
+# 使うには: mkdir -p ~/.config/ame-shell && cp この ファイル ~/.config/ame-shell/environment
+# 変更は次のログインから有効。
+
+# ---- 日本語入力(fcitx5)----
+# Wayland ネイティブのアプリは text-input で fcitx5 とつながるので、GTK_IM_MODULE は設定しない
+# (設定すると GTK4 のアプリで変換の候補が出ないことがある)。
+export XMODIFIERS=@im=fcitx            # X11(Xwayland)のアプリ
+export QT_IM_MODULES="wayland;fcitx"    # Qt 6.7 以降: Wayland を先に試す
+export QT_IM_MODULE=fcitx               # 古い Qt 用
+export SDL_IM_MODULE=fcitx
+# export GLFW_IM_MODULE=ibus            # kitty など GLFW のアプリ(fcitx5 の ibus 互換で動く)
+
+# ---- 見た目 ----
+# export XCURSOR_THEME=Adwaita
+# export XCURSOR_SIZE=32
+# export GTK_THEME=Adwaita:dark
+
+# ---- キーボード配列(River 0.5 のセッション)----
+# export XKB_DEFAULT_LAYOUT=jp

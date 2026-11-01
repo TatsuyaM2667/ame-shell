@@ -1,7 +1,4 @@
 #!/bin/sh
-# ユーザーの自動起動(~/.config/ame-shell/autostart)
-_ame_autostart="${XDG_CONFIG_HOME:-$HOME/.config}/ame-shell/autostart"
-[ -x "$_ame_autostart" ] && "$_ame_autostart" >/dev/null 2>&1 &
 # ame-river-init: Ame Shell 用の River 0.3 初期化スクリプト(riverctl で設定)。
 # ユーザーの ~/.config/river/init は読まず、触りもしない。
 # 追加設定は ~/.config/ame-shell/river-extra.sh があれば最後に読み込む。
@@ -94,6 +91,17 @@ if [ "${AME_SESSION_NESTED:-0}" != "1" ]; then
     }
     # 実装(-gtk・-wlr)は xdg-desktop-portal が D-Bus で必要なときに起動する
     p=$(find_bin xdg-desktop-portal) && "$p" >/dev/null 2>&1 &
+fi
+
+# ユーザーの自動起動(~/.config/ame-shell/autostart。例は share/ame-shell/examples/autostart)。
+# D-Bus に WAYLAND_DISPLAY を伝えた後に動かす(fcitx5 などが画面とつながれるように)
+_ame_autostart="${XDG_CONFIG_HOME:-$HOME/.config}/ame-shell/autostart"
+if [ -x "$_ame_autostart" ]; then
+    log "autostart: $_ame_autostart"
+    "$_ame_autostart" >/dev/null 2>&1 &
+elif [ -f "$_ame_autostart" ]; then
+    log "autostart: sh $_ame_autostart(実行権限が無いので sh で)"
+    sh "$_ame_autostart" >/dev/null 2>&1 &
 fi
 
 [ -f "$HOME/.config/ame-shell/river-extra.sh" ] && . "$HOME/.config/ame-shell/river-extra.sh"
