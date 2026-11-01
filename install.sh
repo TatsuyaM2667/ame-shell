@@ -7,6 +7,7 @@
 #
 # オプション: --no-deps(パッケージを入れない)/ --no-river(River が無くても作らない)/ --no-ghostty(ghostty を作らない)/ --yes(確認しない)
 #           --debug(デバッグ情報つき・安全検査ありでビルド。クラッシュのバックトレースに関数名が出る)
+#           --mozc(日本語入力 Mozc をソースからビルド。Chimera・FreeBSD はパッケージで入らないため。10〜20 分)
 # FreeBSD では scripts/install-freebsd.sh、Arch 系では scripts/install-arch.sh(どちらも完全自動)に任せる。
 #
 # Linux で行うこと:
@@ -26,6 +27,7 @@ UNINSTALL=0
 NO_DEPS=0
 NO_RIVER=0
 NO_GHOSTTY=0
+MOZC=0
 ASSUME_YES=0
 BUILD_OPTS="-Doptimize=ReleaseFast"
 FWD=""
@@ -36,9 +38,10 @@ for a in "$@"; do
         --no-deps) NO_DEPS=1 ;;
         --no-river) NO_RIVER=1 ;;
         --no-ghostty) NO_GHOSTTY=1 ;;
+        --mozc) MOZC=1; FWD="$FWD --mozc" ;;
         --yes|-y) ASSUME_YES=1; FWD="$FWD --yes" ;;
         --debug) BUILD_OPTS="-Doptimize=ReleaseSafe -Dstrip=false"; FWD="$FWD --debug" ;;
-        -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
         *) echo "unknown option: $a" >&2; exit 2 ;;
     esac
 done
@@ -414,4 +417,16 @@ if command -v zsh >/dev/null 2>&1; then
     else
         info "zsh: ame-shell の設定で開きます(端末の中だけ。ログインシェルは変えません)"
     fi
+fi
+
+# ---------------------------------------------------------------------------
+# 日本語入力 Mozc(任意): Chimera はパッケージが無いので --mozc のときソースからビルド(scripts/build-mozc.sh)
+if [ -e /usr/lib/fcitx5/fcitx5-mozc.so ]; then
+    :
+elif [ "$MOZC" = 1 ]; then
+    say "日本語入力 Mozc をソースからビルド"
+    if [ "$ASSUME_YES" = 1 ]; then sh "$REPO/scripts/build-mozc.sh" --yes; else sh "$REPO/scripts/build-mozc.sh"; fi ||
+        info "(Mozc のビルドに失敗しました。ほかはインストール済みです)"
+else
+    case "${LANG:-}" in ja_*) info "日本語入力 Mozc が入っていません。sh install.sh --mozc でソースからビルドできます(10〜20 分)" ;; esac
 fi

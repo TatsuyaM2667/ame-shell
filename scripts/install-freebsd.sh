@@ -1,7 +1,7 @@
 #!/bin/sh
 # install-freebsd.sh: FreeBSD 14 / 15(amd64)に ame-shell を「完全自動」で入れる。POSIX sh のみ。
 #
-#   sh scripts/install-freebsd.sh [--user NAME] [--jobs N] [--no-gpu] [--no-ja] [--no-super-tap] [--yes]
+#   sh scripts/install-freebsd.sh [--user NAME] [--jobs N] [--no-gpu] [--no-ja] [--mozc] [--no-super-tap] [--yes]
 #
 # やること(すべて冪等。2 回目以降は済んでいる手順を飛ばす):
 #   1. pkg で依存を入れる(River 0.4 以降・SDDM・Xorg(SDDM のログイン画面用)・Wayland・フォント など)
@@ -17,6 +17,7 @@
 #   --jobs N        ビルドの並列数(省略時は CPU 数)
 #   --no-gpu        GPU ドライバを触らない(VM や、自分で設定済みのとき)
 #   --no-ja         日本語入力(fcitx5 + mozc)を入れない(日本語フォントは入れる)
+#   --mozc          fcitx5 用の Mozc をソースからビルドして入れる(リポジトリに無いとき。10〜20 分)
 #   --no-super-tap  Super 単独でランチャーを開く機能のための入力デバイスの権限を設定しない
 #   --debug         デバッグ情報つき・安全検査ありでビルドする(クラッシュ時のバックトレースに関数名が出る)
 #   --yes           確認せずに進める
@@ -27,6 +28,7 @@ TARGET_USER=""
 JOBS=""
 DO_GPU=1
 DO_JA=1
+DO_MOZC=0
 DO_TAP=1
 BUILD_OPTS="-Doptimize=ReleaseFast"
 ASSUME_YES=0
@@ -36,6 +38,7 @@ while [ $# -gt 0 ]; do
         --jobs) JOBS="$2"; shift 2 ;;
         --no-gpu) DO_GPU=0; shift ;;
         --no-ja) DO_JA=0; shift ;;
+        --mozc) DO_MOZC=1; shift ;;
         --no-super-tap) DO_TAP=0; shift ;;
         --debug) BUILD_OPTS="-Doptimize=ReleaseSafe -Dstrip=false"; shift ;;
         --yes|-y) ASSUME_YES=1; shift ;;
@@ -151,8 +154,12 @@ fi
 if [ -n "$skipped" ]; then
     info "リポジトリに無いため飛ばしました:$skipped"
     case "$skipped" in
-        *mozc*) info "  (fcitx5 用の Mozc は latest リポジトリか ports の japanese/fcitx5-mozc で入れられます。導入済みなら問題ありません)" ;;
+        *mozc*) [ "$DO_MOZC" = 1 ] || info "  (fcitx5 用の Mozc は --mozc でソースからビルドできます。latest リポジトリや ports の japanese/fcitx5-mozc でも入ります)" ;;
     esac
+fi
+if [ "$DO_MOZC" = 1 ] && [ "$DO_JA" = 1 ] && [ ! -e /usr/local/lib/fcitx5/fcitx5-mozc.so ]; then
+    say "日本語入力 Mozc をソースからビルド"
+    sh "$REPO/scripts/build-mozc.sh" --yes || info "(Mozc のビルドに失敗しました。日本語入力なしで続けます)"
 fi
 river_ver=$(river -version 2>&1 || true)
 info "river: $river_ver"
