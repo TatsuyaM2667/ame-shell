@@ -429,7 +429,7 @@ pub const Frame = struct {
             const reach = @max(T_, T_ + @max(d.h.x * d.t.x, if (d.open) d.h.target else 0)) + 1;
             const inside = self.ptr_in and y < reach and x >= x0 - R_ and x <= x0 + w + R_;
             if (inside and d.by_key) d.by_key = false;
-            if (!d.by_key and inside != d.open) {
+            if (!d.by_key and inside != d.open and !(inside and loop.nowMs() < self.app.edge_quiet_until_ms)) {
                 if (inside) d.show(false) else d.hide();
                 changed = true;
             }
@@ -441,7 +441,7 @@ pub const Frame = struct {
             const right_off = self.side.w.x * self.side.t.x + self.session.w.x * self.session.t.x;
             const inside = self.ptr_in and x > W - @max(T_, T_ + right_off + @max(d.w.x * d.t.x, if (d.open) d.w.target else 0)) - 1 and y >= H / 2 - h / 2 - R_ and y <= H / 2 + h / 2 + R_;
             if (inside and d.by_key) d.by_key = false;
-            if (!d.by_key and inside != d.open) {
+            if (!d.by_key and inside != d.open and !(inside and loop.nowMs() < self.app.edge_quiet_until_ms)) {
                 if (inside) d.show(false) else d.hide();
                 changed = true;
             }
@@ -453,7 +453,7 @@ pub const Frame = struct {
             const reach = @max(T_, T_ + @max(d.h.x * d.t.x, if (d.open) d.h.target else 0)) + R_;
             const inside = self.ptr_in and y > H - reach and x >= W - T_ - w - R_;
             if (inside and d.by_key) d.by_key = false;
-            if (!d.by_key and inside != d.open) {
+            if (!d.by_key and inside != d.open and !(inside and loop.nowMs() < self.app.edge_quiet_until_ms)) {
                 if (inside) d.show(false) else d.hide();
                 changed = true;
             }

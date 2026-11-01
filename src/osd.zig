@@ -17,7 +17,7 @@ const loop = @import("platform/loop.zig");
 
 pub const Kind = enum { volume, brightness, info };
 
-const W: u32 = 360;
+const W: u32 = 820;
 const H: u32 = 120;
 
 pub const Osd = struct {
@@ -131,7 +131,8 @@ pub const Osd = struct {
         }
         const acc = theme.accent(app);
         const txt = theme.text(app);
-        const pw: f32 = 300;
+        // 文字だけの案内は長さに合わせて広げる(音量・明るさは 300)
+        const pw: f32 = if (self.kind == .info) std.math.clamp(cv.measure(self.msg[0..self.msg_len], 16, false) + 56, 300, @as(f32, W) - 20) else 300;
         const ph: f32 = 56;
         const x = (@as(f32, W) - pw) / 2;
         const y = @as(f32, H) - ph - 20;

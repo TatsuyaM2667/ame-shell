@@ -73,6 +73,12 @@ pub const Window = struct {
     tw: f32 = 0,
     th: f32 = 0,
     float_rect: [4]f32 = .{ 0, 0, 0, 0 },
+    /// 浮いているときの縁のつまみ(透明な decoration_below。updateGrip)
+    grip_surf: ?*c.struct_wl_surface = null,
+    grip_dec: ?*c.struct_river_decoration_v1 = null,
+    grip_vp: ?*c.struct_wp_viewport = null,
+    grip_buf: ?*c.struct_wl_buffer = null,
+    grip_size: [2]i32 = .{ 0, 0 },
     proposed: [2]i32 = .{ -1, -1 },
     // アニメーション
     px: Spring = Spring.init(0, 0.36, 0.80),
@@ -145,6 +151,14 @@ pub const WSeat = struct {
     op_dx: i32 = 0,
     op_dy: i32 = 0,
     op_end_pending: bool = false,
+    /// 大きさを変える辺(xdg の resize_edge: 上 1・下 2・左 4・右 8)。窓の縁をドラッグしたときはアプリが教える
+    op_edges: u32 = 0,
+    req_edges: u32 = 0,
+    /// 操作を始めたときのカーソルの位置(グローバル)と、今の位置
+    op_px: i32 = 0,
+    op_py: i32 = 0,
+    ptr_x: i32 = 0,
+    ptr_y: i32 = 0,
     /// River にカーソルのテーマ(XCURSOR_THEME / XCURSOR_SIZE)をまだ伝えていない
     cursor_pending: bool = true,
     enter_pending: bool = false,
@@ -183,6 +197,11 @@ const KeyBind = struct { wm: *Wm, obj: *c.struct_river_xkb_binding_v1, action: A
 
 pub const Wm = struct {
     app: *App,
+    /// 浮かせたときの案内(戻し方)を出した回数(多すぎるとうるさいので 3 回まで)
+    float_hints: u8 = 0,
+    /// カーソルが乗っている、浮いた窓の縁のつまみと、その辺
+    grip_hover: ?*Window = null,
+    grip_edges: u32 = 0,
     mgr: *c.struct_river_window_manager_v1,
     xkb: ?*c.struct_river_xkb_bindings_v1 = null,
     lsh: ?*c.struct_river_layer_shell_v1 = null,
@@ -463,13 +482,7 @@ pub const Wm = struct {
             .fullscreen => if (fw) |w| {
                 w.want_fullscreen = !w.fullscreen;
             },
-            .float => if (fw) |w| {
-                w.floating = !w.floating;
-                if (w.floating) {
-                    // 今の位置・大きさのまま浮かせる(少し小さくして中央寄りに)
-                    w.float_rect = .{ w.tx + w.tw * 0.08, w.ty + w.th * 0.08, w.tw * 0.84, w.th * 0.84 };
-                }
-            },
+            .float => if (fw) |w| self.toggleFloat(w),
             .focus_next, .focus_prev => if (s) |ss| {
                 const list = self.visibleList(o, false);
                 if (list.len == 0) return;
@@ -526,12 +539,34 @@ pub const Wm = struct {
                 if (!w.floating) {
                     w.floating = true;
                     w.float_rect = .{ w.tx, w.ty, w.tw, w.th };
+                    if (a == .op_move and w.tw > 0 and w.th > 0) {
+                        // タイルから引きはがした: ひと回り小さくして、つかんだ所がカーソルの下に残るように
+                        const nw = @min(w.tw, @max(w.tw * 0.7, 480));
+                        const nh = @min(w.th, @max(w.th * 0.7, 320));
+                        const px: f32 = @floatFromInt(ss.ptr_x);
+                        const py: f32 = @floatFromInt(ss.ptr_y);
+                        const fx = std.math.clamp((px - w.tx) / w.tw, 0, 1);
+                        const fy = std.math.clamp((py - w.ty) / w.th, 0, 1);
+                        if (ss.ptr_x != 0 or ss.ptr_y != 0) w.float_rect = .{ px - fx * nw, py - fy * nh, nw, nh };
+                    }
+                    self.floatHint();
                 }
                 ss.op = if (a == .op_move) .move else .resize;
                 ss.op_window = w;
                 ss.op_start = w.float_rect;
                 ss.op_dx = 0;
                 ss.op_dy = 0;
+                ss.op_px = ss.ptr_x;
+                ss.op_py = ss.ptr_y;
+                // 大きさを変える辺: アプリが教えた辺(窓の縁のドラッグ)。無ければ(Super+右ドラッグ)カーソルに近い角
+                ss.op_edges = ss.req_edges;
+                ss.req_edges = 0;
+                if (a == .op_resize and ss.op_edges == 0) {
+                    const r = w.float_rect;
+                    const px: f32 = @floatFromInt(ss.ptr_x);
+                    const py: f32 = @floatFromInt(ss.ptr_y);
+                    ss.op_edges = (if (px < r[0] + r[2] / 2) @as(u32, 4) else 8) | (if (py < r[1] + r[3] / 2) @as(u32, 1) else 2);
+                }
                 ss.focused = w;
                 c.river_seat_v1_op_start_pointer(ss.obj);
                 if (a == .op_resize) c.river_window_v1_inform_resize_start(w.obj);
@@ -545,6 +580,137 @@ pub const Wm = struct {
                 ss.force_focus = true;
             },
         }
+    }
+
+
+    // ---------------------------------------------------------------------
+    // 浮いた窓の縁のつまみ: 窓の下に透明な装飾(decoration_below)を、窓より GRIP だけ大きく置く。
+    // 窓の外側の細い帯だけがこの面になるので、そこにカーソルを乗せると大きさ変更の矢印になり、押すとその辺で
+    // 大きさを変える(アプリが自分の縁を持っていなくても使える)。中身は透明な 1 画素を拡大したもの
+    // ---------------------------------------------------------------------
+
+    fn updateGrip(self: *Wm, w: *Window, want: bool) void {
+        if (!want) return dropGrip(w);
+        const app = self.app;
+        const vpm = app.viewporter orelse return;
+        const spb = app.spb_mgr orelse return;
+        if (w.grip_surf == null) {
+            const surf = c.wl_compositor_create_surface(app.compositor) orelse return;
+            const dec = c.river_window_v1_get_decoration_above(w.obj, surf) orelse {
+                c.wl_surface_destroy(surf);
+                return;
+            };
+            const vp = c.wp_viewporter_get_viewport(vpm, surf);
+            const buf = c.wp_single_pixel_buffer_manager_v1_create_u32_rgba_buffer(spb, 0, 0, 0, 0);
+            c.wl_surface_attach(surf, buf, 0, 0);
+            w.grip_surf = surf;
+            w.grip_dec = dec;
+            w.grip_vp = vp;
+            w.grip_buf = buf;
+            w.grip_size = .{ 0, 0 };
+        }
+        const gw = w.w + 2 * GRIP;
+        const gh = w.h + 2 * GRIP;
+        c.river_decoration_v1_set_offset(w.grip_dec, -GRIP, -GRIP);
+        if (gw != w.grip_size[0] or gh != w.grip_size[1]) {
+            c.wp_viewport_set_destination(w.grip_vp, gw, gh);
+            // 上に重ねるので、入力は外側の帯だけ(中身のクリックは窓へ)
+            const reg = c.wl_compositor_create_region(self.app.compositor);
+            c.wl_region_add(reg, 0, 0, gw, gh);
+            c.wl_region_subtract(reg, GRIP, GRIP, w.w, w.h);
+            c.wl_surface_set_input_region(w.grip_surf, reg);
+            c.wl_region_destroy(reg);
+            c.river_decoration_v1_sync_next_commit(w.grip_dec);
+            c.wl_surface_commit(w.grip_surf);
+            w.grip_size = .{ gw, gh };
+        }
+    }
+
+    /// つまみの上のどの辺か(xdg の resize_edge: 上 1・下 2・左 4・右 8)。角の近くは 2 辺
+    fn gripEdges(w: *const Window, x: f32, y: f32) u32 {
+        const gw: f32 = @floatFromInt(w.grip_size[0]);
+        const gh: f32 = @floatFromInt(w.grip_size[1]);
+        const g: f32 = @floatFromInt(GRIP);
+        const corner: f32 = 28;
+        var e: u32 = 0;
+        if (x < g) e |= 4 else if (x > gw - g) e |= 8;
+        if (y < g) e |= 1 else if (y > gh - g) e |= 2;
+        // 角の近く(帯に沿って corner まで)は 2 辺
+        if (e & (1 | 2) != 0) {
+            if (x < corner) e |= 4 else if (x > gw - corner) e |= 8;
+        }
+        if (e & (4 | 8) != 0) {
+            if (y < corner) e |= 1 else if (y > gh - corner) e |= 2;
+        }
+        return e;
+    }
+
+    fn gripCursor(e: u32) u32 {
+        return switch (e) {
+            1 => c.WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_N_RESIZE,
+            2 => c.WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_S_RESIZE,
+            4 => c.WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_W_RESIZE,
+            8 => c.WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_E_RESIZE,
+            5 => c.WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_NW_RESIZE,
+            9 => c.WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_NE_RESIZE,
+            6 => c.WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_SW_RESIZE,
+            10 => c.WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_SE_RESIZE,
+            else => c.WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT,
+        };
+    }
+
+    /// カーソルがつまみに入った(app.zig の wl_pointer から)。つまみなら true
+    pub fn gripEnter(self: *Wm, surf: ?*c.struct_wl_surface, x: f32, y: f32, serial: u32) bool {
+        const s = surf orelse return false;
+        for (self.windows.items) |w| if (w.grip_surf == s) {
+            self.grip_hover = w;
+            self.gripMotion(x, y, serial);
+            return true;
+        };
+        return false;
+    }
+
+    pub fn gripMotion(self: *Wm, x: f32, y: f32, serial: u32) void {
+        const w = self.grip_hover orelse return;
+        const e = gripEdges(w, x, y);
+        if (e != self.grip_edges) {
+            self.grip_edges = e;
+            self.app.setCursor(serial, gripCursor(e));
+        }
+    }
+
+    pub fn gripLeave(self: *Wm) void {
+        self.grip_hover = null;
+        self.grip_edges = 0;
+    }
+
+    /// つまみを押した: その辺で大きさを変える
+    pub fn gripPress(self: *Wm) void {
+        const w = self.grip_hover orelse return;
+        if (self.grip_edges == 0) return;
+        for (self.seats.items) |s| {
+            s.pointer_window = w;
+            s.req_edges = self.grip_edges;
+        }
+        self.push(.op_resize);
+    }
+
+    /// 浮かせる ⇔ タイルに戻す(Super+Space・タイトルバーのダブルクリック)
+    fn toggleFloat(self: *Wm, w: *Window) void {
+        w.floating = !w.floating;
+        if (w.floating) {
+            // 今の位置・大きさのまま浮かせる(少し小さくして中央寄りに)
+            w.float_rect = .{ w.tx + w.tw * 0.08, w.ty + w.th * 0.08, w.tw * 0.84, w.th * 0.84 };
+            self.floatHint();
+        }
+        self.requestManage();
+    }
+
+    /// 浮かせたときに、戻し方と大きさの変え方を少しだけ案内する(1 回のログインで 3 回まで)
+    fn floatHint(self: *Wm) void {
+        if (self.float_hints >= 3) return;
+        self.float_hints += 1;
+        self.app.osd.info("縁をドラッグで大きさを変更 ・ 上の端へドラッグでタイルに戻す");
     }
 
     /// ワークスペース(タグ)の切替。出ていく窓は横へスライドして消え、入ってくる窓は反対側から入る
@@ -732,7 +898,10 @@ pub const Wm = struct {
                 w.shown = show;
             }
             if (!show) continue;
-            if (w.fullscreen) continue; // 全画面中の位置・clip はコンポジタ任せ
+            if (w.fullscreen) { // 全画面中の位置・clip はコンポジタ任せ
+                dropGrip(w);
+                continue;
+            }
 
             const sc = std.math.clamp(w.reveal.x, 0, 1.2);
             const vw = @min(w.cw.x, fw);
@@ -742,6 +911,7 @@ pub const Wm = struct {
             const x = w.px.x + w.slide.x;
             const y = w.py.x + w.pop.x;
             c.river_node_v1_set_position(node, @intFromFloat(@round(x)), @intFromFloat(@round(y)));
+            self.updateGrip(w, w.floating and !w.closing);
             const full = sc >= 0.999 and vw >= fw - 0.5 and vh >= fh - 0.5;
             if (full) {
                 c.river_window_v1_set_clip_box(w.obj, 0, 0, 0, 0);
@@ -1042,6 +1212,8 @@ fn wClosed(data: ?*anyopaque, obj: ?*c.struct_river_window_v1) callconv(.C) void
             s.op = .none;
         }
     }
+    if (self.grip_hover == w) self.gripLeave();
+    dropGrip(w);
     if (std.mem.indexOfScalar(*Window, self.windows.items, w)) |i| _ = self.windows.orderedRemove(i);
     if (w.node) |n| c.river_node_v1_destroy(n);
     c.river_window_v1_destroy(obj);
@@ -1089,13 +1261,21 @@ fn wMoveReq(data: ?*anyopaque, _: ?*c.struct_river_window_v1, _: ?*c.struct_rive
     for (w.wm.seats.items) |s| s.pointer_window = w;
     w.wm.push(.op_move);
 }
-fn wResizeReq(data: ?*anyopaque, _: ?*c.struct_river_window_v1, _: ?*c.struct_river_seat_v1, _: u32) callconv(.C) void {
+fn wResizeReq(data: ?*anyopaque, _: ?*c.struct_river_window_v1, _: ?*c.struct_river_seat_v1, edges: u32) callconv(.C) void {
     const w: *Window = @ptrCast(@alignCast(data.?));
-    for (w.wm.seats.items) |s| s.pointer_window = w;
+    // 窓の縁をドラッグ → その辺で大きさを変える
+    for (w.wm.seats.items) |s| {
+        s.pointer_window = w;
+        s.req_edges = edges;
+    }
     w.wm.push(.op_resize);
 }
 fn wMenu(_: ?*anyopaque, _: ?*c.struct_river_window_v1, _: i32, _: i32) callconv(.C) void {}
-fn wMax(_: ?*anyopaque, _: ?*c.struct_river_window_v1) callconv(.C) void {}
+/// タイトルバーのダブルクリック・最大化ボタン: 浮かせる ⇔ タイルに戻す
+fn wMax(data: ?*anyopaque, _: ?*c.struct_river_window_v1) callconv(.C) void {
+    const w: *Window = @ptrCast(@alignCast(data.?));
+    w.wm.toggleFloat(w);
+}
 fn wFsReq(data: ?*anyopaque, _: ?*c.struct_river_window_v1, _: ?*c.struct_river_output_v1) callconv(.C) void {
     const w: *Window = @ptrCast(@alignCast(data.?));
     w.want_fullscreen = true;
@@ -1230,24 +1410,51 @@ fn sOpDelta(data: ?*anyopaque, _: ?*c.struct_river_seat_v1, dx: i32, dy: i32) ca
     const w = s.op_window orelse return;
     const fx: f32 = @floatFromInt(dx);
     const fy: f32 = @floatFromInt(dy);
+    s.op_dx = dx;
+    s.op_dy = dy;
     if (s.op == .move) {
         w.float_rect = .{ s.op_start[0] + fx, s.op_start[1] + fy, s.op_start[2], s.op_start[3] };
     } else {
-        w.float_rect = .{ s.op_start[0], s.op_start[1], @max(s.op_start[2] + fx, 80), @max(s.op_start[3] + fy, 60) };
+        // つかんだ辺だけを動かす(反対側の辺は動かさない)。小さくしすぎない
+        const st = s.op_start;
+        const min_w: f32 = @floatFromInt(@max(w.min_w, 160));
+        const min_h: f32 = @floatFromInt(@max(w.min_h, 100));
+        var x = st[0];
+        var y = st[1];
+        var ww = st[2];
+        var hh = st[3];
+        if (s.op_edges & 4 != 0) {
+            ww = @max(st[2] - fx, min_w);
+            x = st[0] + st[2] - ww;
+        } else if (s.op_edges & 8 != 0) ww = @max(st[2] + fx, min_w);
+        if (s.op_edges & 1 != 0) {
+            hh = @max(st[3] - fy, min_h);
+            y = st[1] + st[3] - hh;
+        } else if (s.op_edges & 2 != 0) hh = @max(st[3] + fy, min_h);
+        w.float_rect = .{ x, y, ww, hh };
     }
     s.wm.requestManage();
 }
 fn sOpRelease(data: ?*anyopaque, _: ?*c.struct_river_seat_v1) callconv(.C) void {
     const s: *WSeat = @ptrCast(@alignCast(data.?));
+    // 上の端へ持っていって離したときに、ダッシュボードが開かないように
+    s.wm.app.edge_quiet_until_ms = loop.nowMs() + 900;
     if (s.op == .resize) if (s.op_window) |w| c.river_window_v1_inform_resize_end(w.obj);
+    // 浮いた窓を画面の上の端まで持っていって離した: タイルに戻す
+    if (s.op == .move) if (s.op_window) |w| if (w.out) |o| {
+        const top = if (o.area) |ar| ar[1] else o.y;
+        if (s.op_py + s.op_dy <= top + 4) w.floating = false;
+    };
     s.op = .none;
     s.op_window = null;
     // op_end は manage sequence の中で送る必要がある
     s.op_end_pending = true;
     s.wm.requestManage();
 }
-fn sPtrPos(data: ?*anyopaque, _: ?*c.struct_river_seat_v1, _: i32, _: i32) callconv(.C) void {
+fn sPtrPos(data: ?*anyopaque, _: ?*c.struct_river_seat_v1, x: i32, y: i32) callconv(.C) void {
     const s: *WSeat = @ptrCast(@alignCast(data.?));
+    s.ptr_x = x;
+    s.ptr_y = y;
     s.ptr_moved = true;
 }
 fn sTouchDelta(_: ?*anyopaque, _: ?*c.struct_river_seat_v1, _: i32, _: i32, _: i32) callconv(.C) void {}
@@ -1283,3 +1490,18 @@ fn pbPressed(data: ?*anyopaque, _: ?*c.struct_river_pointer_binding_v1) callconv
 }
 fn pbReleased(_: ?*anyopaque, _: ?*c.struct_river_pointer_binding_v1) callconv(.C) void {}
 const ptr_listener = c.struct_river_pointer_binding_v1_listener{ .pressed = pbPressed, .released = pbReleased };
+
+/// 浮いた窓の縁のつまみの幅(窓の外側)
+const GRIP: i32 = 10;
+
+fn dropGrip(w: *Window) void {
+    if (w.grip_dec) |d| c.river_decoration_v1_destroy(d);
+    if (w.grip_vp) |v| c.wp_viewport_destroy(v);
+    if (w.grip_surf) |s| c.wl_surface_destroy(s);
+    if (w.grip_buf) |b| c.wl_buffer_destroy(b);
+    w.grip_dec = null;
+    w.grip_vp = null;
+    w.grip_surf = null;
+    w.grip_buf = null;
+    w.grip_size = .{ 0, 0 };
+}

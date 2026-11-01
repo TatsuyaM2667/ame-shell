@@ -122,6 +122,9 @@ pub const App = struct {
     icc_mgr: ?*c.struct_ext_image_copy_capture_manager_v1 = null,
     ics_mgr: ?*c.struct_ext_output_image_capture_source_manager_v1 = null,
     dc_mgr: ?*c.struct_ext_data_control_manager_v1 = null,
+    /// 浮いた窓の縁の、大きさを変えるつまみ(wm.zig): 透明な 1 画素を拡大して置く
+    viewporter: ?*c.struct_wp_viewporter = null,
+    spb_mgr: ?*c.struct_wp_single_pixel_buffer_manager_v1 = null,
     /// River 0.5 以降: ame-shell 自身がウィンドウマネージャ(src/wm)
     wm: ?*Wm = null,
     wm_xkb: ?*c.struct_river_xkb_bindings_v1 = null,
@@ -205,6 +208,8 @@ pub const App = struct {
     reap_pending: bool = false,
     read_done: bool = false,
     ptr_serial: u32 = 0,
+    /// 窓をドラッグし終えた直後は、画面の縁に触れてもドロワー(ダッシュボードなど)を開かない(この時刻まで)
+    edge_quiet_until_ms: u64 = 0,
     inotify_hooks: [8]InotifyHook = undefined,
     n_hooks: usize = 0,
 
@@ -791,6 +796,10 @@ fn onGlobal(data: ?*anyopaque, reg: ?*c.struct_wl_registry, name: u32, interface
         app.icc_mgr = @ptrCast(bind(reg, name, &c.ext_image_copy_capture_manager_v1_interface, ver, 1));
     } else if (iface(interface, &c.ext_output_image_capture_source_manager_v1_interface)) {
         app.ics_mgr = @ptrCast(bind(reg, name, &c.ext_output_image_capture_source_manager_v1_interface, ver, 1));
+    } else if (iface(interface, &c.wp_viewporter_interface)) {
+        app.viewporter = @ptrCast(bind(reg, name, &c.wp_viewporter_interface, ver, 1));
+    } else if (iface(interface, &c.wp_single_pixel_buffer_manager_v1_interface)) {
+        app.spb_mgr = @ptrCast(bind(reg, name, &c.wp_single_pixel_buffer_manager_v1_interface, ver, 1));
     } else if (iface(interface, &c.ext_data_control_manager_v1_interface)) {
         app.dc_mgr = @ptrCast(bind(reg, name, &c.ext_data_control_manager_v1_interface, ver, 1));
     } else if (iface(interface, &c.wl_seat_interface)) {
@@ -990,11 +999,20 @@ fn pEnter(data: ?*anyopaque, _: ?*c.struct_wl_pointer, serial: u32, wl: ?*c.stru
     app.ptr_x = @floatCast(c.wl_fixed_to_double(x));
     app.ptr_y = @floatCast(c.wl_fixed_to_double(y));
     app.ptr_serial = serial;
+    // 浮いた窓の縁のつまみ(wm.zig)
+    if (app.wm) |w| if (w.gripEnter(wl, app.ptr_x, app.ptr_y, serial)) {
+        app.ptr_surface = null;
+        return;
+    };
     app.setCursor(serial, c.WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT);
     sendPtr(app, .enter, 0, 0);
 }
 fn pLeave(data: ?*anyopaque, _: ?*c.struct_wl_pointer, _: u32, _: ?*c.struct_wl_surface) callconv(.C) void {
     const app: *App = @ptrCast(@alignCast(data.?));
+    if (app.wm) |w| if (w.grip_hover != null) {
+        w.gripLeave();
+        return;
+    };
     sendPtr(app, .leave, 0, 0);
     app.ptr_surface = null;
 }
@@ -1002,10 +1020,18 @@ fn pMotion(data: ?*anyopaque, _: ?*c.struct_wl_pointer, _: u32, x: c.wl_fixed_t,
     const app: *App = @ptrCast(@alignCast(data.?));
     app.ptr_x = @floatCast(c.wl_fixed_to_double(x));
     app.ptr_y = @floatCast(c.wl_fixed_to_double(y));
+    if (app.wm) |w| if (w.grip_hover != null) {
+        w.gripMotion(app.ptr_x, app.ptr_y, app.ptr_serial);
+        return;
+    };
     sendPtr(app, .motion, 0, 0);
 }
 fn pButton(data: ?*anyopaque, _: ?*c.struct_wl_pointer, _: u32, _: u32, button: u32, state: u32) callconv(.C) void {
     const app: *App = @ptrCast(@alignCast(data.?));
+    if (app.wm) |w| if (w.grip_hover != null) {
+        if (state == c.WL_POINTER_BUTTON_STATE_PRESSED and button == 0x110) w.gripPress();
+        return;
+    };
     sendPtr(app, if (state == c.WL_POINTER_BUTTON_STATE_PRESSED) .press else .release, button, 0);
 }
 fn pAxis(data: ?*anyopaque, _: ?*c.struct_wl_pointer, _: u32, axis: u32, value: c.wl_fixed_t) callconv(.C) void {

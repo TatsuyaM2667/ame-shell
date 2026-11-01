@@ -30,6 +30,8 @@ const protocols = [_][]const u8{
     "protocol/ext-image-capture-source-v1.xml",
     "protocol/ext-image-copy-capture-v1.xml",
     "protocol/ext-data-control-v1.xml",
+    "protocol/viewporter.xml",
+    "protocol/single-pixel-buffer-v1.xml",
 };
 
 pub fn build(b: *std.Build) void {

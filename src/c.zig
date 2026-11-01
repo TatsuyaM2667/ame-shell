@@ -43,6 +43,8 @@ pub usingnamespace @cImport({
     @cInclude("ext-image-capture-source-v1-client-protocol.h");
     @cInclude("ext-image-copy-capture-v1-client-protocol.h");
     @cInclude("ext-data-control-v1-client-protocol.h");
+    @cInclude("viewporter-client-protocol.h");
+    @cInclude("single-pixel-buffer-v1-client-protocol.h");
     @cInclude("xkbcommon/xkbcommon.h");
     // GPU
     @cInclude("EGL/egl.h");
