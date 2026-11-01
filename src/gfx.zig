@@ -490,15 +490,16 @@ const liquid_fs =
     \\    float aa = 1.2 * u_px;
     \\    float fill = smoothstep(edge + aa, edge - aa, dist);
     \\    float rim = fill * smoothstep(edge - 12.0 * u_px, edge - 0.5 * u_px, dist);
-    \\    float glow = exp(-max(dist - edge, 0.0) / (14.0 * u_px)) * (1.0 - fill) * 0.22;
+    \\    float glow = exp(-max(dist - edge, 0.0) / (12.0 * u_px)) * (1.0 - fill) * 0.10;
     \\    vec3 c = mix(u_ca, u_cb, fk * 0.5);
     \\    float depth = pow(clamp(dist / max(edge, 1.0), 0.0, 1.0), 6.0);
-    \\    float body = fill * (0.16 + 0.42 * depth) * (1.0 - 0.18 * fk);
-    \\    float la = body + rim * 0.30 + glow;
-    \\    col += c * (body + glow) + mix(c, vec3(1.0), 0.55) * rim * 0.30;
+    \\    float body = fill * (0.08 + 0.26 * depth) * (1.0 - 0.18 * fk);
+    \\    float la = body + rim * 0.16 + glow;
+    \\    col += c * (body + glow) + mix(c, vec3(1.0), 0.3) * rim * 0.16;
     \\    al += la;
     \\  }
-    \\  al = min(al, 1.0) * u_a;
+    \\  al = min(al, 0.85) * u_a;
+    \\  col = min(col, vec3(al));
     \\  o = vec4(col * u_a, al);
     \\}
 ;

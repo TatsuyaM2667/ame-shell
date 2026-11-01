@@ -383,7 +383,7 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
     const cava_problem = if (playing) f.cava.problem() else null;
     const zeros = [_]f32{0} ** data.BARS;
     const vals: []const f32 = if (f.cava.running() and cava_problem == null) &f.cava.values else &zeros;
-    cv.liquid(cx, cy, R + 4, 54, vals, acc, acc.lighten(0.55), v.vinyl_angle / std.math.tau * 0.25);
+    cv.liquid(cx, cy, R + 4, 54, vals, acc, acc.lighten(0.3), v.vinyl_angle / std.math.tau * 0.25);
     if (cava_problem) |msg| {
         _ = cv.text(cx, cy + R + 34, 12, sub.alpha(0.85), msg, .{ .alignment = .center });
     }

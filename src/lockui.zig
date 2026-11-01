@@ -293,7 +293,7 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
             cv.opacity(ps);
             const zeros = [_]f32{0} ** data.BARS;
             const vals: []const f32 = if (self.cava.running()) &self.cava.values else &zeros;
-            cv.liquid(dcx, dcy, R + 1.5 * k, 16 * k, vals, acc, acc.lighten(0.55), self.vinyl / std.math.tau * 0.25);
+            cv.liquid(dcx, dcy, R + 1.5 * k, 16 * k, vals, acc, acc.lighten(0.3), self.vinyl / std.math.tau * 0.25);
             cv.restore();
         }
         cv.rect(dcx - R, dcy - R, R * 2, R * 2, R, Color.hex(0x0c0c11));
