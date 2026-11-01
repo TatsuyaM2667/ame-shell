@@ -121,8 +121,10 @@ APK_BUILD="git curl bash clang llvm-devel linux-headers pkgconf wayland-devel wa
 #   River 0.5 のビルド(Chimera のリポジトリには river が無いので必ずソースから作る)
 APK_RIVER="wlroots0.20-devel libevdev-devel pixman-devel libinput-devel xwayland xwayland-devel"
 #   動かすのに必要なもの。pipewire-pulse は pipewire パッケージに含まれる
+#   SDDM はテーマとコンポジタを明示する: 既定のまま入れると、テーマ(plasma-desktop)とコンポジタ(kwin)の
+#   ために KDE Plasma 一式(800 以上のパッケージ)が入ってしまう。テーマは ame(scripts/sddm-theme.sh)
 #   (スクショ: grim slurp wl-clipboard / 波形: cava / 音量・Bluetooth の音: libpulse-progs(pactl)/ 無線: util-linux-rfkill)
-APK_RUN="sddm weston foot dbus mesa-dri polkit playerctl cava pipewire wireplumber libpulse-progs mpv-libs ffmpeg
+APK_RUN="sddm sddm-theme-none sddm-default-weston weston foot dbus mesa-dri polkit upower power-profiles-daemon playerctl cava pipewire wireplumber libpulse-progs mpv-libs ffmpeg
  grim slurp wl-clipboard swaylock brightnessctl util-linux-rfkill networkmanager bluez
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  fonts-noto-sans-cjk-otf fonts-nerd-jetbrains-mono fonts-nerd-symbols-only adwaita-icon-theme hicolor-icon-theme"

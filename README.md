@@ -89,6 +89,15 @@ Chimera のリポジトリには River 0.3 が無いので、`install.sh` が Ri
 確認結果は、TTY(`TERM=linux`)では日本語が豆腐になるので英語で出します(`AME_ASCII=1` でも英語)。断った設定は最後に「あとで root で行うコマンド」として表示します。
 インストールの中身だけを確かめるには `sh session/install-session.sh --dry-run`(何も書き込みません)。
 
+**SDDM のために入った KDE Plasma を消す**: Chimera の sddm は、既定のテーマ(plasma-desktop が提供)とコンポジタ(kwin)のために KDE Plasma 一式を引き込みます。
+`install.sh` は `sddm-theme-none`・`sddm-default-weston` を指定して入れるので新しく入れる分には入りませんが、既に入っている場合は次で消せます(800 以上のパッケージ、約 2.5GB。Dolphin・Konsole・Okular・Kate なども消えます):
+```sh
+# ame-shell が使うもの(KDE と一緒に入っていたもの)は残すよう明示する。! は「入れない」の指定
+doas apk add sddm-theme-none sddm-default-weston ffmpeg mpv-libs libpulse-progs xwayland upower power-profiles-daemon \
+    '!plasma-desktop' '!sddm-default-kwin'
+```
+消す前に `apk add --simulate …`(同じ引数)で消えるものを確かめられます。KDE をまた入れるときは `doas apk del '!plasma-desktop' '!sddm-default-kwin'` で指定を外してください。
+
 ### Arch Linux
 `sh install.sh` が Arch(と EndeavourOS / Manjaro など Arch 系)を見つけると `scripts/install-arch.sh` を使います。River 0.5・Odin・wlroots 0.20 も公式リポジトリにあるので、pacman で入れて(AUR は使いません)、sddm・NetworkManager・bluetooth を有効にし(ほかのログイン画面が有効ならそのまま)、ame-shell をビルドしてインストールします。Zig だけは 0.13 が必要なので公式の配布物を `~/.cache` に取ってきます。
 Bluetooth のイヤホンの音には `pipewire-audio`、バーのアイコンには `ttf-nerd-fonts-symbols` が要ります(どちらもインストーラが入れます)。PipeWire のユーザーサービスは `systemctl --user` で確かめます。
