@@ -66,8 +66,32 @@ sh install.sh --uninstall [--user]
 どのユーザーが実行しても構いません。doas / sudo が使えない人は自動で `--user` になります。全ユーザー用では、自分でビルドした River 0.5(`~/.local/opt/river-0.5`)も `/usr/local/opt` にコピーされ、他のアカウントからも River 0.5 のセッションが使えます。
 foot は自分の `~/.config/foot/foot.ini` が無ければ、ame-shell の半透明の設定(`data/xdg/foot/foot.ini`)で開きます。
 
+### Chimera Linux(新規インストールから)
+
+Chimera のリポジトリには River 0.3 が無いので、`install.sh` が River 0.5 をソースからビルドし、ame-shell がウィンドウマネージャを兼ねるセッション(「Ame Shell」)だけを入れます。
+
+1. 一般ユーザー(wheel グループ、doas が使える)でログインし、ソースを取ってくる
+   ```sh
+   doas apk add git
+   git clone https://github.com/TatsuyaM2667/ame-shell && cd ame-shell
+   ```
+2. `sh install.sh` を実行する。次のことを順に行います
+   - **パッケージ**(`doas apk add`): ビルドに要るもの(clang・llvm-devel・linux-headers・pkgconf・wayland / mesa / libdrm / xkbcommon / freetype / harfbuzz / fontconfig / dbus / linux-pam の -devel)、
+     River 0.5 のビルドに要るもの(wlroots0.20-devel など)、動かすのに要るもの(sddm・foot・mesa-dri・polkit・pipewire・wireplumber・libpulse-progs・playerctl・cava・grim・slurp・wl-clipboard・swaylock・brightnessctl・util-linux-rfkill・networkmanager・bluez・xdg-desktop-portal(-gtk・-wlr)・fonts-noto-sans-cjk-otf・fonts-nerd-jetbrains-mono・fonts-nerd-symbols-only・adwaita / hicolor のアイコンテーマ)。
+     どれかが入らないとそこで止まります(足りないまま進めて、スクショや波形が動かないことが無いように)
+   - Zig 0.13 と Odin、River 0.5 のビルド、ame-shell のビルドとインストール
+   - **インストール後の設定**(1 つずつ `[y/N]` で確認。`--yes` で全部、`--no-setup` で何もしない):
+     video・input グループへの追加 / sddm・networkmanager・bluetoothd を次の起動から有効に /
+     wheel グループが NetworkManager を操作できる polkit のルール(`/etc/polkit-1/rules.d/50-networkmanager.rules`。無いと Wi-Fi パネルから接続できません)
+   - **音のユーザーサービス**: pipewire・pipewire-pulse・wireplumber が有効か確かめ、確認してから `dinitctl --user enable` する
+3. 最後の確認結果に `WARNING` が無いことを見て、再起動する。SDDM で「Ame Shell」を選ぶ
+
+確認結果は、TTY(`TERM=linux`)では日本語が豆腐になるので英語で出します(`AME_ASCII=1` でも英語)。断った設定は最後に「あとで root で行うコマンド」として表示します。
+インストールの中身だけを確かめるには `sh session/install-session.sh --dry-run`(何も書き込みません)。
+
 ### Arch Linux
 `sh install.sh` が Arch(と EndeavourOS / Manjaro など Arch 系)を見つけると `scripts/install-arch.sh` を使います。River 0.5・Odin・wlroots 0.20 も公式リポジトリにあるので、pacman で入れて(AUR は使いません)、sddm・NetworkManager・bluetooth を有効にし(ほかのログイン画面が有効ならそのまま)、ame-shell をビルドしてインストールします。Zig だけは 0.13 が必要なので公式の配布物を `~/.cache` に取ってきます。
+Bluetooth のイヤホンの音には `pipewire-audio`、バーのアイコンには `ttf-nerd-fonts-symbols` が要ります(どちらもインストーラが入れます)。PipeWire のユーザーサービスは `systemctl --user` で確かめます。
 
 ### 画面の拡大率・端末
 - **拡大率は自動**(River 0.5 のセッション、`wlr-randr` を使用): 画素の細かさを作者の環境(14 インチ 1920x1200、拡大率 1)と比べて 0.25 刻みで決めます。ふつうの画面は 1 のまま、14 インチ 2880x1800 なら 1.5、13 インチ 4K なら 2。
@@ -78,7 +102,7 @@ foot は自分の `~/.config/foot/foot.ini` が無ければ、ame-shell の半�
 - **タッチパッド**: タップでクリック(設定 `shell { tap-to-click on|off }`、River 0.5 のセッション。変更はログインし直すと反映)。
   FreeBSD はインストーラが I2C(ig4・iichid・hmt)と PS/2(psm の Synaptics / Elantech)のドライバを設定します。後からは `doas sh scripts/freebsd-touchpad.sh`(再起動後に有効)、状態の確認は `sh scripts/freebsd-touchpad.sh --check`。
 - **Bluetooth(FreeBSD)**: インストーラと ame-update が、内蔵アダプタのファームウェア(Realtek: rtlbt-firmware / Intel: iwmbt-firmware)・ng_ubt・hcsecd / sdpd / bthidd を設定します。後からは `doas sh scripts/freebsd-bluetooth.sh`、確認は `--check`。機器のペアリングは今のところ端末で `doas bluetooth-config scan`(マウス・キーボード)。
-- **無線のブロック解除**: Linux ではセッションの開始時に `rfkill unblock all`(と `bluetoothctl power on`)。
+- **無線のブロック解除**: Linux ではセッションの開始時に `rfkill unblock all`(と `bluetoothctl power on`)。ログイン直後は `/dev/rfkill` の権限がまだ付いていないことがあるので、裏で数秒おきに試します。Bluetooth の電源を設定パネル・サイドバーから入れるときも、先にブロックを外します。
 - **ログイン画面(SDDM)**: ロック画面と同じ見た目の ame-shell のテーマ(`data/sddm/ame`。背景はその人の ame-shell の壁紙をぼかしたもの、動画なら 1 コマ目)。FreeBSD はインストーラと ame-update が入れ、壁紙を変えたら ame-update で背景も更新。手動では `doas sh scripts/sddm-theme.sh`。SDDM のテーマは QML でしか書けないため、ここだけ QML を使っています。
 
 ### アップデート(ame-update)
@@ -112,7 +136,9 @@ FreeBSD での違い:
 ### 手動でビルドする
 
 必要: Zig 0.13、Odin、wayland-scanner、wayland / EGL / GLESv2 / xkbcommon / freetype / harfbuzz / fontconfig / dbus の開発ファイル(FreeBSD は加えて libepoll-shim・libinotify)。
-実行時に使うもの: `playerctl`・`wpctl` / `pactl`(PipeWire)・`nmcli`・`bluetoothctl`・`curl`・`cava`(任意)・`libmpv`(動画壁紙、任意)・`ffmpeg`(動画のサムネイル、任意)・`wf-recorder`(録画、`~/Videos` に保存、任意)。
+実行時に使うもの: `playerctl`・`wpctl` / `pactl`(PipeWire)・`nmcli`・`bluetoothctl`・`rfkill`・`curl`・`cava`(メディアの波形)・`grim` / `slurp` / `wl-copy`(スクリーンショット)・`xdg-desktop-portal` と `-gtk`(ユーザーの写真を選ぶ画面)・`libmpv`(動画壁紙、任意)・`ffmpeg`(動画のサムネイル、任意)・`wf-recorder`(録画、`~/Videos` に保存、任意)。
+フォント: 日本語(Noto Sans CJK)と Nerd Font のアイコン(JetBrainsMono Nerd Font か Symbols Nerd Font)。無いと起動時にログ(`session.log`)へ入れるパッケージ名を出します。
+スクショのコマンドが無いときは通知で、cava が無い・音を拾えないときはメディアの波形の場所に理由を表示します。
 
 ```sh
 zig build -Doptimize=ReleaseFast     # zig-out/bin/{ame-shell,ame-ctl}, zig-out/share/ame-shell/
@@ -123,16 +149,19 @@ sh session/install-session.sh        # インストールだけ(--user / --dry-r
 
 ### セッション
 
-SDDM に 3 つのセッションが追加されます(River 0.4 以降しか無いシステムでは「Ame Shell」1 つ):
+SDDM に追加されるセッション:
 
 | セッション | 内容 |
 |---|---|
 | **Ame Shell (River 0.5)** | ame-shell がウィンドウマネージャを兼ねる。ウィンドウアニメーションあり。River 0.5(`/usr/local/opt/river-0.5`・`~/.local/opt/river-0.5`・PATH の River 0.4 以降)|
-| **Ame Shell** | River 0.3 + ame-shell |
-| **Ame Shell (Safe Mode)** | River 0.3 + foot だけ(問題が起きたときの脱出口)|
+| **Ame Shell** | River 0.3 + ame-shell(River 0.3 が入っているときだけ)|
+
+River 0.3 が無いシステム(Chimera Linux・FreeBSD など)では、River 0.5 のセッションだけが「Ame Shell」という名前で入ります。
+セーフモード(River 0.3 + foot だけ)は廃止しました。以前の版で入れた「Ame Shell (Safe Mode)」は、入れ直すと消えます。
+`ame-session` は、頼まれた River が無ければもう一方(0.3 ⇔ 0.5)で起動します。
 
 入るものは `/usr/local/share/ame-shell/installed-files`(自分用は `~/.local/share/ame-shell/installed-files`)に記録され、`sh install.sh --uninstall` で元に戻せます。
-ログは `~/.local/state/ame-shell/session.log`。起動直後に 3 回続けて落ちると、次回は自動でセーフモードになります。
+ログは `~/.local/state/ame-shell/session.log`。
 
 インストールせずに試す(今のセッションの中にウィンドウとして開く):
 ```sh
@@ -141,6 +170,9 @@ PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5
 
 ### Bluetooth イヤホン(AirPods など)が繋がらないとき
 `br-connection-refused` で繋がらない・すぐ切れる場合は、`doas sh session/bt-airpods-fix.sh` で BlueZ を従来の Bluetooth(BR/EDR)接続に切り替えてから、ペアリングし直してください(`--undo` で元に戻せます)。
+
+設定パネルからのペアリングは、ブロック解除(rfkill)→ 電源 → ペアリング可 → エージェント(`NoInputNoOutput`)つきのペアリング → 信頼 → 接続 → 音の出力先の切り替え、の順に行います(`data/bt-connect.sh`)。認証に失敗したら一度ペアリングを消してやり直します。
+つながったのに音が出ないときは、パネルに理由が出ます(`pactl` が無い、PipeWire が動いていない、Bluetooth の音声のプラグインが無い: Arch は `pipewire-audio`)。
 
 音が電話のようにガサガサになるのは、アプリがマイクを開いた瞬間に通話用(HFP、モノラル 16kHz)に切り替わるためです。設定パネルから接続すると、この自動切り替えを止めます(`wpctl settings --save bluetooth.autoswitch-to-headset-profile false`)。通話でイヤホンのマイクを使うときは、音量のポップアウトで入力をイヤホンに切り替えてください。
 
@@ -161,7 +193,7 @@ PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5
 | Super+Ctrl+1〜9 | ワークスペースの表示を足す |
 | Super+P / Super+Shift+P | スクラッチパッド |
 | Super+ドラッグ(左 / 右)/ Super+中クリック | 移動 / 大きさ変更 / フロート |
-| Print / Shift+Print | 範囲 / 全画面のスクリーンショット(~/Pictures/Screenshots + クリップボード)|
+| Print / Shift+Print / Super+Print | 範囲 / 全画面のスクリーンショット(~/Pictures/Screenshots + クリップボード)/ 全画面をクリップボードだけ。grim・slurp・wl-copy が無ければ通知で知らせる |
 | 音量・明るさ・メディアキー | OSD つき |
 | Super+Shift+E | セッションを終了 |
 
@@ -193,6 +225,29 @@ wallpaper {
 ```
 全項目は `data/config.ame` を参照。
 
+### 環境変数と自動起動(`~/.config/ame-shell/environment`・`autostart`)
+
+| ファイル | 読むもの・時期 | 例 |
+|---|---|---|
+| `~/.config/ame-shell/environment` | `ame-session` がログインのたびに sh の `.` で読む。`export` した変数は River・ame-shell・すべてのアプリと D-Bus から起動されるものに渡る | `share/ame-shell/examples/environment`(`data/examples/environment`)|
+| `~/.config/ame-shell/autostart` | River の init がセッションの開始時に 1 回実行する(画面と D-Bus の準備の後)。実行権限が無ければ `sh` で | `share/ame-shell/examples/autostart`(`data/examples/autostart`)|
+
+```sh
+mkdir -p ~/.config/ame-shell
+cp /usr/local/share/ame-shell/examples/environment ~/.config/ame-shell/environment   # 日本語入力の変数など
+cp /usr/local/share/ame-shell/examples/autostart ~/.config/ame-shell/autostart       # fcitx5 -d --replace など
+```
+
+例の中身(日本語入力): `XMODIFIERS=@im=fcitx`、`QT_IM_MODULES="wayland;fcitx"`、autostart で `fcitx5 -d --replace`。変更は次のログインから有効です。
+`river-extra.sh` / `river5-extra.sh`(River の init が `.` で読む)も引き続き使えますが、アプリ全体に渡したい変数は `environment` に書いてください。
+
+**Flatpak**: `ame-session` が `XDG_DATA_DIRS` に `~/.local/share/flatpak/exports/share` と `/var/lib/flatpak/exports/share` を足すので、Flatpak のアプリもランチャーにアイコンつきで出ます。
+
+**ポータル**(ファイルを開く画面・画面共有): `ame-session` が `XDG_CONFIG_DIRS` の先頭に置く `share/ame-shell/xdg` に `xdg-desktop-portal/river-portals.conf` を入れています(既定は gtk、Screenshot と ScreenCast は wlr)。自分の `~/.config/xdg-desktop-portal/river-portals.conf` があればそちらが優先されます。
+ユーザーの D-Bus はログアウトしても残るため、前のセッションのポータルが画面を出せないまま残ることがあります。River の init はセッションの開始時に自分のポータルを止めて、今の環境で起動し直します。
+
+**ユーザーの写真**(ダッシュボード左上の丸): 押すと `~/Pictures` の画像が並びます。ほかの場所の写真は「ファイルから選ぶ…」(O キー、`ame-ctl avatar pick`)でファイル選択の画面から。`~/Pictures` に画像が無ければ、すぐにファイル選択の画面を開きます。
+
 ## ame-ctl
 
 ```
@@ -203,6 +258,7 @@ ame-ctl volume up|down|mute|<0-100>      ame-ctl brightness up|down
 ame-ctl wallpaper aurora|rain|<画像・GIF・動画のパス>
 ame-ctl accent '#ff88aa'|reset           ame-ctl notify <テキスト>
 ame-ctl workspace <1-9>                  ame-ctl window close|fullscreen|float|focus-next|…(River 0.5)
+ame-ctl screenshot region|full|clip      ame-ctl avatar pick
 ame-ctl lock | reload | widgets reload | stats | restart | quit
 ```
 
@@ -212,7 +268,9 @@ ame-ctl lock | reload | widgets reload | stats | restart | quit
 
 ## 既知の問題
 
+- River 0.3 系のセッション(「Ame Shell」の River 0.3 版)は Chimera Linux では使えない(リポジトリに river 0.3 が無い)。Chimera では River 0.5 のセッションだけが入る。FreeBSD も同じ(river パッケージが 0.4 以降)。
 - ウィンドウの開閉アニメーションは River 0.5 セッションのみ(River 0.3 には外から窓を動かす手段が無い)。ウィンドウ越しのガラスは未対応。
+- ユーザーの写真を選ぶ画面は xdg-desktop-portal の実装(xdg-desktop-portal-gtk)が出すので、見た目は GTK のもの。
 - River 0.3 では、ワークスペースごとのアプリ名は推測(River 0.3 は窓とタグの対応を外に出さない)。
 - ランチャーの日本語入力(IME)とトレイは未対応。
 - 動画壁紙は再生中に CPU 約 5%(720p)・メモリ +130MB 程度を使う。
