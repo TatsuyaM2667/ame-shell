@@ -131,8 +131,8 @@ APK_RIVER="wlroots0.20-devel libevdev-devel pixman-devel libinput-devel xwayland
 #   動かすのに必要なもの。pipewire-pulse は pipewire パッケージに含まれる
 #   ログイン画面は greetd + ame-shell(ame-greeter)。SDDM は入れない(Chimera の sddm は既定のテーマ・コンポジタの
 #   ために KDE Plasma 一式を引き込む。SDDM を使うなら sddm-theme-none と sddm-default-weston も一緒に)
-#   (スクショ: grim slurp wl-clipboard / 波形: cava / 音量・Bluetooth の音: libpulse-progs(pactl)/ 無線: util-linux-rfkill)
-APK_RUN="greetd greetd-dinit foot dbus mesa-dri polkit upower power-profiles-daemon playerctl cava pipewire wireplumber libpulse-progs mpv-libs ffmpeg
+#   (スクショ: grim slurp wl-clipboard / / 音量・Bluetooth の音: libpulse-progs(pactl)/ 無線: util-linux-rfkill)
+APK_RUN="greetd greetd-dinit foot dbus mesa-dri polkit upower power-profiles-daemon playerctl pipewire wireplumber libpulse-progs mpv-libs ffmpeg
  grim slurp wl-clipboard swaylock brightnessctl util-linux-rfkill networkmanager bluez thunar tumbler xdg-utils
  zsh zsh-syntax-highlighting fzf zoxide
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
@@ -140,7 +140,7 @@ APK_RUN="greetd greetd-dinit foot dbus mesa-dri polkit upower power-profiles-dae
 APK_OPT="fastfetch wf-recorder wlr-randr gvfs eza bat"
 NEED_CMDS="git curl clang wayland-scanner pkg-config"
 # 動かすのに欠かせないコマンド(パッケージを入れた後に確かめる)
-RUN_CMDS="foot zsh greetd dbus-run-session playerctl cava pactl grim slurp wl-copy swaylock brightnessctl rfkill nmcli bluetoothctl"
+RUN_CMDS="foot zsh greetd dbus-run-session playerctl pactl grim slurp wl-copy swaylock brightnessctl rfkill nmcli bluetoothctl"
 # Odin のビルドは llvm-config という名前を探せないため明示する
 export LLVM_CONFIG="${LLVM_CONFIG:-llvm-config}"
 if [ "$NO_DEPS" = 1 ]; then

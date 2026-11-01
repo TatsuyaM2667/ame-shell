@@ -517,7 +517,7 @@ if command -v ghostty >/dev/null 2>&1 || [ -x "$DESTDIR$PREFIX/bin/ghostty" ]; t
 chk zsh zsh "端末のシェル" "terminal shell"
 chk dbus-run-session dbus "D-Bus" "D-Bus"
 chk playerctl playerctl "メディア" "media"
-chk cava cava "メディアの波形" "media spectrum"
+
 chk grim grim "スクショ" "screenshots"
 chk slurp slurp "範囲のスクショ" "region screenshots"
 chk wl-copy wl-clipboard "スクショのコピー" "copy screenshots"

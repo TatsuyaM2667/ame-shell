@@ -1,7 +1,7 @@
 // 枠 UI(caelestia 風)が使う追加のデータ源。全て「必要な間だけ」動かす:
 //  * GPU/CPU 温度・GPU 使用率・ストレージ … ダッシュボードが開いている間の 1 秒ティックで読む
 //  * 天気 … wttr.in を curl で非同期取得(30 分キャッシュ)。完了は pipe の EOF で知る
-//  * cava(音声スペクトラム)… メディアタブ表示中だけ起動し、終わったら kill
+//  * 音声スペクトラム … メディアタブ・ロック画面で曲が流れている間だけ、録音して FFT(cava は使わない)
 //  * 電源プロファイル … powerprofilesctl(ユーティリティを開いたとき)
 const std = @import("std");
 const c = @import("../c.zig");
@@ -219,17 +219,82 @@ pub const Weather = struct {
 };
 
 // ---------------------------------------------------------------------------
-// cava(音声スペクトラム)
+// 音声スペクトラム(メディアの波形)。cava を使わず ame-shell の中で計算する:
+//  * 音: PulseAudio 互換の録音 API(libpulse-simple を実行時に読み込む。PipeWire の pipewire-pulse でも
+//    動く)で「今鳴っている音」(@DEFAULT_MONITOR@)を別スレッドで受け取る
+//  * 計算: 窓をかけて FFT(anim/fft.odin)、50Hz〜12kHz を対数で 48 の帯域に分け、dB にして自動で音量をそろえる
+//  * 受け取るたびにスレッドが pipe に 1 バイト書き、描画のループ(epoll)で計算する(ポーリングしない)
+// 名前は以前の外部コマンド cava のまま(呼び出し側を変えないため)
 // ---------------------------------------------------------------------------
 
 pub const BARS = 48;
+const FFT_N = 1024;
+const RATE = 44100;
+const CHUNK = RATE / 60; // 1 回に受け取るサンプル数(約 60 回/秒)
+
+const PaSampleSpec = extern struct { format: c_int, rate: u32, channels: u8 };
+const PaBufferAttr = extern struct { maxlength: u32, tlength: u32, prebuf: u32, minreq: u32, fragsize: u32 };
+const PaNew = *const fn (?[*:0]const u8, [*:0]const u8, c_int, ?[*:0]const u8, [*:0]const u8, *const PaSampleSpec, ?*anyopaque, ?*const PaBufferAttr, *c_int) callconv(.C) ?*anyopaque;
+const PaRead = *const fn (*anyopaque, *anyopaque, usize, *c_int) callconv(.C) c_int;
+const PaFree = *const fn (*anyopaque) callconv(.C) void;
+const Pa = struct { new: PaNew, read: PaRead, free: PaFree };
+var pa_api: ?Pa = null;
+var pa_tried = false;
+
+fn loadPa() ?Pa {
+    if (pa_tried) return pa_api;
+    pa_tried = true;
+    const h = c.dlopen("libpulse-simple.so.0", c.RTLD_NOW) orelse c.dlopen("libpulse-simple.so", c.RTLD_NOW) orelse return null;
+    const n = c.dlsym(h, "pa_simple_new") orelse return null;
+    const r = c.dlsym(h, "pa_simple_read") orelse return null;
+    const fr = c.dlsym(h, "pa_simple_free") orelse return null;
+    pa_api = .{ .new = @ptrCast(n), .read = @ptrCast(r), .free = @ptrCast(fr) };
+    return pa_api;
+}
+
+/// FFT の表(窓・回転子・帯域の区切り)。一度だけ作る
+const Tables = struct {
+    window: [FFT_N]f32,
+    tw: [FFT_N]f32, // cos, sin を N/2 組
+    edges: [BARS + 1]i32,
+};
+var tables: ?Tables = null;
+
+fn getTables() *const Tables {
+    if (tables == null) {
+        var t: Tables = undefined;
+        const nf: f32 = @floatFromInt(FFT_N);
+        for (0..FFT_N) |i| {
+            const fi: f32 = @floatFromInt(i);
+            t.window[i] = 0.5 - 0.5 * @cos(std.math.tau * fi / (nf - 1));
+        }
+        for (0..FFT_N / 2) |k| {
+            const a = -std.math.tau * @as(f32, @floatFromInt(k)) / nf;
+            t.tw[2 * k] = @cos(a);
+            t.tw[2 * k + 1] = @sin(a);
+        }
+        // 50Hz〜12kHz を対数で等分(低い方は 1 ビン以上の幅を保つ)
+        const lo_f: f32 = 50;
+        const hi_f: f32 = 12000;
+        var prev: i32 = 0;
+        for (0..BARS + 1) |b| {
+            const r = @as(f32, @floatFromInt(b)) / BARS;
+            const f = lo_f * std.math.pow(f32, hi_f / lo_f, r);
+            var bin: i32 = @intFromFloat(f * nf / RATE);
+            if (b > 0 and bin <= prev) bin = prev + 1;
+            t.edges[b] = @min(bin, FFT_N / 2 - 1);
+            prev = t.edges[b];
+        }
+        tables = t;
+    }
+    return &tables.?;
+}
 
 pub const Cava = struct {
     app: *App,
+    /// 受け取りスレッドからの知らせ(読む側の fd。動いていなければ -1)
     fd: c_int = -1,
-    pid: c_int = 0,
-    buf: [1024]u8 = undefined,
-    len: usize = 0,
+    wfd: c_int = -1,
     values: [BARS]f32 = [_]f32{0} ** BARS,
     on_frame: ?*const fn (ctx: *anyopaque) void = null,
     ctx: *anyopaque = undefined,
@@ -240,6 +305,15 @@ pub const Cava = struct {
     sound_ms: u64 = 0,
     /// 失敗したときは、しばらく起動し直さない(毎フレーム起動を試みないように)
     retry_ms: u64 = 0,
+    last_calc_ms: u64 = 0,
+    // 受け取りスレッドと共有するもの
+    thread: ?std.Thread = null,
+    stop_flag: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    failed_flag: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    mutex: std.Thread.Mutex = .{},
+    ring: [FFT_N]f32 = [_]f32{0} ** FFT_N,
+    // 自動で音量をそろえるための、最近の大きい音の目安(dB)
+    peak_db: f32 = -30,
 
     pub const State = enum { idle, ok, missing, failed };
 
@@ -254,10 +328,10 @@ pub const Cava = struct {
     /// 波形の代わりに出す説明(出せているときは null)
     pub fn problem(self: *const Cava) ?[]const u8 {
         return switch (self.state) {
-            .missing => "cava が無いため波形を表示できません",
-            .failed => "cava が起動できませんでした(音声の入力を確認)",
+            .missing => "音を取り込めないため波形を表示できません(libpulse が必要です)",
+            .failed => "音を取り込めませんでした(PipeWire / PulseAudio を確認)",
             .ok, .idle => if (self.running() and loop.nowMs() -| @max(self.started_ms, self.sound_ms) > SILENT_MS)
-                "cava が音を拾えていません(PipeWire / PulseAudio を確認)"
+                "音を拾えていません(PipeWire / PulseAudio を確認)"
             else
                 null,
         };
@@ -268,87 +342,132 @@ pub const Cava = struct {
         const now = loop.nowMs();
         if ((self.state == .missing or self.state == .failed) and now < self.retry_ms) return;
         self.retry_ms = now + RETRY_MS;
-        if (!sys.hasCommand("cava")) {
-            if (self.state != .missing) std.log.warn("cava が見つかりません。メディアの波形は表示されません({s} cava)", .{@import("../deps.zig").installCmd()});
+        if (loadPa() == null) {
+            if (self.state != .missing) std.log.warn("spectrum: libpulse-simple が見つかりません。メディアの波形は表示されません", .{});
             self.state = .missing;
             return;
         }
-        // 設定ファイルを XDG_RUNTIME_DIR に書く(raw 出力、ASCII、; 区切り、改行でフレーム)
-        const rt = std.posix.getenv("XDG_RUNTIME_DIR") orelse return;
-        var pbuf: [256]u8 = undefined;
-        const path = std.fmt.bufPrintZ(&pbuf, "{s}/ame-cava.conf", .{rt}) catch return;
-        const f = std.fs.cwd().createFile(path, .{}) catch return;
-        f.writer().print(
-            \\[general]
-            \\bars = {d}
-            \\framerate = 60
-            \\[output]
-            \\method = raw
-            \\raw_target = /dev/stdout
-            \\data_format = ascii
-            \\ascii_max_range = 100
-            \\bar_delimiter = 59
-            \\frame_delimiter = 10
-            \\
-        , .{BARS}) catch {};
-        f.close();
-        self.fd = sys.spawnReader(&.{ "cava", "-p", path.ptr }, &self.pid) orelse {
+        var fds: [2]c_int = undefined;
+        if (c.pipe2(&fds, c.O_CLOEXEC | c.O_NONBLOCK) != 0) return;
+        self.fd = fds[0];
+        self.wfd = fds[1];
+        self.stop_flag.store(false, .release);
+        self.failed_flag.store(false, .release);
+        @memset(&self.ring, 0);
+        self.thread = std.Thread.spawn(.{}, capture, .{self}) catch {
+            _ = c.close(fds[0]);
+            _ = c.close(fds[1]);
+            self.fd = -1;
+            self.wfd = -1;
             self.state = .failed;
             return;
         };
         self.started_ms = now;
         self.sound_ms = 0;
         if (self.state != .ok) self.state = .idle;
-        self.app.loop.add(self.fd, c.EPOLLIN | c.EPOLLHUP, self, onRead) catch {};
+        self.app.loop.add(self.fd, c.EPOLLIN, self, onRead) catch {};
     }
 
     pub fn stop(self: *Cava) void {
         if (self.fd < 0) return;
-        _ = c.kill(self.pid, c.SIGTERM);
+        self.stop_flag.store(true, .release);
+        // 受け取りは 1/60 秒ごとに戻ってくるので、すぐ終わる
+        if (self.thread) |t| t.join();
+        self.thread = null;
         self.app.loop.remove(self.fd);
         _ = c.close(self.fd);
+        _ = c.close(self.wfd);
         self.fd = -1;
-        self.len = 0;
+        self.wfd = -1;
         @memset(&self.values, 0);
     }
 
-    fn onRead(ctx: *anyopaque, fd: c_int, ev: u32) void {
-        const self: *Cava = @ptrCast(@alignCast(ctx));
-        const n = c.read(fd, self.buf[self.len..].ptr, self.buf.len - self.len);
-        if (n <= 0) {
-            if (n == 0 or ev & c.EPOLLHUP != 0) {
-                // 自分で止めたのではなく cava が終わった(入力の機器を開けないなど)
-                const ran = loop.nowMs() -| self.started_ms;
-                std.log.warn("cava が {d} ms で終了しました(音声の入力を開けない可能性があります)", .{ran});
-                self.state = .failed;
-                self.stop();
-                if (self.on_frame) |f| f(self.ctx);
+    /// 受け取りスレッド: 録音の口を開き、1/60 秒ぶんずつ読んでリングに足す
+    fn capture(self: *Cava) void {
+        const pa = loadPa() orelse return;
+        const ss = PaSampleSpec{ .format = 5, .rate = RATE, .channels = 1 }; // PA_SAMPLE_FLOAT32LE・モノラル
+        const attr = PaBufferAttr{ .maxlength = std.math.maxInt(u32), .tlength = std.math.maxInt(u32), .prebuf = std.math.maxInt(u32), .minreq = std.math.maxInt(u32), .fragsize = CHUNK * 4 };
+        var err: c_int = 0;
+        const s = pa.new(null, "ame-shell", 2, "@DEFAULT_MONITOR@", "spectrum", &ss, null, &attr, &err) orelse {
+            self.failed_flag.store(true, .release);
+            _ = c.write(self.wfd, "F", 1);
+            return;
+        };
+        defer pa.free(s);
+        var buf: [CHUNK]f32 = undefined;
+        while (!self.stop_flag.load(.acquire)) {
+            if (pa.read(s, &buf, @sizeOf(@TypeOf(buf)), &err) < 0) {
+                self.failed_flag.store(true, .release);
+                _ = c.write(self.wfd, "F", 1);
+                return;
             }
+            self.mutex.lock();
+            // 古いサンプルを前へ詰めて、新しいものを後ろへ
+            std.mem.copyForwards(f32, self.ring[0 .. FFT_N - CHUNK], self.ring[CHUNK..]);
+            @memcpy(self.ring[FFT_N - CHUNK ..], &buf);
+            self.mutex.unlock();
+            _ = c.write(self.wfd, "d", 1);
+        }
+    }
+
+    fn onRead(ctx: *anyopaque, fd: c_int, _: u32) void {
+        const self: *Cava = @ptrCast(@alignCast(ctx));
+        var drain: [64]u8 = undefined;
+        var failed = false;
+        while (true) {
+            const n = c.read(fd, &drain, drain.len);
+            if (n <= 0) break;
+            for (drain[0..@intCast(n)]) |b| failed = failed or b == 'F';
+        }
+        if (failed or self.failed_flag.load(.acquire)) {
+            std.log.warn("spectrum: 音を取り込めませんでした(@DEFAULT_MONITOR@)", .{});
+            self.state = .failed;
+            self.stop();
+            if (self.on_frame) |f| f(self.ctx);
             return;
         }
-        self.len += @intCast(n);
-        var got = false;
-        // 最後の完全な行だけを使う(遅れて溜まった古いフレームは捨てる)
-        while (std.mem.indexOfScalar(u8, self.buf[0..self.len], '\n')) |nl| {
-            var it = std.mem.splitScalar(u8, self.buf[0..nl], ';');
-            var i: usize = 0;
-            while (it.next()) |v| {
-                if (i >= BARS) break;
-                if (v.len == 0) continue;
-                self.values[i] = (std.fmt.parseFloat(f32, v) catch 0) / 100;
-                if (self.values[i] > 0) {
-                    self.sound_ms = loop.nowMs();
-                    self.state = .ok;
-                }
-                i += 1;
-            }
-            const rest = self.len - nl - 1;
-            std.mem.copyForwards(u8, self.buf[0..rest], self.buf[nl + 1 .. self.len]);
-            self.len = rest;
-            got = true;
+        // 描くのは 1 秒に 60 回まで
+        const now = loop.nowMs();
+        if (now -| self.last_calc_ms < 14) return;
+        self.last_calc_ms = now;
+        self.compute();
+        if (self.on_frame) |f| f(self.ctx);
+    }
+
+    fn compute(self: *Cava) void {
+        const t = getTables();
+        var samples: [FFT_N]f32 = undefined;
+        self.mutex.lock();
+        samples = self.ring;
+        self.mutex.unlock();
+        var work: [2 * FFT_N]f32 = undefined;
+        var bands: [BARS]f32 = undefined;
+        @import("../anim.zig").ame_spectrum(&samples, FFT_N, &t.window, &t.tw, &work, &t.edges, BARS, &bands);
+        // dB にして、最近の大きい音を基準に 0..1 へ(静かな曲でも見えるように自動でそろえる)
+        var loudest: f32 = -120;
+        var db: [BARS]f32 = undefined;
+        for (bands, 0..) |p, i| {
+            // 高い音ほど小さく出るので少し持ち上げる(ピンクノイズの傾き)
+            const tilt = 3.0 * @as(f32, @floatFromInt(i)) / BARS;
+            db[i] = 10 * @log10(p + 1e-12) + tilt * 6;
+            loudest = @max(loudest, db[i]);
         }
-        if (self.len == self.buf.len) self.len = 0;
-        if (got) if (self.on_frame) |f| f(self.ctx);
+        // 基準は上がるときは速く、下がるときはゆっくり
+        self.peak_db = if (loudest > self.peak_db) loudest else self.peak_db - 0.15;
+        self.peak_db = @max(self.peak_db, -40);
+        const range: f32 = 45;
+        var any = false;
+        for (0..BARS) |i| {
+            const v = std.math.clamp((db[i] - (self.peak_db - range)) / range, 0, 1);
+            const target = v * v; // 小さい音を沈めて、山を目立たせる
+            // 上がるときはすぐ、下がるときはなめらかに
+            self.values[i] = if (target > self.values[i]) target else self.values[i] * 0.82 + target * 0.18;
+            if (self.values[i] > 0.04) any = true;
+        }
+        if (any and loudest > -90) {
+            self.sound_ms = loop.nowMs();
+            self.state = .ok;
+        }
     }
 };
 

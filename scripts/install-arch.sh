@@ -40,7 +40,7 @@ RIVER="river xorg-xwayland"
 # 動かすのに必要なもの・あると使うもの
 # (pipewire-audio: Bluetooth のイヤホン・スピーカー(bluez5 のプラグイン)/ libpulse: pactl /
 #  ttf-nerd-fonts-symbols: バーのアイコン / hicolor・adwaita: アプリのアイコン)
-RUN="greetd foot polkit upower power-profiles-daemon playerctl cava pipewire pipewire-audio pipewire-pulse wireplumber libpulse mpv ffmpeg grim slurp wl-clipboard swaylock
+RUN="greetd foot polkit upower power-profiles-daemon playerctl pipewire pipewire-audio pipewire-pulse wireplumber libpulse mpv ffmpeg grim slurp wl-clipboard swaylock
  brightnessctl networkmanager bluez bluez-utils util-linux thunar tumbler gvfs xdg-utils
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  noto-fonts-cjk ttf-jetbrains-mono-nerd ttf-nerd-fonts-symbols hicolor-icon-theme adwaita-icon-theme
@@ -48,7 +48,7 @@ RUN="greetd foot polkit upower power-profiles-daemon playerctl cava pipewire pip
  ghostty zsh zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza bat
  libva-mesa-driver"
 # 動かすのに欠かせないコマンド(入れた後に確かめる)
-RUN_CMDS="foot zsh greetd dbus-run-session playerctl cava pactl grim slurp wl-copy swaylock brightnessctl rfkill nmcli bluetoothctl"
+RUN_CMDS="foot zsh greetd dbus-run-session playerctl pactl grim slurp wl-copy swaylock brightnessctl rfkill nmcli bluetoothctl"
 # 日本語入力(あれば)
 JA="fcitx5 fcitx5-mozc fcitx5-gtk fcitx5-qt fcitx5-configtool"
 

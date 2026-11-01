@@ -69,6 +69,7 @@ pub fn build(b: *std.Build) void {
     const anim_obj = odin.addPrefixedOutputFileArg("-out:", "anim.o");
     // ディレクトリ引数は中身の変更を追跡しないため、ソースを明示的に入力に加える。
     odin.addFileInput(b.path("anim/anim.odin"));
+    odin.addFileInput(b.path("anim/fft.odin"));
 
     // --- wasm3: WASM ウィジェットの実行ランタイム(C, MIT) ---
     const wasm3_files = [_][]const u8{

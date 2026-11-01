@@ -55,6 +55,8 @@ pub extern fn ame_spring_step(s: *Spring, dt: f32) i32;
 pub extern fn ame_springs_step(arr: [*]Spring, count: i32, dt: f32) i32;
 pub extern fn ame_fuzzy_score(pat: [*]const u8, pat_len: i32, text: [*]const u8, text_len: i32) i32;
 pub extern fn ame_dominant_color(rgba: [*]const u8, pixel_count: i32, stride_px: i32, work: [*]u32) u32;
+/// 窓をかけて FFT し、帯域ごとのパワーを返す(anim/fft.odin。cava の代わり)
+pub extern fn ame_spectrum(samples: [*]const f32, n: i32, window: [*]const f32, tw: [*]const f32, work: [*]f32, edges: [*]const i32, nbands: i32, bands: [*]f32) void;
 
 pub fn fuzzy(pat: []const u8, text: []const u8) i32 {
     return ame_fuzzy_score(pat.ptr, @intCast(pat.len), text.ptr, @intCast(text.len));
