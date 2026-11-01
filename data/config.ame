@@ -49,7 +49,7 @@ font {
 }
 
 apps {
-  terminal foot
+  terminal ame-terminal         // ghostty(無ければ foot)。session/ame-terminal
 }
 
 notifications {

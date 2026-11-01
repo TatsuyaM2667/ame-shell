@@ -599,7 +599,7 @@ pub const Launcher = struct {
                     .reboot => sys.power(.reboot),
                     .poweroff => sys.power(.poweroff),
                     // 端末で ame-update を実行(root のパスワードを聞かれることがあるので端末の中で)
-                    .update => sys.spawnDetached("foot -T ame-update -e sh -c 'ame-update; echo; printf \"Enter で閉じます \"; read x'"),
+                    .update => sys.spawnDetached("ame-terminal --title ame-update -e sh -c 'ame-update; echo; printf \"Enter で閉じます \"; read x'"),
                     .wallpaper => {},
                 }
                 return;

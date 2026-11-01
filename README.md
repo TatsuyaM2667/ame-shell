@@ -69,7 +69,7 @@ sh install.sh --uninstall [--user]
 
 `install.sh` が依存パッケージ(Chimera Linux は apk、Arch 系は pacman で自動。他のディストリは足りないものを表示)、Zig 0.13、Odin、River(無ければ River 0.5 をソースから)、ame-shell のビルドとインストールまで行います。
 どのユーザーが実行しても構いません。doas / sudo が使えない人は自動で `--user` になります。全ユーザー用では、自分でビルドした River 0.5(`~/.local/opt/river-0.5`)も `/usr/local/opt` にコピーされ、他のアカウントからも River 0.5 のセッションが使えます。
-foot は自分の `~/.config/foot/foot.ini` が無ければ、ame-shell の半透明の設定(`data/xdg/foot/foot.ini`)で開きます。
+端末は ghostty(無ければ foot)。下の「端末とシェル」を参照。
 
 ### Chimera Linux(新規インストールから)
 
@@ -109,7 +109,11 @@ Bluetooth のイヤホンの音には `pipewire-audio`、バーのアイコン�
 ### 画面の拡大率・端末
 - **拡大率は自動**(River 0.5 のセッション、`wlr-randr` を使用): 画素の細かさを作者の環境(14 インチ 1920x1200、拡大率 1)と比べて 0.25 刻みで決めます。ふつうの画面は 1 のまま、14 インチ 2880x1800 なら 1.5、13 インチ 4K なら 2。
   自分で決めるときは `~/.config/ame-shell/output-scale` に `1.5` や `eDP-1 1.5`(画面ごと)、`off` で自動設定なし。
-- **foot**: 自分の `~/.config/foot/foot.ini` が無ければ ame-shell の設定(半透明、JetBrains Mono 12pt、`dpi-aware=no`)。開くと最初に `fastfetch` を表示します(`AME_FASTFETCH=0` で無効。シェルの設定で自分で呼んでいる場合は二重にしません)。
+- **端末(ghostty)とシェル(zsh)**: Super+Return で `ame-terminal` が ghostty(ame-shell と同じ Zig 製)を開きます。無ければ foot。
+  - ghostty は Arch・FreeBSD ではパッケージ、Chimera はパッケージが無いので `install.sh` が公式のソースから Zig 0.17 でビルドします(GTK4・libadwaita の開発ファイルを入れて。失敗しても foot で続けます。`--no-ghostty` で飛ばす)
+  - ghostty の設定: 自分の `~/.config/ghostty/config` が無ければ ame-shell のもの(`data/ghostty/config`: 夜空の紺に半透明、JetBrainsMono Nerd Font、ame の 16 色、タイトルバーなし、2 つ目からの窓はすぐ開く)
+  - 端末の中のシェルは zsh(ログインシェルは変えません)。自分の `~/.zshrc` が無ければ ame-shell の設定(`data/zsh/.zshrc`): 2 行のプロンプト(場所・git のブランチと状態・かかった時間・終了コード・時刻)、矢印で選べる補完、↑↓ で入力中の文字から始まる履歴、灰色の候補(zsh-autosuggestions)、色分け(zsh-syntax-highlighting)、fzf(Ctrl+R)・zoxide(`z`)・eza(アイコン付きの `ls`)。足したい設定は `~/.config/ame-shell/zshrc.local` に
+  - 開くと最初に `fastfetch` を表示します(`AME_FASTFETCH=0` で無効)
   FreeBSD では、インストーラと ame-update が `~/.config/foot/foot.ini` と `~/.config/fastfetch/config.jsonc`(いつもの大きいロゴ)をこの設定で上書きします(元のファイルは `*.ame-bak`)。
 - カーソルは未設定なら 24px(Adwaita)。
 - **タッチパッド**: タップでクリック(設定 `shell { tap-to-click on|off }`、River 0.5 のセッション。変更はログインし直すと反映)。
@@ -208,7 +212,7 @@ PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5
 | キー | 動作 |
 |---|---|
 | Super(単独で押して離す)/ Super+D | ランチャー |
-| Super+Return / Super+T | foot |
+| Super+Return / Super+T | 端末(ghostty。無ければ foot)|
 | Super+A / Super+N / Super+U | ダッシュボード / 通知センター / ユーティリティ |
 | Super+Escape | セッション(ロック・ログアウト・再起動・電源オフ。危険な操作は 2 回押し)|
 | Super+L | ロック |

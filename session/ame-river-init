@@ -17,7 +17,7 @@ riverctl focus-follows-cursor normal
 riverctl xcursor-theme Adwaita 24 2>/dev/null
 
 # ---- キーバインド ----
-riverctl map normal Super Return spawn foot
+riverctl map normal Super Return spawn ame-terminal
 riverctl map normal Super E spawn 'command -v thunar >/dev/null 2>&1 && exec thunar || exec xdg-open "$HOME"'
 riverctl map normal Super D spawn "ame-ctl launcher toggle"
 riverctl map normal Super A spawn "ame-ctl dashboard toggle"
@@ -107,7 +107,7 @@ fi
 
 [ -f "$HOME/.config/ame-shell/river-extra.sh" ] && . "$HOME/.config/ame-shell/river-extra.sh"
 
-# ---- ame-shell の監督: 30 秒以内に 3 回落ちたら再起動をやめて foot で知らせる ----
+# ---- ame-shell の監督: 30 秒以内に 3 回落ちたら再起動をやめて端末で知らせる ----
 (
     crashes=""
     while :; do
@@ -128,7 +128,7 @@ fi
         set -- $crashes
         if [ "$#" -ge 3 ]; then
             log "30 秒以内に 3 回落ちたため再起動を停止します"
-            foot sh -c "echo 'ame-shell が繰り返し終了したため停止しました。'; echo 'ログ: $LOG'; echo 'Super+Shift+E で River を終了できます。'; exec \${SHELL:-/bin/sh}" &
+            ame-terminal -e sh -c "echo 'ame-shell が繰り返し終了したため停止しました。'; echo 'ログ: $LOG'; echo 'Super+Shift+E で River を終了できます。'; exec \${SHELL:-/bin/sh}" &
             break
         fi
         sleep 1

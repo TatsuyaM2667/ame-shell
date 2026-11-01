@@ -1,0 +1,51 @@
+#!/bin/sh
+# ame-terminal: ame-shell が開く端末(Super+Return・ランチャーのアップデートなど)。POSIX sh。
+#   ame-terminal [--title 題名] [-e コマンド 引数...]
+# ghostty(ame-shell と同じ Zig 製)を使う。無ければ foot、それも無ければ xterm。
+# ghostty は自分の設定(~/.config/ghostty/config)が無ければ ame-shell の設定(share/ame-shell/ghostty/config:
+# 半透明・JetBrainsMono Nerd Font・ame の配色・zsh)で開く。
+
+case "$0" in
+    */*) SELF_DIR=$(cd "$(dirname "$0")" && pwd) ;;
+    *) SELF_DIR=$(dirname "$(command -v "$0")") ;;
+esac
+PREFIX_DIR=$(dirname "$SELF_DIR")
+SHARE="$PREFIX_DIR/share/ame-shell"
+[ -d "$SHARE" ] || SHARE="$SELF_DIR/../data"
+export PATH="$SELF_DIR:$PATH"
+
+title=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --title) title="$2"; shift 2 ;;
+        --title=*) title="${1#*=}"; shift ;;
+        -e) shift; break ;;
+        *) break ;;
+    esac
+done
+
+if command -v ghostty >/dev/null 2>&1; then
+    conf=""
+    user_conf="${XDG_CONFIG_HOME:-$HOME/.config}/ghostty/config"
+    [ -f "$user_conf" ] || [ ! -f "$SHARE/ghostty/config" ] || conf="--config-file=$SHARE/ghostty/config"
+    # 引数の組み立て: 題名と設定は前に、-e のコマンドは最後に
+    if [ $# -gt 0 ]; then
+        if [ -n "$title" ]; then
+            exec ghostty ${conf:+"$conf"} --title="$title" -e "$@"
+        fi
+        exec ghostty ${conf:+"$conf"} -e "$@"
+    fi
+    if [ -n "$title" ]; then exec ghostty ${conf:+"$conf"} --title="$title"; fi
+    exec ghostty ${conf:+"$conf"}
+fi
+
+if command -v foot >/dev/null 2>&1; then
+    if [ -n "$title" ]; then
+        if [ $# -gt 0 ]; then exec foot -T "$title" "$@"; fi
+        exec foot -T "$title"
+    fi
+    exec foot "$@"
+fi
+
+if [ $# -gt 0 ]; then exec xterm ${title:+-T "$title"} -e "$@"; fi
+exec xterm ${title:+-T "$title"}

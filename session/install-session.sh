@@ -101,7 +101,7 @@ if [ "$UNINSTALL" = 1 ]; then
     done < "$MANIFEST"
     run rm -f "$MANIFEST"
     # 自分で作った空ディレクトリだけ片付ける(他のファイルがあれば残る)
-    for d in "$DESTDIR$PREFIX/share/icons/ame/cursors" "$DESTDIR$PREFIX/share/icons/ame" "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell/xdg/foot" "$DESTDIR$PREFIX/share/ame-shell/xdg/fastfetch" "$DESTDIR$PREFIX/share/ame-shell/xdg/xdg-desktop-portal" "$DESTDIR$PREFIX/share/ame-shell/examples" "$DESTDIR$PREFIX/share/ame-shell/xdg" "$DESTDIR$PREFIX/share/ame-shell" "$DESTDIR/usr/share/sddm/themes/ame" "$DESTDIR/usr/local/share/sddm/themes/ame" "$DESTDIR$PREFIX/opt/river-0.5/bin" "$DESTDIR$PREFIX/opt/river-0.5"; do
+    for d in "$DESTDIR$PREFIX/share/icons/ame/cursors" "$DESTDIR$PREFIX/share/icons/ame" "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell/xdg/foot" "$DESTDIR$PREFIX/share/ame-shell/xdg/fastfetch" "$DESTDIR$PREFIX/share/ame-shell/xdg/xdg-desktop-portal" "$DESTDIR$PREFIX/share/ame-shell/examples" "$DESTDIR$PREFIX/share/ame-shell/ghostty" "$DESTDIR$PREFIX/share/ame-shell/zsh" "$DESTDIR$PREFIX/share/ame-shell/xdg" "$DESTDIR$PREFIX/share/ame-shell" "$DESTDIR/usr/share/sddm/themes/ame" "$DESTDIR/usr/local/share/sddm/themes/ame" "$DESTDIR$PREFIX/opt/river-0.5/bin" "$DESTDIR$PREFIX/opt/river-0.5"; do
         [ -d "$d" ] && run rmdir "$d" 2>/dev/null
     done
     say "完了しました。"
@@ -234,6 +234,7 @@ install_file "$HERE/ame-session" "$PREFIX/bin/ame-session" 755
 install_file "$HERE/ame-update" "$PREFIX/bin/ame-update" 755
 install_file "$HERE/ame-term-shell" "$PREFIX/bin/ame-term-shell" 755
 install_file "$HERE/ame-greeter" "$PREFIX/bin/ame-greeter" 755
+install_file "$HERE/ame-terminal" "$PREFIX/bin/ame-terminal" 755
 # ame-update が git pull してビルドし直すための、ソースの場所の記録
 tmp=$(mktemp "${TMPDIR:-/tmp}/ame-src.XXXXXX") || exit 1
 echo "$ROOT" > "$tmp"
@@ -249,6 +250,9 @@ install_file "$OUT/share/ame-shell/config.ame" "$PREFIX/share/ame-shell/config.a
 install_file "$OUT/share/ame-shell/bt-connect.sh" "$PREFIX/share/ame-shell/bt-connect.sh" 755
 install_file "$OUT/share/ame-shell/xdg/foot/foot.ini" "$PREFIX/share/ame-shell/xdg/foot/foot.ini" 644
 install_file "$OUT/share/ame-shell/xdg/fastfetch/config.jsonc" "$PREFIX/share/ame-shell/xdg/fastfetch/config.jsonc" 644
+# 端末(ghostty)と zsh の ame-shell の設定(自分の ~/.config/ghostty/config・~/.zshrc があればそちらが使われる)
+install_file "$OUT/share/ame-shell/ghostty/config" "$PREFIX/share/ame-shell/ghostty/config" 644
+install_file "$OUT/share/ame-shell/zsh/.zshrc" "$PREFIX/share/ame-shell/zsh/.zshrc" 644
 install_file "$OUT/share/ame-shell/xdg/xdg-desktop-portal/river-portals.conf" "$PREFIX/share/ame-shell/xdg/xdg-desktop-portal/river-portals.conf" 644
 # ユーザー設定の例(~/.config/ame-shell/environment・autostart。README を参照)
 install_file "$OUT/share/ame-shell/examples/environment" "$PREFIX/share/ame-shell/examples/environment" 644
@@ -268,6 +272,21 @@ if [ -d "$OUT/share/icons/ame/cursors" ]; then
         fi
     done
     install_file "$OUT/share/icons/ame/index.theme" "$PREFIX/share/icons/ame/index.theme" 644
+fi
+
+# ghostty をソースからビルドした場合(Chimera などパッケージが無い環境。install.sh が ~/.cache に作る)
+GPFX="$UHOME/.cache/ame-shell/toolchain/ghostty-prefix"
+if [ -x "$GPFX/bin/ghostty" ]; then
+    say "ghostty($GPFX)を $PREFIX に入れます"
+    (cd "$GPFX" && find . \( -type f -o -type l \) | sed "s|^\./||") | while IFS= read -r rel; do
+        if [ -L "$GPFX/$rel" ]; then
+            install_link "$(readlink "$GPFX/$rel")" "$PREFIX/$rel"
+        elif [ -x "$GPFX/$rel" ]; then
+            install_file "$GPFX/$rel" "$PREFIX/$rel" 755
+        else
+            install_file "$GPFX/$rel" "$PREFIX/$rel" 644
+        fi
+    done
 fi
 
 # River 0.5 を自分でビルドしている場合(~/.local/opt/river-0.5)、全ユーザーが使えるよう $PREFIX/opt へ
@@ -431,6 +450,22 @@ RULES
             later "sh $ROOT/scripts/greeter-setup.sh --user $U"
         fi
     fi
+    # 4b. SDDM と、そのために入った KDE Plasma を消す(Chimera)。安全なときだけ聞く:
+    #     ログイン画面が ame-shell(greetd)に設定済みで、いまのログインが greetd 経由(sddm が動いていない)。
+    #     ame-shell が使うもの(KDE と一緒に入っていたもの)は残すよう明示する
+    if command -v apk >/dev/null 2>&1 && apk info -e sddm >/dev/null 2>&1 &&
+        grep -q "ame-greeter" /etc/greetd/config.toml 2>/dev/null &&
+        ps -o comm= -A 2>/dev/null | grep -qx greetd && ! ps -o comm= -A 2>/dev/null | grep -qx sddm; then
+        KEEP="greetd greetd-dinit thunar tumbler ffmpeg mpv-libs libpulse-progs xwayland upower power-profiles-daemon mesa-dri"
+        if ask "ログイン画面は ame-shell で動いています。SDDM と、そのために入った KDE Plasma(800 以上のパッケージ)を消しますか?" \
+            "The login screen runs on ame-shell. Remove SDDM and the KDE Plasma it pulled in (800+ packages)?"; then
+            # shellcheck disable=SC2086
+            if [ "$DRY" = 1 ]; then say "  (dry-run) apk add $KEEP '!sddm'"
+            else apk add $KEEP '!sddm' && ok "SDDM と KDE を消しました" "removed SDDM and KDE"; fi
+        else
+            later "apk add $KEEP '!sddm'"
+        fi
+    fi
     # 5. SDDM を使うなら: ロック画面と同じ見た目にし、SDDM の設定を上書きする(scripts/sddm-theme.sh)。
     #    テーマ ame・ame-shell が背景や写真を書き出す置き場・weston のキオスク(kwin_wayland より軽い)
     if [ "$GREETD_DONE" = 0 ] && command -v sddm >/dev/null 2>&1 && [ -f "$ROOT/scripts/sddm-theme.sh" ]; then
@@ -476,7 +511,8 @@ if [ "$USER_MODE" = 0 ]; then
     elif command -v sddm >/dev/null 2>&1; then say "  [ok] sddm"
     else ng "ログイン画面(greetd)がありません($PKG greetd)" "no login manager (greetd) found ($PKG greetd)"; fi
 fi
-chk foot foot "端末" "terminal"
+if command -v ghostty >/dev/null 2>&1 || [ -x "$DESTDIR$PREFIX/bin/ghostty" ]; then say "  [ok] ghostty"; else chk foot foot "端末(ghostty が無いので foot)" "terminal (foot; ghostty not found)"; fi
+chk zsh zsh "端末のシェル" "terminal shell"
 chk dbus-run-session dbus "D-Bus" "D-Bus"
 chk playerctl playerctl "メディア" "media"
 chk cava cava "メディアの波形" "media spectrum"

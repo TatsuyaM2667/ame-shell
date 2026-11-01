@@ -1,0 +1,71 @@
+# ame-shell の ghostty の既定設定(session/ame-terminal が --config-file で渡す)。
+# 自分の ~/.config/ghostty/config があれば、そちらだけが使われる(この設定は使わない)。
+# 書き方: ghostty +show-config --default --docs
+
+# ---- シェル: fastfetch を出してから zsh(ame-shell の設定)----
+command = ame-term-shell
+# プロンプトの位置などの連携は zsh の設定(share/ame-shell/zsh/.zshrc)が読み込む
+shell-integration = none
+shell-integration-features = cursor,title
+
+# ---- 文字 ----
+font-family = JetBrainsMono Nerd Font
+font-family = Noto Sans CJK JP
+font-size = 12
+font-thicken = false
+adjust-cell-height = 8%
+
+# ---- 見た目: 夜空の紺に、ame のアクセントの青 ----
+background = #0b1020
+foreground = #dfe7f5
+background-opacity = 0.86
+background-blur = true
+cursor-color = #7ab8ff
+cursor-style = bar
+cursor-style-blink = true
+selection-background = #2b4a7a
+selection-foreground = #ffffff
+minimum-contrast = 1.1
+# 16 色(黒・赤・緑・黄・青・紫・水色・白 / 明るい版)
+palette = 0=#1b2236
+palette = 1=#ff7a8a
+palette = 2=#7ee0a1
+palette = 3=#ffd58a
+palette = 4=#7ab8ff
+palette = 5=#c8a2ff
+palette = 6=#7fe3e8
+palette = 7=#c9d4e8
+palette = 8=#4b5675
+palette = 9=#ff9aa6
+palette = 10=#a3f0bf
+palette = 11=#ffe3a8
+palette = 12=#a3cfff
+palette = 13=#dcc2ff
+palette = 14=#a6f1f4
+palette = 15=#ffffff
+
+# ---- 窓 ----
+window-padding-x = 14
+window-padding-y = 12
+window-padding-balance = true
+# タイル型の WM なのでタイトルバーは要らない(枠は ame-shell が描く)
+window-decoration = false
+gtk-titlebar = false
+resize-overlay = never
+confirm-close-surface = false
+# 2 つ目からの窓をすぐ開けるよう、1 つのプロセスで複数の窓を持つ
+gtk-single-instance = true
+# 最後の窓を閉じても少しの間は残し、次に開くのを速く
+quit-after-last-window-closed = true
+quit-after-last-window-closed-delay = 5m
+
+# ---- 操作 ----
+mouse-hide-while-typing = true
+copy-on-select = clipboard
+app-notifications = no-clipboard-copy
+keybind = ctrl+shift+t=new_tab
+keybind = ctrl+shift+enter=new_split:auto
+keybind = ctrl+shift+w=close_surface
+keybind = ctrl+plus=increase_font_size:1
+keybind = ctrl+minus=decrease_font_size:1
+keybind = ctrl+zero=reset_font_size

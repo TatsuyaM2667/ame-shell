@@ -20,8 +20,8 @@ pub const Bind = struct { keysym: u32, mods: u32, action: Action };
 
 const fixed = [_]Bind{
     // アプリ
-    .{ .keysym = c.XKB_KEY_Return, .mods = SUPER, .action = .{ .spawn = "foot" } },
-    .{ .keysym = c.XKB_KEY_t, .mods = SUPER, .action = .{ .spawn = "foot" } },
+    .{ .keysym = c.XKB_KEY_Return, .mods = SUPER, .action = .{ .spawn = "ame-terminal" } },
+    .{ .keysym = c.XKB_KEY_t, .mods = SUPER, .action = .{ .spawn = "ame-terminal" } },
     .{ .keysym = c.XKB_KEY_b, .mods = SUPER, .action = .{ .spawn = "firefox" } },
     // ファイルマネージャ(thunar。無ければフォルダを開く既定のアプリ)
     .{ .keysym = c.XKB_KEY_e, .mods = SUPER, .action = .{ .spawn = "command -v thunar >/dev/null 2>&1 && exec thunar || exec xdg-open \"$HOME\"" } },

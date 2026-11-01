@@ -5,7 +5,7 @@
 #   sh install.sh --user        自分だけ(~/.local)。root 不要(パッケージの導入は、できなければ飛ばす)
 #   sh install.sh --uninstall [--user]
 #
-# オプション: --no-deps(パッケージを入れない)/ --no-river(River が無くても作らない)/ --yes(確認しない)
+# オプション: --no-deps(パッケージを入れない)/ --no-river(River が無くても作らない)/ --no-ghostty(ghostty を作らない)/ --yes(確認しない)
 #           --debug(デバッグ情報つき・安全検査ありでビルド。クラッシュのバックトレースに関数名が出る)
 # FreeBSD では scripts/install-freebsd.sh、Arch 系では scripts/install-arch.sh(どちらも完全自動)に任せる。
 #
@@ -13,9 +13,11 @@
 #   1. 依存パッケージ(Chimera Linux の apk・Arch の pacman は自動。その他のディストリは足りないものを表示)
 #   2. Zig 0.13.0(無ければ公式の配布物を ~/.cache に)と Odin(無ければソースからビルド)
 #   3. River が無ければ River 0.5 をソースからビルド(Zig 0.16 + wlroots 0.20)
-#   4. ame-shell をビルドして、session/install-session.sh でインストール
+#   4. 端末 ghostty が無ければソースからビルド(Zig 0.17。Chimera はパッケージが無い)。失敗しても foot で続ける
+#   5. ame-shell をビルドして、session/install-session.sh でインストール
 #      (グループ・SDDM などのサービス・NetworkManager の polkit ルールは確認してから設定)
-#   5. PipeWire / WirePlumber / pipewire-pulse のユーザーサービスを確認して有効に
+#   6. PipeWire / WirePlumber / pipewire-pulse のユーザーサービスを確認して有効に
+#   7. zsh の候補表示(zsh-autosuggestions)がパッケージに無ければ取ってくる・フォルダを開くアプリ
 
 set -eu
 
@@ -23,6 +25,7 @@ USER_MODE=0
 UNINSTALL=0
 NO_DEPS=0
 NO_RIVER=0
+NO_GHOSTTY=0
 ASSUME_YES=0
 BUILD_OPTS="-Doptimize=ReleaseFast"
 FWD=""
@@ -32,6 +35,7 @@ for a in "$@"; do
         --uninstall) UNINSTALL=1 ;;
         --no-deps) NO_DEPS=1 ;;
         --no-river) NO_RIVER=1 ;;
+        --no-ghostty) NO_GHOSTTY=1 ;;
         --yes|-y) ASSUME_YES=1; FWD="$FWD --yes" ;;
         --debug) BUILD_OPTS="-Doptimize=ReleaseSafe -Dstrip=false"; FWD="$FWD --debug" ;;
         -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
@@ -95,6 +99,8 @@ CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/ame-shell/toolchain"
 mkdir -p "$CACHE"
 ZIG_VER=0.13.0
 ZIG_RIVER_VER=0.16.0
+ZIG_GHOSTTY_VER=0.17.0
+GHOSTTY_VER=1.4.0
 ODIN_TAG=dev-2026-08
 
 fetch_to() { # fetch_to <url> <file>
@@ -112,12 +118,14 @@ if [ "$ASSUME_YES" = 0 ] && [ -t 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
-say "1/5 依存パッケージ"
+say "1/7 依存パッケージ"
 # Chimera Linux のパッケージ名(すべて `apk search -e` で実在を確認済み)。
 # APK_BUILD / APK_RIVER / APK_RUN は必須: 入れられなければ止める。APK_OPT は無くても動く(その機能だけ使えない)
 #   ビルド: ame-shell と Odin のビルドに必要なもの
 APK_BUILD="git curl bash clang llvm-devel linux-headers pkgconf wayland-devel wayland-progs wayland-protocols
- mesa-devel libdrm-devel libxkbcommon-devel freetype-devel harfbuzz-devel fontconfig-devel dbus-devel linux-pam-devel"
+ mesa-devel libdrm-devel libxkbcommon-devel freetype-devel harfbuzz-devel fontconfig-devel dbus-devel linux-pam-devel
+ gtk4-devel libadwaita-devel gtk4-layer-shell-devel blueprint-compiler gettext-devel ncurses"
+#   (2 行目は端末 ghostty のビルド用。Chimera には ghostty のパッケージが無い)
 #   River 0.5 のビルド(Chimera のリポジトリには river が無いので必ずソースから作る)
 APK_RIVER="wlroots0.20-devel libevdev-devel pixman-devel libinput-devel xwayland xwayland-devel"
 #   動かすのに必要なもの。pipewire-pulse は pipewire パッケージに含まれる
@@ -126,12 +134,13 @@ APK_RIVER="wlroots0.20-devel libevdev-devel pixman-devel libinput-devel xwayland
 #   (スクショ: grim slurp wl-clipboard / 波形: cava / 音量・Bluetooth の音: libpulse-progs(pactl)/ 無線: util-linux-rfkill)
 APK_RUN="greetd greetd-dinit foot dbus mesa-dri polkit upower power-profiles-daemon playerctl cava pipewire wireplumber libpulse-progs mpv-libs ffmpeg
  grim slurp wl-clipboard swaylock brightnessctl util-linux-rfkill networkmanager bluez thunar tumbler xdg-utils
+ zsh zsh-syntax-highlighting fzf zoxide
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  fonts-noto-sans-cjk-otf fonts-nerd-jetbrains-mono fonts-nerd-symbols-only adwaita-icon-theme hicolor-icon-theme"
-APK_OPT="fastfetch wf-recorder wlr-randr gvfs"
+APK_OPT="fastfetch wf-recorder wlr-randr gvfs eza bat"
 NEED_CMDS="git curl clang wayland-scanner pkg-config"
 # 動かすのに欠かせないコマンド(パッケージを入れた後に確かめる)
-RUN_CMDS="foot greetd dbus-run-session playerctl cava pactl grim slurp wl-copy swaylock brightnessctl rfkill nmcli bluetoothctl"
+RUN_CMDS="foot zsh greetd dbus-run-session playerctl cava pactl grim slurp wl-copy swaylock brightnessctl rfkill nmcli bluetoothctl"
 # Odin のビルドは llvm-config という名前を探せないため明示する
 export LLVM_CONFIG="${LLVM_CONFIG:-llvm-config}"
 if [ "$NO_DEPS" = 1 ]; then
@@ -180,7 +189,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-say "2/5 ツールチェイン(Zig $ZIG_VER・Odin)"
+say "2/7 ツールチェイン(Zig $ZIG_VER・Odin)"
 ZIG=""
 if command -v zig >/dev/null 2>&1 && [ "$(zig version)" = "$ZIG_VER" ]; then
     ZIG=$(command -v zig)
@@ -211,7 +220,7 @@ info "odin: $ODIN"
 TOOLPATH="$(dirname "$ZIG"):$(dirname "$ODIN"):$PATH"
 
 # ---------------------------------------------------------------------------
-say "3/5 River"
+say "3/7 River"
 RIVER5_DIR="$HOME/.local/opt/river-0.5"
 if command -v river >/dev/null 2>&1; then
     info "river $(river -version 2>&1) が入っています"
@@ -237,7 +246,43 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-say "4/5 ame-shell のビルドとインストール"
+say "4/7 端末(ghostty)"
+# ame-shell と同じ Zig 製の端末。パッケージがあればそれ(Arch・FreeBSD)、無ければ公式のソースから
+# ビルドして ~/.cache に置く(install-session.sh が $PREFIX へコピーする)。失敗しても foot で続ける
+GHOSTTY_PREFIX="$CACHE/ghostty-prefix"
+if command -v ghostty >/dev/null 2>&1; then
+    info "ghostty: $(command -v ghostty)"
+elif [ -x "$GHOSTTY_PREFIX/bin/ghostty" ] && [ "$(cat "$GHOSTTY_PREFIX/.ame-version" 2>/dev/null)" = "$GHOSTTY_VER" ]; then
+    info "ghostty $GHOSTTY_VER: ビルド済み($GHOSTTY_PREFIX)"
+elif [ "$NO_GHOSTTY" = 1 ]; then
+    info "(--no-ghostty のため作りません。端末は foot を使います)"
+elif ! pkg-config --exists gtk4 libadwaita-1 2>/dev/null; then
+    info "(GTK4 / libadwaita の開発ファイルが無いため ghostty は作りません。端末は foot を使います)"
+else
+    info "ghostty $GHOSTTY_VER をソースからビルドします(Zig $ZIG_GHOSTTY_VER。数分かかります)"
+    ZIG17="$CACHE/zig-$ARCH-linux-$ZIG_GHOSTTY_VER/zig"
+    if [ ! -x "$ZIG17" ]; then
+        fetch_to "https://ziglang.org/download/$ZIG_GHOSTTY_VER/zig-$ARCH-linux-$ZIG_GHOSTTY_VER.tar.xz" "$CACHE/zig-$ZIG_GHOSTTY_VER.tar.xz" &&
+            tar -xf "$CACHE/zig-$ZIG_GHOSTTY_VER.tar.xz" -C "$CACHE"
+    fi
+    GSRC="$CACHE/ghostty-$GHOSTTY_VER"
+    if [ ! -d "$GSRC" ]; then
+        fetch_to "https://release.files.ghostty.org/$GHOSTTY_VER/ghostty-$GHOSTTY_VER.tar.gz" "$CACHE/ghostty-$GHOSTTY_VER.tar.gz" &&
+            tar -xzf "$CACHE/ghostty-$GHOSTTY_VER.tar.gz" -C "$CACHE"
+    fi
+    rm -rf "$GHOSTTY_PREFIX"
+    if [ -x "$ZIG17" ] && [ -d "$GSRC" ] &&
+        (cd "$GSRC" && "$ZIG17" build -Doptimize=ReleaseFast -Dgtk-x11=false --prefix "$GHOSTTY_PREFIX"); then
+        echo "$GHOSTTY_VER" > "$GHOSTTY_PREFIX/.ame-version"
+        info "ghostty $GHOSTTY_VER → $GHOSTTY_PREFIX"
+    else
+        rm -rf "$GHOSTTY_PREFIX"
+        info "ghostty のビルドに失敗しました。端末は foot を使います(--no-ghostty で次から飛ばせます)"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+say "5/7 ame-shell のビルドとインストール"
 (cd "$REPO" && PATH="$TOOLPATH" "$ZIG" build $BUILD_OPTS) || die "ame-shell のビルドに失敗しました"
 SESS_OPTS=""
 [ "$ASSUME_YES" = 1 ] && SESS_OPTS="--yes"
@@ -251,7 +296,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-say "5/5 音のユーザーサービス(PipeWire / WirePlumber / pipewire-pulse)"
+say "6/7 音のユーザーサービス(PipeWire / WirePlumber / pipewire-pulse)"
 # 音量・メディア・Bluetooth の音に必要。自分のユーザーのサービスなので root は要らない
 confirm() {
     [ "$ASSUME_YES" = 1 ] && return 0
@@ -304,4 +349,26 @@ if command -v thunar >/dev/null 2>&1 && command -v xdg-mime >/dev/null 2>&1; the
             xdg-mime default thunar.desktop inode/directory && info "フォルダを開くアプリ: thunar(Super+E)" ;;
         *) info "フォルダを開くアプリ: $cur(そのまま)" ;;
     esac
+fi
+
+# ---------------------------------------------------------------------------
+say "7/7 端末のシェル(zsh)"
+# 灰色の候補(zsh-autosuggestions)は Chimera にパッケージが無いので、無ければ取ってくる(ame-shell の zsh の設定が読む)
+ZPLUG="$HOME/.local/share/ame-shell/zsh"
+have_autosuggest=0
+for f in /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh \
+    /usr/local/share/zsh-autosuggestions/zsh-autosuggestions.zsh "$ZPLUG/zsh-autosuggestions/zsh-autosuggestions.zsh"; do
+    [ -r "$f" ] && have_autosuggest=1
+done
+if [ "$have_autosuggest" = 0 ] && command -v zsh >/dev/null 2>&1; then
+    mkdir -p "$ZPLUG"
+    git clone --depth 1 https://github.com/zsh-users/zsh-autosuggestions "$ZPLUG/zsh-autosuggestions" >/dev/null 2>&1 &&
+        info "zsh-autosuggestions → $ZPLUG" || info "(zsh-autosuggestions を取ってこられませんでした。候補表示なしで使えます)"
+fi
+if command -v zsh >/dev/null 2>&1; then
+    if [ -f "$HOME/.zshrc" ]; then
+        info "zsh: 自分の ~/.zshrc を使います(ame-shell の設定は share/ame-shell/zsh/.zshrc)"
+    else
+        info "zsh: ame-shell の設定で開きます(端末の中だけ。ログインシェルは変えません)"
+    fi
 fi

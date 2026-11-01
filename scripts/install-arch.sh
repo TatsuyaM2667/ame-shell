@@ -44,9 +44,10 @@ RUN="greetd foot polkit upower power-profiles-daemon playerctl cava pipewire pip
  brightnessctl networkmanager bluez bluez-utils util-linux thunar tumbler gvfs xdg-utils
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  noto-fonts-cjk ttf-jetbrains-mono-nerd ttf-nerd-fonts-symbols hicolor-icon-theme adwaita-icon-theme
- fastfetch wf-recorder wlr-randr"
+ fastfetch wf-recorder wlr-randr
+ ghostty zsh zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza bat"
 # 動かすのに欠かせないコマンド(入れた後に確かめる)
-RUN_CMDS="foot greetd dbus-run-session playerctl cava pactl grim slurp wl-copy swaylock brightnessctl rfkill nmcli bluetoothctl"
+RUN_CMDS="foot zsh greetd dbus-run-session playerctl cava pactl grim slurp wl-copy swaylock brightnessctl rfkill nmcli bluetoothctl"
 # 日本語入力(あれば)
 JA="fcitx5 fcitx5-mozc fcitx5-gtk fcitx5-qt fcitx5-configtool"
 

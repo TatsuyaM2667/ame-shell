@@ -71,7 +71,7 @@ pub const Config = struct {
     lyrics_lrclib: bool = true,
     lyrics_netease: bool = true,
     // apps
-    terminal: Str = Str.of("foot"),
+    terminal: Str = Str.of("ame-terminal"),
     // notifications
     notify_timeout_ms: u32 = 6000,
     /// バッテリーの残りが少なくなったとき(20% / 10% / 5%)に知らせる
