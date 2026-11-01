@@ -22,6 +22,8 @@ pub const Avatar = struct {
     /// 読み終えて GPU へ送るのを待っている画素(描画中に送る: そのとき GL コンテキストが current)
     ready: ?[*]u8 = null,
     loading: bool = false,
+    /// 読み込み中にもう一度 reload された(読み終えたら読み直す)
+    again: bool = false,
 
     pub fn create(app: *App) !*Avatar {
         const self = try app.alloc.create(Avatar);
@@ -45,7 +47,10 @@ pub const Avatar = struct {
     }
 
     pub fn reload(self: *Avatar) void {
-        if (self.loading) return;
+        if (self.loading) {
+            self.again = true;
+            return;
+        }
         var buf: [600]u8 = undefined;
         const path = resolve(&buf) orelse return;
         const owned = std.heap.c_allocator.dupeZ(u8, path) catch return;
@@ -77,6 +82,10 @@ pub const Avatar = struct {
         self.pending = null;
         self.mutex.unlock();
         self.loading = false;
+        if (self.again) {
+            self.again = false;
+            self.reload();
+        }
         const p = px orelse return;
         if (self.ready) |old| std.c.free(old);
         self.ready = p;

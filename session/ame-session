@@ -147,7 +147,7 @@ fi
 rm -f "$STATE_DIR/crashloop" "$STATE_DIR/quick-fails"
 
 if [ "${AME_SESSION_NESTED:-0}" != "1" ] && command -v dbus-update-activation-environment >/dev/null 2>&1; then
-    dbus-update-activation-environment XDG_SESSION_TYPE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS PATH >/dev/null 2>&1
+    dbus-update-activation-environment XDG_SESSION_TYPE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS PATH XDG_CONFIG_DIRS XDG_DATA_DIRS >/dev/null 2>&1
 fi
 
 # ---- どの River で起動するか ----

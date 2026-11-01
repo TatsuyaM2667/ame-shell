@@ -3,6 +3,7 @@ const std = @import("std");
 const anim = @import("anim.zig");
 test {
     _ = @import("config.zig");
+    _ = @import("portal.zig");
 }
 
 test "spring converges and is velocity-continuous" {

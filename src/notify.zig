@@ -149,6 +149,8 @@ pub const Notifs = struct {
         _ = c.dbus_connection_read_write(conn, 0);
         while (c.dbus_connection_pop_message(conn)) |msg| {
             defer c.dbus_message_unref(msg);
+            // ファイル選択の画面(xdg-desktop-portal)の返事は同じ接続に届く
+            if (@import("portal.zig").handle(self.app, msg)) continue;
             self.handleMessage(msg);
         }
         c.dbus_connection_flush(conn);

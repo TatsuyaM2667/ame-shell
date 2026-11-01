@@ -29,6 +29,9 @@ pub const WallPick = struct {
     is_open: bool = false,
     sel: usize = 0,
     hover: ?usize = null,
+    /// ユーザーの写真のとき: 「ファイルから選ぶ…」のボタン(x, y, w, h)と、その上にポインタがあるか
+    file_btn: [4]f32 = .{ 0, 0, 0, 0 },
+    file_hover: bool = false,
     open_s: Spring = Spring.init(0, 0.5, 0.82),
     scroll: Spring = Spring.init(0, 0.42, 0.86),
     wide: [MAX_CARDS]Spring = [_]Spring{Spring.init(0, 0.38, 0.78)} ** MAX_CARDS,
@@ -56,11 +59,27 @@ pub const WallPick = struct {
         return @min(self.list().len, MAX_CARDS);
     }
 
-    /// ダッシュボードの写真から: ~/Pictures の画像を並べてユーザーの写真を選ぶ
+    /// ダッシュボードの写真から: ~/Pictures の画像を並べてユーザーの写真を選ぶ。
+    /// ~/Pictures に画像が無ければ、ファイル選択の画面(xdg-desktop-portal)を直接開く
     pub fn openAvatar(self: *WallPick) void {
         if (self.is_open) self.close();
         self.kind = .avatar;
+        self.app.launcher.ensureScanned();
+        if (self.count() == 0) {
+            self.openAvatarFile();
+            return;
+        }
         self.open();
+    }
+
+    /// ほかの場所の写真をファイル選択の画面から選ぶ
+    pub fn openAvatarFile(self: *WallPick) void {
+        if (self.is_open) self.close();
+        @import("portal.zig").openImage(self.app, "ユーザーの写真を選ぶ", struct {
+            fn done(app: *App, path: []const u8) void {
+                app.avatar.set(path);
+            }
+        }.done);
     }
 
     pub fn toggle(self: *WallPick) void {
@@ -182,6 +201,7 @@ pub const WallPick = struct {
             c.XKB_KEY_Return, c.XKB_KEY_KP_Enter, c.XKB_KEY_space => self.apply(),
             c.XKB_KEY_Right, c.XKB_KEY_l, c.XKB_KEY_Tab, c.XKB_KEY_Down => if (self.sel + 1 < n) self.select(self.sel + 1),
             c.XKB_KEY_Left, c.XKB_KEY_h, c.XKB_KEY_ISO_Left_Tab, c.XKB_KEY_Up => if (self.sel > 0) self.select(self.sel - 1),
+            c.XKB_KEY_o, c.XKB_KEY_f => if (self.kind == .avatar) self.openAvatarFile(),
             c.XKB_KEY_Home => self.select(0),
             c.XKB_KEY_End => self.select(n - 1),
             else => {},
@@ -204,6 +224,16 @@ pub const WallPick = struct {
         const self: *WallPick = @ptrCast(@alignCast(ctx));
         if (!self.is_open) return;
         const hit = if (ev.kind == .leave) null else self.cardAt(ev.x, ev.y);
+        const b = self.file_btn;
+        const on_btn = self.kind == .avatar and ev.kind != .leave and ev.x >= b[0] and ev.x <= b[0] + b[2] and ev.y >= b[1] and ev.y <= b[1] + b[3];
+        if (on_btn != self.file_hover) {
+            self.file_hover = on_btn;
+            s.schedule();
+        }
+        if (on_btn and ev.kind == .press) {
+            self.openAvatarFile();
+            return;
+        }
         if (hit != self.hover) {
             self.hover = hit;
             s.schedule();
@@ -374,7 +404,20 @@ pub const WallPick = struct {
         var buf: [32]u8 = undefined;
         _ = cv.text(W / 2, ny + 28, 13, sub, std.fmt.bufPrint(&buf, "{d} / {d}", .{ self.sel + 1, n }) catch "", .{ .alignment = .center });
         _ = cv.text(W / 2, cy - 40, 30, txt, if (self.kind == .avatar) "ユーザーの写真" else "壁紙", .{ .bold = true, .alignment = .center });
-        _ = cv.text(W / 2, H - 36, 13, sub, "← → / ホイールで選択   Enter・クリックで適用   Esc で閉じる", .{ .alignment = .center });
+        if (self.kind == .avatar) {
+            // ~/Pictures 以外の写真は、ファイル選択の画面(xdg-desktop-portal)から
+            const label = "\u{F0256}  ファイルから選ぶ…";
+            const bw: f32 = 220;
+            const bh: f32 = 40;
+            const bx = W / 2 - bw / 2;
+            const by = H - 104;
+            self.file_btn = .{ bx, by, bw, bh };
+            cv.rect(bx, by, bw, bh, bh / 2, if (self.file_hover) acc.alpha(0.35) else Color.hex(0xffffff).alpha(0.10));
+            _ = cv.text(W / 2, by + bh / 2 + 5, 15, txt, label, .{ .alignment = .center });
+            _ = cv.text(W / 2, H - 36, 13, sub, "← → / ホイールで選択   Enter・クリックで適用   O でファイルから選ぶ   Esc で閉じる", .{ .alignment = .center });
+        } else {
+            _ = cv.text(W / 2, H - 36, 13, sub, "← → / ホイールで選択   Enter・クリックで適用   Esc で閉じる", .{ .alignment = .center });
+        }
         cv.restore();
 
         if (self.is_open) s.setInputRect(0, 0, @intFromFloat(W), @intFromFloat(H));
