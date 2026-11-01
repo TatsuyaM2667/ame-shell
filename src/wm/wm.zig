@@ -69,7 +69,9 @@ pub const Window = struct {
     py: Spring = Spring.init(0, 0.36, 0.80),
     cw: Spring = Spring.init(0, 0.30, 0.90),
     ch: Spring = Spring.init(0, 0.30, 0.90),
-    reveal: Spring = Spring.init(0, 0.30, 0.68),
+    // 開くとき: 中心から広がる(減衰を弱めにして弾む)+ 下からせり上がって少し行き過ぎて戻る(ダッシュボードのバネと同じ感触)
+    reveal: Spring = Spring.init(0, 0.32, 0.6),
+    pop: Spring = Spring.init(0, 0.34, 0.55),
     slide: Spring = Spring.init(0, 0.42, 0.92),
     placed: bool = false,
     wait_frames: u8 = 0,
@@ -431,6 +433,7 @@ pub const Wm = struct {
                 w.closing = true;
                 w.reveal.response = 0.18;
                 w.reveal.set(0);
+                w.pop.set(28); // 閉じるときは少し沈みながら縮む
                 self.kick();
             },
             .exit => c.river_window_manager_v1_exit_session(self.mgr),
@@ -677,8 +680,10 @@ pub const Wm = struct {
                 w.py.snap(w.ty);
                 w.cw.snap(@floatFromInt(w.w));
                 w.ch.snap(@floatFromInt(w.h));
-                w.reveal.snap(0.55);
+                w.reveal.snap(0.3);
                 w.reveal.set(1);
+                w.pop.snap(40);
+                w.pop.set(0);
             }
             // 大きくなったときは前の大きさから clip を広げていく(縮むときは即時)
             const fw: f32 = @floatFromInt(w.w);
@@ -689,7 +694,7 @@ pub const Wm = struct {
             if (w.ch.target != fh) {
                 if (fh < w.ch.x) w.ch.snap(fh) else w.ch.set(fh);
             }
-            var springs = [_]*Spring{ &w.px, &w.py, &w.cw, &w.ch, &w.reveal, &w.slide };
+            var springs = [_]*Spring{ &w.px, &w.py, &w.cw, &w.ch, &w.reveal, &w.slide, &w.pop };
             if (anim.stepAll(&springs, dt)) moving = true;
 
             // ワークスペース切替で出ていった窓は、スライドが終わったら隠す
@@ -712,7 +717,7 @@ pub const Wm = struct {
             const bw = vw * @min(sc, 1);
             const bh = vh * @min(sc, 1);
             const x = w.px.x + w.slide.x;
-            const y = w.py.x;
+            const y = w.py.x + w.pop.x;
             c.river_node_v1_set_position(node, @intFromFloat(@round(x)), @intFromFloat(@round(y)));
             const full = sc >= 0.999 and vw >= fw - 0.5 and vh >= fh - 0.5;
             if (full) {
