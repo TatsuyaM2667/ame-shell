@@ -6,6 +6,9 @@
 #   sh session/install-session.sh --user          自分だけ(~/.local)。root 不要。SDDM のセッションは作れない
 #   sh session/install-session.sh --uninstall [--user]
 #   その他: --prefix DIR / --destdir DIR(疑似 root への試験)/ --dry-run
+#          --yes(インストール後の設定を確認せずに行う)/ --no-setup(インストール後の設定をしない)
+#   インストール後の設定(Linux の全ユーザー用のみ、1 つずつ確認): video・input グループへの追加、
+#   SDDM・NetworkManager・bluetoothd の有効化(dinit)、NetworkManager の polkit ルール(wheel)
 #
 # 入力は zig-out/ のビルド成果物とこのリポジトリ内のファイルだけ(ここではビルドしない。ビルドは install.sh)。
 # 追加したファイルは $PREFIX/share/ame-shell/installed-files に記録し、--uninstall はそれだけを消す。
@@ -17,6 +20,8 @@ DESTDIR=""
 UNINSTALL=0
 DRY=0
 USER_MODE=0
+ASSUME_YES=0
+NO_SETUP=0
 ORIG_ARGS="$*"
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -27,7 +32,9 @@ while [ $# -gt 0 ]; do
         --uninstall) UNINSTALL=1; shift ;;
         --dry-run) DRY=1; shift ;;
         --user) USER_MODE=1; shift ;;
-        -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+        --yes|-y) ASSUME_YES=1; shift ;;
+        --no-setup) NO_SETUP=1; shift ;;
+        -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -313,6 +320,96 @@ if [ "$USER_MODE" = 0 ] && [ "$OS" != FreeBSD ]; then
     fi
 fi
 
+# ---------------------------------------------------------------------------
+# 表示の言語: Linux のコンソール(TTY)は日本語を表示できず豆腐になるので、英語で出す
+# (doas は LANG を引き継がないので TERM で判断する。AME_ASCII=1 でも英語)
+# ---------------------------------------------------------------------------
+EN=0
+if [ "${TERM:-}" = linux ] || [ "${TERM:-}" = vt220 ] || [ "${AME_ASCII:-0}" = 1 ]; then EN=1; fi
+# m <日本語> <英語>: 言語に合わせてどちらかを返す
+m() { if [ "$EN" = 1 ]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
+ok() { say "  [ok] $(m "$1" "$2")"; }
+ng() { warn "$(m "$1" "$2")"; }
+
+# ---------------------------------------------------------------------------
+# インストール後の設定(Linux の全ユーザー用のみ。root で動いている。1 つずつ確認してから行う)
+# FreeBSD は scripts/install-freebsd.sh が同じことを行う
+# ---------------------------------------------------------------------------
+# ask <日本語> <英語>: --yes なら常に はい。端末でなければ いいえ。--dry-run では聞かずに表示だけ
+ask() {
+    [ "$ASSUME_YES" = 1 ] && return 0
+    if [ "$DRY" = 1 ]; then say "  (dry-run) $(m "$1" "$2")"; return 0; fi
+    [ -t 0 ] || return 1
+    printf '  %s [y/N] ' "$(m "$1" "$2")"
+    read -r a || return 1
+    case "$a" in [yY]*) return 0 ;; esac
+    return 1
+}
+in_group() { id -Gn "$U" 2>/dev/null | tr ' ' '\n' | grep -qx "$1"; }
+SETUP_LATER=""
+later() { SETUP_LATER="$SETUP_LATER
+    $1"; }
+
+if [ "$USER_MODE" = 0 ] && [ "$OS" != FreeBSD ] && [ "$NO_SETUP" = 0 ] && [ -z "$DESTDIR" ]; then
+    say ""
+    say "== $(m "インストール後の設定" "Post-install setup") =="
+    # 1. video / input グループ(明るさの変更・Super 単独でのランチャー)
+    groups=""
+    for g in video input; do
+        getent group "$g" >/dev/null 2>&1 || continue
+        in_group "$g" || groups="$groups,$g"
+    done
+    groups=${groups#,}
+    if [ -n "$groups" ]; then
+        if ask "$U を $groups グループに追加しますか?(次のログインから有効)" "Add $U to group(s) $groups? (effective from next login)"; then
+            run usermod -aG "$groups" "$U" && ok "$U を $groups に追加しました" "added $U to $groups"
+        else
+            later "usermod -aG $groups $U"
+        fi
+    fi
+    # 2. dinit のサービス(SDDM・NetworkManager・Bluetooth)。boot.d へのリンクで「次の起動から」有効にする
+    #    (dinitctl enable はすぐに起動するため、インストール中に画面が SDDM に切り替わってしまう)
+    if command -v dinitctl >/dev/null 2>&1 && [ -d /etc/dinit.d ]; then
+        for svc in sddm networkmanager bluetoothd; do
+            [ -f "/usr/lib/dinit.d/$svc" ] || [ -f "/etc/dinit.d/$svc" ] || continue
+            [ -e "/etc/dinit.d/boot.d/$svc" ] && continue
+            if ask "dinit のサービス $svc を有効にしますか?(次の起動から)" "Enable dinit service $svc? (from next boot)"; then
+                svc_file="/usr/lib/dinit.d/$svc"
+                [ -f "/etc/dinit.d/$svc" ] && svc_file="/etc/dinit.d/$svc"
+                run mkdir -p /etc/dinit.d/boot.d
+                run ln -s "$svc_file" "/etc/dinit.d/boot.d/$svc" && ok "$svc を有効にしました" "enabled $svc"
+            else
+                later "dinitctl --system enable $svc"
+            fi
+        done
+    fi
+    # 3. NetworkManager を一般ユーザー(wheel)が操作できるように(無いと Wi-Fi パネルから接続できない)
+    RULE=/etc/polkit-1/rules.d/50-networkmanager.rules
+    if [ -d /usr/share/polkit-1 ] && command -v nmcli >/dev/null 2>&1; then
+        if [ -e "$RULE" ] && ! grep -qx "$RULE" "$MANIFEST" 2>/dev/null; then
+            ok "$RULE は既にあります(そのまま)" "$RULE already exists (left as is)"
+        elif in_group network; then
+            : # 既定のルール(network グループ)で操作できる
+        elif grep -qx "$RULE" "$MANIFEST" 2>/dev/null || ask "wheel グループが NetworkManager を操作できるよう polkit のルールを置きますか?($RULE)" "Install a polkit rule so the wheel group can control NetworkManager? ($RULE)"; then
+            tmp=$(mktemp "${TMPDIR:-/tmp}/ame-polkit.XXXXXX") || exit 1
+            cat > "$tmp" <<'RULES'
+// ame-shell(install-session.sh)が作成: wheel グループの人が、ログイン中の画面から
+// NetworkManager を操作できるようにする(Wi-Fi パネルからの接続・切断・オン/オフ)
+polkit.addRule(function(action, subject) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") == 0 &&
+        subject.isInGroup("wheel") && subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});
+RULES
+            install_file "$tmp" "$RULE" 644
+            rm -f "$tmp"
+        else
+            later "$(m "polkit のルール" "polkit rule"): $RULE"
+        fi
+    fi
+fi
+
 # 記録(前回分とマージして重複を除く)
 if [ "$DRY" = 0 ]; then
     mkdir -p "$(dirname "$MANIFEST")"
@@ -325,68 +422,87 @@ if [ "$DRY" = 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 前提チェック(表示のみ。設定は変更しない)
+# 確認(表示のみ)。TTY では英語
 # ---------------------------------------------------------------------------
 say ""
-say "== 前提チェック =="
+say "== $(m "確認" "Checks") =="
 if [ "$OS" = FreeBSD ]; then PKG="pkg install"; else PKG="apk add"; fi
-chk() { if command -v "$1" >/dev/null 2>&1; then say "  [ok] $1"; else warn "$1 がありません ($2)"; fi; }
-[ "$USER_MODE" = 0 ] && chk sddm "$PKG sddm"
-chk foot "$PKG foot"
-chk dbus-run-session "$PKG dbus"
-chk playerctl "メディア表示に必要: $PKG playerctl"
+# chk <コマンド> <パッケージ> <日本語の用途> <英語の用途>
+chk() {
+    if command -v "$1" >/dev/null 2>&1; then say "  [ok] $1"
+    else ng "$1 がありません($3: $PKG $2)" "$1 not found ($4: $PKG $2)"; fi
+}
+[ "$USER_MODE" = 0 ] && chk sddm sddm "ログイン画面" "login screen"
+chk foot foot "端末" "terminal"
+chk dbus-run-session dbus "D-Bus" "D-Bus"
+chk playerctl playerctl "メディア" "media"
+chk cava cava "メディアの波形" "media spectrum"
+chk grim grim "スクショ" "screenshots"
+chk slurp slurp "範囲のスクショ" "region screenshots"
+chk wl-copy wl-clipboard "スクショのコピー" "copy screenshots"
+[ "$OS" != FreeBSD ] && chk pactl libpulse-progs "音量・Bluetooth の音" "volume / Bluetooth audio"
+[ "$OS" != FreeBSD ] && chk rfkill util-linux-rfkill "Wi-Fi・Bluetooth のブロック解除" "unblock Wi-Fi / Bluetooth"
 if [ "$NEW_RIVER" = 1 ]; then
-    say "  [ok] river $(river -version 2>&1)(ame-shell がウィンドウマネージャを兼ねます)"
+    ok "river $(river -version 2>&1)(ame-shell がウィンドウマネージャを兼ねます)" "river $(river -version 2>&1) (ame-shell acts as window manager)"
 elif [ -x "$UHOME/.local/opt/river-0.5/bin/river" ] || [ -x "$DESTDIR$PREFIX/opt/river-0.5/bin/river" ]; then
-    say "  [ok] River 0.5(ウィンドウアニメーションつきのセッションが使えます)"
+    ok "River 0.5(ウィンドウアニメーションつきのセッションが使えます)" "River 0.5 (session with window animations)"
+elif [ "$HAVE_RIVER03" = 1 ]; then
+    ok "river $(river -version 2>&1)(River 0.5 が無いので River 0.3 のセッションだけが使えます)" "river $(river -version 2>&1) (no River 0.5: only the River 0.3 session works)"
 else
-    if [ "$HAVE_RIVER03" = 1 ]; then
-        say "  [ok] river $(river -version 2>&1)(River 0.5 が無いので「Ame Shell」だけが使えます)"
-    else
-        warn "River 0.5 も River 0.3 もありません(sh install.sh が River 0.5 をビルドします)"
-    fi
+    ng "River 0.5 も River 0.3 もありません(sh install.sh が River 0.5 をビルドします)" "Neither River 0.5 nor River 0.3 found (sh install.sh builds River 0.5)"
 fi
 if [ "$OS" = FreeBSD ]; then
     for svc in dbus seatd sddm; do
-        if [ "$(sysrc -n "${svc}_enable" 2>/dev/null)" = YES ]; then say "  [ok] ${svc}_enable=YES"; else warn "${svc} が有効になっていません(例: sysrc ${svc}_enable=YES)"; fi
+        if [ "$(sysrc -n "${svc}_enable" 2>/dev/null)" = YES ]; then say "  [ok] ${svc}_enable=YES"; else ng "${svc} が有効になっていません(例: sysrc ${svc}_enable=YES)" "${svc} is not enabled (e.g. sysrc ${svc}_enable=YES)"; fi
     done
-    chk swaylock "ロックに必要: pkg install swaylock"
+    chk swaylock swaylock "ロック" "lock screen"
 elif command -v dinitctl >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
-    for svc in sddm dbus; do
-        if dinitctl --system status "$svc" 2>/dev/null | grep -q STARTED; then
-            say "  [ok] dinit: $svc は起動中"
+    for svc in dbus sddm networkmanager bluetoothd; do
+        [ -f "/usr/lib/dinit.d/$svc" ] || [ -f "/etc/dinit.d/$svc" ] || continue
+        if [ -e "/etc/dinit.d/boot.d/$svc" ] || [ -e "/usr/lib/dinit.d/boot.d/$svc" ]; then
+            ok "dinit: $svc は有効" "dinit: $svc enabled"
         else
-            warn "dinit サービス $svc が起動していません(例: doas dinitctl enable $svc)"
+            ng "dinit のサービス $svc が有効になっていません(例: doas dinitctl enable $svc)" "dinit service $svc is not enabled (e.g. doas dinitctl enable $svc)"
         fi
     done
     if dinitctl --system status elogind 2>/dev/null | grep -q STARTED; then
-        say "  [ok] dinit: elogind(libseat は logind 経由で動きます)"
+        ok "dinit: elogind(libseat は logind 経由で動きます)" "dinit: elogind (libseat uses logind)"
     elif dinitctl --system status seatd 2>/dev/null | grep -q STARTED; then
-        if id -Gn "$U" 2>/dev/null | tr ' ' '\n' | grep -qx _seatd; then
-            say "  [ok] seatd 起動中 / $U は _seatd グループ所属"
+        if in_group _seatd; then
+            ok "seatd 起動中 / $U は _seatd グループ所属" "seatd running / $U is in group _seatd"
         else
-            warn "seatd を使う場合は $U を _seatd グループへ(例: doas usermod -aG _seatd $U)"
+            ng "seatd を使う場合は $U を _seatd グループへ(例: doas usermod -aG _seatd $U)" "With seatd, add $U to group _seatd (e.g. doas usermod -aG _seatd $U)"
         fi
     else
-        warn "elogind も seatd も起動していません(例: doas dinitctl enable elogind)"
+        ng "elogind も seatd も起動していません(例: doas dinitctl enable elogind)" "Neither elogind nor seatd is running (e.g. doas dinitctl enable elogind)"
     fi
 fi
 for g in video input; do
-    if id -Gn "$U" 2>/dev/null | tr ' ' '\n' | grep -qx "$g"; then say "  [ok] $U は $g グループ所属"; else warn "$U は $g グループに未所属(明るさ変更・Super 単独のランチャーに必要な場合あり)"; fi
+    if in_group "$g"; then
+        ok "$U は $g グループ所属" "$U is in group $g"
+    elif [ "$DRY" = 0 ] && id -Gn "$U" >/dev/null 2>&1 && getent group "$g" 2>/dev/null | cut -d: -f4 | tr ',' '\n' | grep -qx "$U"; then
+        ok "$U は $g グループに追加済み(次のログインから)" "$U added to group $g (from next login)"
+    else
+        ng "$U は $g グループに未所属(明るさの変更・Super 単独のランチャーに必要)" "$U is not in group $g (needed for brightness and the Super-key launcher)"
+    fi
 done
+if [ -n "$SETUP_LATER" ]; then
+    say ""
+    say "$(m "あとで root で行ってください:" "Please run later as root:")$SETUP_LATER"
+fi
 
 say ""
 if [ "$USER_MODE" = 1 ]; then
-    say "インストール完了(自分用、警告 $WARN 件)。"
-    say "  起動: TTY でログインして  $PREFIX/bin/ame-session --river5"
-    say "  (SDDM の一覧に出すには、全ユーザー用のインストールが必要です: sh $0)"
-    say "元に戻す: sh $0 --uninstall --user"
+    say "$(m "インストール完了(自分用、警告 $WARN 件)。" "Installed for this user ($WARN warning(s)).")"
+    say "  $(m "起動: TTY でログインして" "Start: log in on a TTY and run")  $PREFIX/bin/ame-session --river5"
+    say "  $(m "(SDDM の一覧に出すには、全ユーザー用のインストールが必要です: sh $0)" "(for the SDDM session list, install system-wide: sh $0)")"
+    say "$(m "元に戻す" "Uninstall"): sh $0 --uninstall --user"
 else
     if [ "$HAVE_RIVER03" = 0 ]; then
-        say "インストール完了(警告 $WARN 件)。SDDM で \"Ame Shell\" を選んでください。"
+        say "$(m "インストール完了(警告 $WARN 件)。SDDM で \"Ame Shell\" を選んでください。" "Installed ($WARN warning(s)). Choose \"Ame Shell\" in SDDM.")"
     else
-        say "インストール完了(警告 $WARN 件)。SDDM で \"Ame Shell\"(River 0.3)か \"Ame Shell (River 0.5)\" を選んでください。"
+        say "$(m "インストール完了(警告 $WARN 件)。SDDM で \"Ame Shell\"(River 0.3)か \"Ame Shell (River 0.5)\" を選んでください。" "Installed ($WARN warning(s)). Choose \"Ame Shell\" (River 0.3) or \"Ame Shell (River 0.5)\" in SDDM.")"
     fi
-    say "元に戻す: sh $0 --uninstall"
+    say "$(m "元に戻す" "Uninstall"): sh $0 --uninstall"
 fi
 exit 0

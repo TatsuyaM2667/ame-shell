@@ -14,6 +14,8 @@
 #   2. Zig 0.13.0(無ければ公式の配布物を ~/.cache に)と Odin(無ければソースからビルド)
 #   3. River が無ければ River 0.5 をソースからビルド(Zig 0.16 + wlroots 0.20)
 #   4. ame-shell をビルドして、session/install-session.sh でインストール
+#      (グループ・SDDM などのサービス・NetworkManager の polkit ルールは確認してから設定)
+#   5. PipeWire / WirePlumber / pipewire-pulse のユーザーサービスを確認して有効に
 
 set -eu
 
@@ -32,7 +34,7 @@ for a in "$@"; do
         --no-river) NO_RIVER=1 ;;
         --yes|-y) ASSUME_YES=1; FWD="$FWD --yes" ;;
         --debug) BUILD_OPTS="-Doptimize=ReleaseSafe -Dstrip=false"; FWD="$FWD --debug" ;;
-        -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
         *) echo "unknown option: $a" >&2; exit 2 ;;
     esac
 done
@@ -110,7 +112,7 @@ if [ "$ASSUME_YES" = 0 ] && [ -t 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
-say "1/4 依存パッケージ"
+say "1/5 依存パッケージ"
 # Chimera Linux のパッケージ名(すべて `apk search -e` で実在を確認済み)。
 # APK_BUILD / APK_RIVER / APK_RUN は必須: 入れられなければ止める。APK_OPT は無くても動く(その機能だけ使えない)
 #   ビルド: ame-shell と Odin のビルドに必要なもの
@@ -176,7 +178,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-say "2/4 ツールチェイン(Zig $ZIG_VER・Odin)"
+say "2/5 ツールチェイン(Zig $ZIG_VER・Odin)"
 ZIG=""
 if command -v zig >/dev/null 2>&1 && [ "$(zig version)" = "$ZIG_VER" ]; then
     ZIG=$(command -v zig)
@@ -207,7 +209,7 @@ info "odin: $ODIN"
 TOOLPATH="$(dirname "$ZIG"):$(dirname "$ODIN"):$PATH"
 
 # ---------------------------------------------------------------------------
-say "3/4 River"
+say "3/5 River"
 RIVER5_DIR="$HOME/.local/opt/river-0.5"
 if command -v river >/dev/null 2>&1; then
     info "river $(river -version 2>&1) が入っています"
@@ -233,11 +235,60 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-say "4/4 ame-shell のビルドとインストール"
+say "4/5 ame-shell のビルドとインストール"
 (cd "$REPO" && PATH="$TOOLPATH" "$ZIG" build $BUILD_OPTS) || die "ame-shell のビルドに失敗しました"
+SESS_OPTS=""
+[ "$ASSUME_YES" = 1 ] && SESS_OPTS="--yes"
 if [ "$USER_MODE" = 1 ]; then
     sh "$REPO/session/install-session.sh" --user
 else
-    # install-session.sh が自分で doas / sudo を使う(River 0.5 も全ユーザー用にコピーされる)
-    sh "$REPO/session/install-session.sh"
+    # install-session.sh が自分で doas / sudo を使う(River 0.5 も全ユーザー用にコピーされる)。
+    # グループ・サービス・polkit の設定は 1 つずつ確認してから行う
+    # shellcheck disable=SC2086
+    sh "$REPO/session/install-session.sh" $SESS_OPTS
+fi
+
+# ---------------------------------------------------------------------------
+say "5/5 音のユーザーサービス(PipeWire / WirePlumber / pipewire-pulse)"
+# 音量・メディア・Bluetooth の音に必要。自分のユーザーのサービスなので root は要らない
+confirm() {
+    [ "$ASSUME_YES" = 1 ] && return 0
+    [ -t 0 ] || return 1
+    printf '    %s [Y/n] ' "$1"
+    read -r a || return 1
+    case "$a" in [nN]*) return 1 ;; esac
+    return 0
+}
+AUDIO_SVCS="pipewire pipewire-pulse wireplumber"
+if command -v dinitctl >/dev/null 2>&1 && [ -d /usr/lib/dinit.d/user ]; then
+    # Chimera Linux: turnstile が動かすユーザーの dinit。~/.config/dinit.d/boot.d にあれば次のログインから起動する
+    off=""
+    for s in $AUDIO_SVCS; do
+        [ -f "/usr/lib/dinit.d/user/$s" ] || continue
+        if [ -e "$HOME/.config/dinit.d/boot.d/$s" ] || dinitctl --user status "$s" 2>/dev/null | grep -q STARTED; then
+            info "[ok] $s"
+        else
+            off="$off $s"
+        fi
+    done
+    if [ -n "$off" ] && confirm "有効になっていないサービスを有効にしますか?:$off"; then
+        for s in $off; do dinitctl --user enable "$s" >/dev/null 2>&1 && info "$s を有効にしました" || info "$s を有効にできませんでした(dinitctl --user enable $s)"; done
+    elif [ -n "$off" ]; then
+        info "有効にするには: dinitctl --user enable$off"
+    fi
+elif command -v systemctl >/dev/null 2>&1; then
+    # Arch など systemd: ソケットで起動するのが既定
+    off=""
+    for s in pipewire.socket pipewire-pulse.socket wireplumber.service; do
+        systemctl --user is-enabled "$s" >/dev/null 2>&1 && { info "[ok] $s"; continue; }
+        off="$off $s"
+    done
+    if [ -n "$off" ] && confirm "有効になっていないサービスを有効にしますか?:$off"; then
+        # shellcheck disable=SC2086
+        systemctl --user enable --now $off >/dev/null 2>&1 && info "有効にしました:$off" || info "有効にできませんでした: systemctl --user enable --now$off"
+    elif [ -n "$off" ]; then
+        info "有効にするには: systemctl --user enable --now$off"
+    fi
+else
+    info "(このシステムのユーザーサービスは確認できません。PipeWire が自動で起動するようにしてください)"
 fi
