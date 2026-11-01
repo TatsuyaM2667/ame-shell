@@ -5,6 +5,10 @@
 //   2. music-tui の歌詞サーバ(music-tui と同じ WORKERS_URL。曲の一覧から曲名で探し、その曲の LRC を取る)
 //   3. LRCLIB(https://lrclib.net、無料・登録不要)の /api/get(アーティスト + 曲名 + 長さ)→ /api/search
 //   4. NetEase Cloud Music(非公式の公開 API。日本語の曲の同期歌詞が多い)の検索 → 歌詞
+//   5. 酷狗(Kugou、歌詞ツールで広く使われる公開 API)の検索 → 歌詞(base64 の LRC)。長さの近い候補を選ぶ(ライブ版を避ける)
+//   6. 最後に、曲名だけで LRCLIB を検索(長さが 3 秒以内で合うものだけ)
+// 検索の前に、動画サイトの書き方(「チャンネル名 - Topic」「アーティスト - 曲名」「【MV】アーティスト「曲名」」など)を
+// アーティストと曲名に分けて整える(normalize)。
 // 同期歌詞が見つかった時点で終わり。同期の無い歌詞しか無ければ、残りの取り寄せ先で同期歌詞を探してから使う。
 // curl を非同期に動かし、完了を pipe の EOF で知る(シェルを通さず引数で渡すので曲名に何が入っていても安全)。
 // どこにも無かったことは「無し」としてキャッシュするが、タイムアウトや 5xx(混雑)のときは覚えない(次に再生したときに探し直す)。
@@ -19,10 +23,10 @@ pub const Line = struct { t: f32, text: []const u8 };
 pub const State = enum { idle, fetching, synced, plain, none };
 
 /// 取り寄せ先の順番
-const Stage = enum { mt_index, mt_lrc, lrclib_get, lrclib_search, ne_search, ne_lyric, done };
+const Stage = enum { mt_index, mt_lrc, lrclib_get, lrclib_search, ne_search, ne_lyric, kg_search, kg_lyric, lrclib_title, done };
 
 /// 「どこにも無かった」の印。取り寄せ先を増やす前の "#none" は無効(探し直す)
-const NONE_MARK = "#none2";
+const NONE_MARK = "#none3";
 
 /// music-tui の曲の一覧(タイトル → 歌詞ファイルのパス)。1 回読めば、曲が変わっても使い回す
 const MtTrack = struct { title: []const u8, artist: []const u8, lrc: []const u8 };
@@ -48,6 +52,16 @@ pub const Lyrics = struct {
     transient: bool = false,
     /// NetEase の検索で選んだ曲の id / music-tui の歌詞ファイルのパス
     ne_id: u64 = 0,
+    /// 酷狗の候補(id と accesskey)
+    kg_id: [40]u8 = undefined,
+    kg_id_len: usize = 0,
+    kg_key: [64]u8 = undefined,
+    kg_key_len: usize = 0,
+    /// 検索に使う、整えたアーティストと曲名(normalize)
+    qa: [160]u8 = undefined,
+    qa_len: usize = 0,
+    qt: [160]u8 = undefined,
+    qt_len: usize = 0,
     mt_path: []const u8 = "",
     mt_tracks: std.ArrayList(MtTrack),
     mt_arena: std.heap.ArenaAllocator,
@@ -103,6 +117,9 @@ pub const Lyrics = struct {
         self.title_len = @min(title.len, self.title.len);
         @memcpy(self.title[0..self.title_len], title[0..self.title_len]);
         self.duration = duration;
+        const nq = normalize(artist, title, &self.qa, &self.qt);
+        self.qa_len = nq[0];
+        self.qt_len = nq[1];
         self.plain_fallback = null;
         self.transient = false;
         // キャッシュ
@@ -220,8 +237,8 @@ pub const Lyrics = struct {
                     var a1: [400]u8 = undefined;
                     var a2: [400]u8 = undefined;
                     var a3: [64]u8 = undefined;
-                    const artist = self.artist[0..self.artist_len];
-                    const title = cleanTitle(self.title[0..self.title_len]);
+                    const artist = self.qArtist();
+                    const title = self.qTitle();
                     const ua = "ame-shell (https://github.com/TatsuyaM2667/ame-shell)";
                     if (self.stage == .lrclib_get) {
                         const an = std.fmt.bufPrintZ(&a1, "artist_name={s}", .{artist}) catch break :blk false;
@@ -237,17 +254,45 @@ pub const Lyrics = struct {
                 },
                 .ne_search => blk: {
                     if (!self.app.cfg.lyrics_netease) {
-                        self.stage = .done;
+                        self.stage = .kg_search;
                         continue;
                     }
                     var a1: [400]u8 = undefined;
-                    const q = std.fmt.bufPrintZ(&a1, "s={s} {s}", .{ self.artist[0..self.artist_len], cleanTitle(self.title[0..self.title_len]) }) catch break :blk false;
+                    const q = std.fmt.bufPrintZ(&a1, "s={s} {s}", .{ self.qArtist(), self.qTitle() }) catch break :blk false;
                     break :blk self.curl(&.{ "curl", "-s", "--max-time", "8", "-w", "\n%{http_code}", "-G", "https://music.163.com/api/cloudsearch/pc", "--data-urlencode", q.ptr, "--data-urlencode", "type=1", "--data-urlencode", "limit=10" });
                 },
                 .ne_lyric => blk: {
                     var ub: [160]u8 = undefined;
                     const url = std.fmt.bufPrintZ(&ub, "https://music.163.com/api/song/lyric?id={d}&lv=1&tv=-1", .{self.ne_id}) catch break :blk false;
                     break :blk self.curl(&.{ "curl", "-s", "--max-time", "8", "-w", "\n%{http_code}", url.ptr });
+                },
+                .kg_search => blk: {
+                    if (!self.app.cfg.lyrics_kugou) {
+                        self.stage = .lrclib_title;
+                        continue;
+                    }
+                    var a1: [400]u8 = undefined;
+                    var a2: [48]u8 = undefined;
+                    const kw = (if (self.qa_len > 0) std.fmt.bufPrintZ(&a1, "keyword={s} - {s}", .{ self.qArtist(), self.qTitle() }) else std.fmt.bufPrintZ(&a1, "keyword={s}", .{self.qTitle()})) catch break :blk false;
+                    const du = std.fmt.bufPrintZ(&a2, "duration={d}", .{@as(u64, @intFromFloat(@max(self.duration, 0) * 1000))}) catch break :blk false;
+                    break :blk self.curl(&.{ "curl", "-s", "--max-time", "8", "-w", "\n%{http_code}", "-G", "https://lyrics.kugou.com/search", "--data-urlencode", "ver=1", "--data-urlencode", "man=yes", "--data-urlencode", "client=pc", "--data-urlencode", kw.ptr, "--data-urlencode", du.ptr });
+                },
+                .kg_lyric => blk: {
+                    var a1: [80]u8 = undefined;
+                    var a2: [96]u8 = undefined;
+                    const id = std.fmt.bufPrintZ(&a1, "id={s}", .{self.kg_id[0..self.kg_id_len]}) catch break :blk false;
+                    const key = std.fmt.bufPrintZ(&a2, "accesskey={s}", .{self.kg_key[0..self.kg_key_len]}) catch break :blk false;
+                    break :blk self.curl(&.{ "curl", "-s", "--max-time", "8", "-w", "\n%{http_code}", "-G", "https://lyrics.kugou.com/download", "--data-urlencode", "ver=1", "--data-urlencode", "client=pc", "--data-urlencode", id.ptr, "--data-urlencode", key.ptr, "--data-urlencode", "fmt=lrc", "--data-urlencode", "charset=utf8" });
+                },
+                .lrclib_title => blk: {
+                    // 最後の手段: 曲名だけで探す(長さが合うものだけ使う。長さが分からなければ使わない)
+                    if (!self.app.cfg.lyrics_lrclib or self.duration <= 0) {
+                        self.stage = .done;
+                        continue;
+                    }
+                    var a1: [400]u8 = undefined;
+                    const q = std.fmt.bufPrintZ(&a1, "track_name={s}", .{self.qTitle()}) catch break :blk false;
+                    break :blk self.curl(&.{ "curl", "-s", "--max-time", "8", "-w", "\n%{http_code}", "-A", "ame-shell (https://github.com/TatsuyaM2667/ame-shell)", "-G", "https://lrclib.net/api/search", "--data-urlencode", q.ptr });
                 },
                 .done => unreachable,
             };
@@ -271,7 +316,9 @@ pub const Lyrics = struct {
             .mt_lrc => .lrclib_get,
             .lrclib_get => .lrclib_search,
             .lrclib_search => .ne_search,
-            .ne_search, .ne_lyric => .done,
+            .ne_search, .ne_lyric => .kg_search,
+            .kg_search, .kg_lyric => .lrclib_title,
+            .lrclib_title => .done,
             .done => .done,
         };
     }
@@ -290,7 +337,10 @@ pub const Lyrics = struct {
         self.handleResponse();
     }
 
-    const Rec = struct { syncedLyrics: ?[]const u8 = null, plainLyrics: ?[]const u8 = null, instrumental: bool = false };
+    const Rec = struct { syncedLyrics: ?[]const u8 = null, plainLyrics: ?[]const u8 = null, instrumental: bool = false, duration: ?f32 = null };
+    const KgCand = struct { id: []const u8 = "", accesskey: []const u8 = "", song: []const u8 = "", singer: []const u8 = "", duration: u64 = 0 };
+    const KgSearch = struct { candidates: ?[]KgCand = null };
+    const KgDownload = struct { content: ?[]const u8 = null };
     const NeArtist = struct { name: []const u8 = "" };
     const NeSong = struct { id: u64 = 0, name: []const u8 = "", ar: []NeArtist = &.{}, dt: u64 = 0 };
     const NeSearch = struct { result: ?struct { songs: ?[]NeSong = null } = null };
@@ -353,6 +403,44 @@ pub const Lyrics = struct {
                     };
                 } else |_| {};
             },
+            .kg_search => {
+                if (r.code == 200) if (std.json.parseFromSliceLeaky(KgSearch, a, r.body, .{ .ignore_unknown_fields = true })) |res| {
+                    if (res.candidates) |cands| if (self.pickKugou(cands)) |cd| {
+                        self.kg_id_len = @min(cd.id.len, self.kg_id.len);
+                        @memcpy(self.kg_id[0..self.kg_id_len], cd.id[0..self.kg_id_len]);
+                        self.kg_key_len = @min(cd.accesskey.len, self.kg_key.len);
+                        @memcpy(self.kg_key[0..self.kg_key_len], cd.accesskey[0..self.kg_key_len]);
+                        self.stage = .kg_lyric;
+                        self.run();
+                        return;
+                    };
+                } else |_| {};
+            },
+            .kg_lyric => {
+                if (r.code == 200) if (std.json.parseFromSliceLeaky(KgDownload, a, r.body, .{ .ignore_unknown_fields = true })) |res| {
+                    if (res.content) |b64| {
+                        const dec = std.base64.standard.Decoder;
+                        if (dec.calcSizeForSlice(b64)) |n| {
+                            const out = a.alloc(u8, n) catch null;
+                            if (out) |o| if (dec.decode(o, b64)) {
+                                if (std.mem.trim(u8, o, " \r\n").len > 0) found = o;
+                            } else |_| {};
+                        } else |_| {}
+                    }
+                } else |_| {};
+            },
+            .lrclib_title => {
+                if (r.code == 200) if (std.json.parseFromSliceLeaky([]Rec, a, r.body, .{ .ignore_unknown_fields = true })) |list| {
+                    for (list) |rec| {
+                        const d = rec.duration orelse continue;
+                        if (@abs(d - self.duration) > 3) continue;
+                        if (rec.syncedLyrics) |s| {
+                            found = s;
+                            break;
+                        }
+                    }
+                } else |_| {};
+            },
             .done => {},
         }
         if (found) |text| {
@@ -369,10 +457,46 @@ pub const Lyrics = struct {
         self.run();
     }
 
+    /// 検索に使う(整えた)アーティストと曲名
+    pub fn qArtist(self: *const Lyrics) []const u8 {
+        return self.qa[0..self.qa_len];
+    }
+    pub fn qTitle(self: *const Lyrics) []const u8 {
+        return self.qt[0..self.qt_len];
+    }
+
+    /// 酷狗の候補から、曲名・アーティスト・長さが合うものを選ぶ(1 件目がライブ版のことも多い)
+    fn pickKugou(self: *Lyrics, cands: []const KgCand) ?KgCand {
+        const title = self.qTitle();
+        const artist = self.qArtist();
+        var best: ?KgCand = null;
+        var best_score: i32 = -100;
+        for (cands) |cd| {
+            if (cd.id.len == 0 or cd.accesskey.len == 0) continue;
+            var score: i32 = 0;
+            if (containsIgnoreCase(cd.song, title) or containsIgnoreCase(title, cd.song)) score += 3;
+            if (artist.len > 0 and (containsIgnoreCase(cd.singer, artist) or containsIgnoreCase(artist, cd.singer))) score += 3;
+            if (self.duration > 0 and cd.duration > 0) {
+                const d = @abs(@as(f32, @floatFromInt(cd.duration)) / 1000 - self.duration);
+                if (d < 3) score += 4 else if (d < 8) score += 1 else if (d > 20) score -= 4;
+            }
+            // ライブ・別バージョンは避ける
+            for ([_][]const u8{ "现场", "Live", "live", "LIVE", "伴奏", "Instrumental", "钢琴", "翻自" }) |w| if (std.mem.indexOf(u8, cd.song, w) != null) {
+                score -= 3;
+            };
+            if (score > best_score) {
+                best = cd;
+                best_score = score;
+            }
+        }
+        // 長さもアーティストも合わないものは別の曲とみなす
+        return if (best_score >= 4) best else null;
+    }
+
     /// NetEase の検索結果から、曲名・アーティスト・長さが合うものを選ぶ(1 件目が別の曲のことも多い)
     fn pickNetease(self: *Lyrics, songs: []const NeSong) ?u64 {
-        const title = cleanTitle(self.title[0..self.title_len]);
-        const artist = std.mem.trim(u8, self.artist[0..self.artist_len], " ");
+        const title = self.qTitle();
+        const artist = self.qArtist();
         var best: ?u64 = null;
         var best_score: i32 = 0;
         for (songs) |s| {
@@ -429,6 +553,7 @@ pub const Lyrics = struct {
                 } else |_| {}
             }
         }
+        std.log.info("lyrics: 見つかりません: {s} / {s}(検索: {s} / {s})", .{ self.artist[0..self.artist_len], self.title[0..self.title_len], self.qArtist(), self.qTitle() });
         self.state = .none;
         self.changed();
     }
@@ -466,7 +591,7 @@ pub const Lyrics = struct {
     fn findMt(self: *Lyrics) ?[]const u8 {
         const title = std.mem.trim(u8, self.title[0..self.title_len], " ");
         const ctitle = cleanTitle(title);
-        const artist = std.mem.trim(u8, self.artist[0..self.artist_len], " ");
+        const artist = self.qArtist();
         const eqi = std.ascii.eqlIgnoreCase;
         for (self.mt_tracks.items) |t| {
             const tt = std.mem.trim(u8, t.title, " ");
@@ -504,7 +629,7 @@ pub const Lyrics = struct {
         }
         const eqi = std.ascii.eqlIgnoreCase;
         const title = std.mem.trim(u8, self.title[0..self.title_len], " ");
-        const artist = std.mem.trim(u8, self.artist[0..self.artist_len], " ");
+        const artist = self.qArtist();
         if (!eqi(ti, title)) return;
         if (ar.len > 0 and artist.len > 0 and !eqi(ar, artist)) return;
         // 一致: LRCLIB の問い合わせをやめて、こちらを使う
@@ -600,6 +725,103 @@ fn cleanTitle(t: []const u8) []const u8 {
     return std.mem.trim(u8, s, " ");
 }
 
+
+/// 動画サイトなどの書き方をアーティストと曲名に分けて整える。返り値は (アーティストの長さ, 曲名の長さ)
+///   「YOASOBI - Topic」/「YOASOBI Official」→ YOASOBI
+///   「YOASOBI - アイドル (Official Music Video)」→ YOASOBI / アイドル
+///   「【MV】YOASOBI「アイドル」」→ YOASOBI / アイドル
+///   「アイドル / YOASOBI」→ アイドル(アーティストと一致する側を外す)
+pub fn normalize(artist_in: []const u8, title_in: []const u8, abuf: *[160]u8, tbuf: *[160]u8) [2]usize {
+    var a = std.mem.trim(u8, artist_in, " ");
+    var t = std.mem.trim(u8, title_in, " ");
+    // チャンネル名の飾り
+    var changed = true;
+    while (changed) {
+        changed = false;
+        for ([_][]const u8{ " - Topic", "VEVO", " Official YouTube Channel", " Official Channel", " official channel", " Official", " official", " OFFICIAL", "公式チャンネル", "オフィシャルチャンネル", "公式", " Channel", " channel", "チャンネル", "【公式】" }) |suf| {
+            if (a.len > suf.len and std.mem.endsWith(u8, a, suf)) {
+                a = std.mem.trim(u8, a[0 .. a.len - suf.len], " ");
+                changed = true;
+            }
+        }
+    }
+    // 先頭の【MV】[MV] などのタグ
+    while (true) {
+        if (std.mem.startsWith(u8, t, "【")) {
+            const e = std.mem.indexOf(u8, t, "】") orelse break;
+            t = std.mem.trim(u8, t[e + "】".len ..], " ");
+        } else if (t.len > 0 and t[0] == '[') {
+            const e = std.mem.indexOfScalar(u8, t, ']') orelse break;
+            t = std.mem.trim(u8, t[e + 1 ..], " ");
+        } else break;
+    }
+    // 「曲名」『曲名』: かぎかっこの中が曲名、前がアーティストのことが多い
+    for ([_][2][]const u8{ .{ "「", "」" }, .{ "『", "』" } }) |q| {
+        if (std.mem.indexOf(u8, t, q[0])) |o| if (std.mem.indexOf(u8, t[o..], q[1])) |cl| {
+            const before = std.mem.trim(u8, t[0..o], " -/");
+            const inner = std.mem.trim(u8, t[o + q[0].len .. o + cl], " ");
+            if (inner.len > 0) {
+                if (before.len > 0 and (a.len == 0 or containsIgnoreCase(before, a) or containsIgnoreCase(a, before))) a = before;
+                t = inner;
+                break;
+            }
+        };
+    }
+    // 「アーティスト - 曲名」「曲名 / アーティスト」
+    for ([_][]const u8{ " - ", " – ", " — ", " / ", "／" }) |sep| {
+        const i = std.mem.indexOf(u8, t, sep) orelse continue;
+        const l = std.mem.trim(u8, t[0..i], " ");
+        const r = std.mem.trim(u8, t[i + sep.len ..], " ");
+        if (l.len == 0 or r.len == 0) continue;
+        const slash = std.mem.eql(u8, sep, " / ") or std.mem.eql(u8, sep, "／");
+        if (slash) {
+            // 日本の MV に多い「曲名 / アーティスト」
+            if (a.len == 0 or containsIgnoreCase(r, a) or containsIgnoreCase(a, r)) {
+                if (a.len == 0) a = r;
+                t = l;
+            }
+        } else if (a.len == 0 or containsIgnoreCase(l, a) or containsIgnoreCase(a, l)) {
+            a = l;
+            t = r;
+        } else if (containsIgnoreCase(r, a)) {
+            t = l;
+        }
+        break;
+    }
+    t = cleanTitle(t);
+    // 末尾の飾り(かっこ無し)
+    for ([_][]const u8{ " Official Music Video", " Official Video", " Music Video", " Official Audio", " Lyric Video", " Lyrics", " MV", " PV", " (Audio)" }) |suf| {
+        if (t.len > suf.len and std.ascii.endsWithIgnoreCase(t, suf)) t = std.mem.trim(u8, t[0 .. t.len - suf.len], " ");
+    }
+    // feat. 以降は外す(検索でぶれる)
+    for ([_][]const u8{ " feat.", " ft.", " Feat.", " FEAT." }) |f| if (std.mem.indexOf(u8, t, f)) |i| {
+        t = std.mem.trim(u8, t[0..i], " ");
+    };
+    const al = @min(a.len, abuf.len);
+    @memcpy(abuf[0..al], a[0..al]);
+    const tl = @min(t.len, tbuf.len);
+    @memcpy(tbuf[0..tl], t[0..tl]);
+    return .{ al, tl };
+}
+
+test "normalize: 動画サイトの書き方" {
+    var ab: [160]u8 = undefined;
+    var tb: [160]u8 = undefined;
+    var r = normalize("YOASOBI - Topic", "アイドル", &ab, &tb);
+    try std.testing.expectEqualStrings("YOASOBI", ab[0..r[0]]);
+    try std.testing.expectEqualStrings("アイドル", tb[0..r[1]]);
+    r = normalize("YOASOBI Official", "YOASOBI - アイドル (Official Music Video)", &ab, &tb);
+    try std.testing.expectEqualStrings("YOASOBI", ab[0..r[0]]);
+    try std.testing.expectEqualStrings("アイドル", tb[0..r[1]]);
+    r = normalize("Ayase / YOASOBI", "【MV】YOASOBI「アイドル」", &ab, &tb);
+    try std.testing.expectEqualStrings("アイドル", tb[0..r[1]]);
+    r = normalize("Ado", "うっせぇわ / Ado", &ab, &tb);
+    try std.testing.expectEqualStrings("うっせぇわ", tb[0..r[1]]);
+    r = normalize("", "Mrs. GREEN APPLE - ケセラセラ", &ab, &tb);
+    try std.testing.expectEqualStrings("Mrs. GREEN APPLE", ab[0..r[0]]);
+    try std.testing.expectEqualStrings("ケセラセラ", tb[0..r[1]]);
+}
+
 fn containsIgnoreCase(hay: []const u8, needle: []const u8) bool {
     if (needle.len == 0) return false;
     return std.ascii.indexOfIgnoreCase(hay, needle) != null;
@@ -635,7 +857,7 @@ fn encodePath(buf: []u8, path: []const u8) ?[]const u8 {
 
 /// 歌詞の頭に付くクレジットの行(「作词 : …」「作曲 : …」)
 fn isCredit(text: []const u8) bool {
-    const heads = [_][]const u8{ "作词", "作詞", "作曲", "编曲", "編曲", "制作", "混音", "母带", "和声", "吉他", "贝斯", "鼓", "录音", "监制", "出品", "OP", "SP" };
+    const heads = [_][]const u8{ "作词", "作詞", "作曲", "词", "曲", "词曲", "编曲", "編曲", "制作", "混音", "母带", "和声", "吉他", "贝斯", "鼓", "录音", "监制", "出品", "OP", "SP" };
     const colon = std.mem.indexOf(u8, text, ":") orelse std.mem.indexOf(u8, text, "：") orelse return false;
     const head = std.mem.trim(u8, text[0..colon], " ");
     if (head.len == 0 or head.len > 24) return false;

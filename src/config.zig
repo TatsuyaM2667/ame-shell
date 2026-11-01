@@ -70,6 +70,7 @@ pub const Config = struct {
     lyrics_music_tui_on: bool = true,
     lyrics_lrclib: bool = true,
     lyrics_netease: bool = true,
+    lyrics_kugou: bool = true,
     // apps
     terminal: Str = Str.of("ame-terminal"),
     // notifications
@@ -339,6 +340,8 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             cfg.lyrics_lrclib = boolean(val) orelse true;
         } else if (eq(u8, key, "netease")) {
             cfg.lyrics_netease = boolean(val) orelse true;
+        } else if (eq(u8, key, "kugou")) {
+            cfg.lyrics_kugou = boolean(val) orelse true;
         } else ok = false;
     } else if (eq(u8, sec, "lock")) {
         if (eq(u8, key, "enabled")) cfg.lock_enabled = boolean(val) orelse true else ok = false;

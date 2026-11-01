@@ -67,4 +67,5 @@ lyrics {
   music-tui on            // music-tui の歌詞サーバ。on なら ~/music-tui-bsd/.env の WORKERS_URL を使う(URL を直接書いてもよい)
   lrclib on               // LRCLIB(lrclib.net)
   netease on              // NetEase Cloud Music(非公式の公開 API。日本語の曲に強い)
+  kugou on                // 酷狗(Kugou。日本語・中国語の曲の同期歌詞が多い)
 }
