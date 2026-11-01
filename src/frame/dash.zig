@@ -69,13 +69,18 @@ pub const View = struct {
     n_btn: usize = 0,
 };
 
+/// ワークスペースのタイルの高さと間隔(描画と当たり判定で共通)
+const WS_TILE_H: f32 = 92;
+const WS_GAP: f32 = 10;
+
 pub fn size(f: *Frame) [2]f32 {
     return switch (f.dashv.tab) {
         0 => .{ 900, TAB_H + 100 + GAP + 250 + PAD },
         // メディアは横に広いので、画面に収まる幅に抑える(中身は幅に合わせて配置する)
         1 => .{ @min(1180, f.W - f.BW() - f.T() - 2 * f.R() - 30), TAB_H + 380 + PAD },
         2 => .{ @min(1040, f.W - f.BW() - f.T() - 2 * f.R() - 30), TAB_H + 330 + PAD },
-        else => .{ 620, TAB_H + 3 * 64 + 2 * 8 + PAD * 2 },
+        // ワークスペース: ほかのタブと同じ幅に(狭いとタブもタイルも押しづらかった)
+        else => .{ 900, TAB_H + 3 * WS_TILE_H + 2 * WS_GAP + PAD * 2 },
     };
 }
 
@@ -803,13 +808,13 @@ fn drawWorkspaces(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
     const acc = theme.accent(app);
     const txt = theme.text(app);
     const sub = theme.subtext(app);
-    const tile_w = (w - PAD * 2 - 16) / 3;
-    const tile_h: f32 = 64;
+    const tile_w = (w - PAD * 2 - 2 * WS_GAP) / 3;
+    const tile_h: f32 = WS_TILE_H;
     for (0..9) |i| {
         const col_i: f32 = @floatFromInt(i % 3);
         const row_i: f32 = @floatFromInt(i / 3);
-        const x = PAD + col_i * (tile_w + 8);
-        const y = PAD + row_i * (tile_h + 8);
+        const x = PAD + col_i * (tile_w + WS_GAP);
+        const y = PAD + row_i * (tile_h + WS_GAP);
         const focused = (f.out.focused_tags >> @intCast(i)) & 1 == 1;
         const occ = (f.out.view_tags >> @intCast(i)) & 1 == 1;
         const urgent = (f.out.urgent_tags >> @intCast(i)) & 1 == 1;
@@ -823,7 +828,7 @@ fn drawWorkspaces(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         }
         var lab: [1]u8 = .{'1' + @as(u8, @intCast(i))};
         const fg = if (focused) Color.hex(0x08101e) else if (occ) txt else sub;
-        _ = cv.text(x + 22, y + tile_h / 2 + 10, 26, fg, lab[0..], .{ .bold = true });
+        _ = cv.text(x + 24, y + tile_h / 2 + 12, 32, fg, lab[0..], .{ .bold = true });
         // このワークスペースで開いているアプリ: アイコン(最大 4 つ)+ 名前
         var apps: [12]@import("../app.zig").App.WsApp = undefined;
         const na = app.workspaceApps(f.out, @intCast(i), &apps);
@@ -835,7 +840,7 @@ fn drawWorkspaces(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         var nl: usize = 0;
         var shown: [4][]const u8 = undefined;
         var ns: usize = 0;
-        var ix = x + 56;
+        var ix = x + 60;
         for (apps[0..na]) |a| {
             // 同じアプリは 1 回だけ
             var dup = false;
@@ -850,13 +855,13 @@ fn drawWorkspaces(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
                 ns += 1;
                 const tex = if (e) |ee| app.launcher.entryIcon(ee) else 0;
                 if (tex != 0) {
-                    cv.image(tex, ix, y + 11, 22, 22, 6);
+                    cv.image(tex, ix, y + 18, 30, 30, 8);
                 } else {
-                    cv.rect(ix, y + 11, 22, 22, 6, fg.alpha(0.18));
+                    cv.rect(ix, y + 18, 30, 30, 8, fg.alpha(0.18));
                     const n1 = if (label.len > 0) (std.unicode.utf8ByteSequenceLength(label[0]) catch 1) else 0;
-                    _ = cv.text(ix + 11, y + 27, 12, fg, label[0..@min(n1, label.len)], .{ .bold = true, .alignment = .center });
+                    _ = cv.text(ix + 15, y + 39, 15, fg, label[0..@min(n1, label.len)], .{ .bold = true, .alignment = .center });
                 }
-                ix += 26;
+                ix += 36;
             }
             const sep: []const u8 = if (nl > 0) " ・ " else "";
             if (nl + sep.len + label.len < names.len) {
@@ -868,9 +873,9 @@ fn drawWorkspaces(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         }
         if (na > ns) {
             var cb: [8]u8 = undefined;
-            _ = cv.text(ix + 4, y + 27, 11, fg.alpha(0.8), std.fmt.bufPrint(&cb, "{d}窓", .{na}) catch "", .{});
+            _ = cv.text(ix + 4, y + 39, 12, fg.alpha(0.8), std.fmt.bufPrint(&cb, "{d}窓", .{na}) catch "", .{});
         }
-        _ = cv.text(x + 56, y + tile_h - 13, 11.5, fg.alpha(0.85), names[0..nl], .{ .max_w = tile_w - 70 });
+        _ = cv.text(x + 60, y + tile_h - 16, 12.5, fg.alpha(0.85), names[0..nl], .{ .max_w = tile_w - 70 });
     }
     return false;
 }
@@ -961,13 +966,13 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
     // ワークスペースのタイル
     if (v.tab == 3) {
         const w = f.dash.w.x;
-        const tile_w = (w - PAD * 2 - 16) / 3;
+        const tile_w = (w - PAD * 2 - 2 * WS_GAP) / 3;
         const cy = ly - TAB_H - PAD;
         const cx = lx - PAD;
         var hw: i32 = -1;
         if (ev.kind != .leave and cx >= 0 and cy >= 0) {
-            const ci: i32 = @intFromFloat(cx / (tile_w + 8));
-            const ri: i32 = @intFromFloat(cy / 72);
+            const ci: i32 = @intFromFloat(cx / (tile_w + WS_GAP));
+            const ri: i32 = @intFromFloat(cy / (WS_TILE_H + WS_GAP));
             if (ci < 3 and ri < 3) hw = ri * 3 + ci;
         }
         if (hw != v.hover_ws) redraw = true;
