@@ -96,7 +96,10 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
     const txt = theme.text(app);
     const sub = theme.subtext(app);
     const playing = app.media.status == .playing;
-    const has_media = app.media.status != .none;
+    // ログイン画面には曲も通知も出さない
+    const has_media = !self.greeter and app.media.status != .none;
+    // 同期した歌詞(lyrics.zig)。曲のカードの下に、前・今・次の行を出す
+    const lcur = if (has_media) app.media.lyrics.current(app.media.position()) else @TypeOf(app.media.lyrics.current(0)){ .idx = null, .frac = 0 };
 
     if (primary) {
         self.time_s += dt;
@@ -107,7 +110,13 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         self.media_s.set(if (has_media) 1 else 0);
         self.play_s.set(if (playing) 1 else 0);
         self.expand.set(if (self.notif_expanded) 1 else 0);
-        var springs = [_]*Spring{ &self.auth, &self.media_s, &self.play_s, &self.expand, &self.ring };
+        self.lyr_s.set(if (lcur.idx != null) 1 else 0);
+        if (lcur.idx) |li| {
+            const fi: f32 = @floatFromInt(li);
+            if (self.lyr_idx < 0) self.lyr_pos.snap(fi) else self.lyr_pos.set(fi);
+            self.lyr_idx = @intCast(li);
+        } else self.lyr_idx = -1;
+        var springs = [_]*Spring{ &self.auth, &self.media_s, &self.play_s, &self.expand, &self.ring, &self.lyr_s, &self.lyr_pos };
         if (anim.stepAll(&springs, dt)) animating = true;
         for (&self.cards) |*cd| if (cd.id != 0 and cd.s.step(dt)) {
             animating = true;
@@ -234,12 +243,16 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
     var y_next: f32 = @max(widgets_y + 14, H * 0.40);
     const m_e = self.media_s.x * stagger(appear, 4) * (1 - a);
     if (m_e > 0.01) {
-        const ch: f32 = 132;
+        const ch_base: f32 = 132;
+        const lyr_h: f32 = 104 * self.lyr_s.x;
+        const ch: f32 = ch_base + lyr_h;
         const cy0 = y_next + (1 - m_e) * 30;
         cv.save();
         cv.opacity(m_e);
         cv.scaleAbout(W / 2, cy0 + ch / 2, lerp(0.94, 1, m_e));
         cv.shadow(cx0, cy0 + 10, card_w, ch, 26, 30, black.alpha(0.35));
+        // 曲の色(アクセントはジャケットの色)でほのかに光る
+        cv.shadow(cx0, cy0 + 16, card_w, ch, 26, 44, acc.alpha(0.30 * self.play_s.x));
         // 背景: ジャケットを大きくぼかして敷いたガラス
         if (app.media.art_tex != 0) {
             cv.imageEx(app.media.art_tex, cx0, cy0, card_w, ch, 26, .{ 0, 0.3, 1, 0.7 }, 6.5, 0, 0.5, 0.95);
@@ -252,7 +265,7 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         // レコード: 外周に cava の波形、ジャケットのラベルが回る
         const R: f32 = 40;
         const dcx = cx0 + 22 + R;
-        const dcy = cy0 + ch / 2;
+        const dcy = cy0 + ch_base / 2;
         const nb = data.BARS;
         for (0..nb) |i| {
             const ang = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(nb)) * std.math.tau - std.math.pi / 2.0 + self.vinyl * 0.25;
@@ -265,7 +278,13 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         cv.rect(dcx - R, dcy - R, R * 2, R * 2, R, Color.hex(0x0c0c11));
         var gr: f32 = R - 3;
         while (gr > 18) : (gr -= 2.4) cv.arc(dcx, dcy, gr, 0.8, 1, white.alpha(0.045), .{ .a = 0 });
-        const lr: f32 = 17;
+        // ラベルは音の大きさに合わせてわずかに脈打つ
+        var energy: f32 = 0;
+        if (self.cava.running()) {
+            for (self.cava.values) |vv| energy += vv;
+            energy /= @floatFromInt(nb);
+        }
+        const lr: f32 = 17 * (1 + 0.14 * energy);
         if (app.media.art_tex != 0) {
             cv.imageEx(app.media.art_tex, dcx - lr, dcy - lr, lr * 2, lr * 2, lr, .{ 0, 0, 1, 1 }, 0, self.vinyl, 1, 1);
         } else {
@@ -294,7 +313,7 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
             _ = cv.text(tx + tw, py + 18, 10.5, white.alpha(0.6), std.fmt.bufPrint(&b2, "-{d}:{d:0>2}", .{ rem / 60, rem % 60 }) catch "", .{ .alignment = .right });
         }
         // 操作ボタン
-        const by = cy0 + ch - 24;
+        const by = cy0 + ch_base - 24;
         const bmid = tx + tw / 2;
         const gap: f32 = 54;
         const bs: f32 = 34;
@@ -315,6 +334,43 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         _ = cv.text(bmid, by + 2, 28, white, I_PLAY, .{ .alignment = .center });
         cv.restore();
         _ = cv.text(bmid + gap, by, 22, white.alpha(0.9), I_NEXT, .{ .alignment = .center });
+
+        // ---- 歌詞: 前・今・次の行。行が変わるとバネで上へ流れ、今の行は歌った分だけ光で満ちる ----
+        if (self.lyr_s.x > 0.01) {
+            const ls = app.media.lyrics.lines.items;
+            const top = cy0 + ch_base;
+            cv.rect(cx0 + 22, top, card_w - 44, 1, 0.5, white.alpha(0.10 * self.lyr_s.x));
+            const mid_y = top + lyr_h / 2 + 7;
+            const lc = W / 2;
+            const center: f32 = self.lyr_pos.x;
+            const ci: i32 = @intFromFloat(@round(center));
+            var k: i32 = ci - 2;
+            while (k <= ci + 2) : (k += 1) {
+                if (k < 0 or k >= @as(i32, @intCast(ls.len))) continue;
+                const d = @as(f32, @floatFromInt(k)) - center;
+                const ad = @abs(d);
+                if (ad > 1.6) continue;
+                const al = clamp01(1 - ad * 0.62) * self.lyr_s.x;
+                if (al < 0.02) continue;
+                const size = lerp(17, 13.5, clamp01(ad));
+                const ly = mid_y + d * 30;
+                // カードの外にはみ出さない
+                if (ly < top + 14 or ly > top + lyr_h - 4) continue;
+                const line = ls[@intCast(k)].text;
+                const is_cur = lcur.idx != null and k == @as(i32, @intCast(lcur.idx.?));
+                const bold = ad < 0.5;
+                const base_a: f32 = if (is_cur) 0.38 else 0.5;
+                _ = cv.text(lc, ly, size, white.alpha(base_a * al), line, .{ .bold = bold, .alignment = .center, .max_w = card_w - 44 });
+                if (is_cur) {
+                    // カラオケのように、歌った分(行の進み具合)だけ左から明るく
+                    const lw = @min(cv.measure(line, size, bold), card_w - 44);
+                    const lx = lc - lw / 2;
+                    cv.setClip(lx - 2, ly - size - 6, lw * lcur.frac + 2, size + 14);
+                    _ = cv.text(lc, ly, size, white.alpha(al), line, .{ .bold = bold, .alignment = .center, .max_w = card_w - 44 });
+                    cv.setClip(0, 0, 0, 0);
+                }
+            }
+        }
         cv.restore();
         y_next += (ch + 16) * self.media_s.x;
     }
@@ -323,6 +379,7 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
     var shown: [6]*const @import("notify.zig").Notif = undefined;
     var ns: usize = 0;
     for (app.notifs.history.items) |*n| {
+        if (self.greeter) break; // ログイン画面には出さない
         if (n.id < self.first_notif_id) break;
         if (ns >= shown.len) break;
         shown[ns] = n;

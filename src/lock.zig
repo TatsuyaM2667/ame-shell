@@ -87,6 +87,10 @@ pub const Lock = struct {
     /// これより新しい ID の通知をロック画面に出す(ロックしてから来たもの)
     first_notif_id: u32 = 0,
     cards: [6]lockui.Card = [_]lockui.Card{.{}} ** 6,
+    /// 歌詞: 出ている割合と、流れる位置(行の番号)
+    lyr_s: Spring = Spring.init(0, 0.45, 0.9),
+    lyr_pos: Spring = Spring.init(0, 0.38, 0.82),
+    lyr_idx: i32 = -1,
     hits: lockui.Hits = .{},
     cava: framedata.Cava,
 
