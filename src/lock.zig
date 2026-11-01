@@ -20,6 +20,7 @@ const appmod = @import("app.zig");
 const App = appmod.App;
 const Output = appmod.Output;
 const surface = @import("surface.zig");
+const ripple = @import("ripple.zig");
 const Surface = surface.Surface;
 const bar = @import("bar.zig");
 const lockui = @import("lockui.zig");
@@ -46,6 +47,8 @@ const LockView = struct {
     lock: *Lock,
     out: *Output,
     surf: *Surface,
+    /// 水の波紋で解除するときの、このビューの写し(ripple.zig)
+    snap: c.GLuint = 0,
 };
 
 pub const Lock = struct {
@@ -55,6 +58,9 @@ pub const Lock = struct {
     locked: bool = false,
     /// このロックで、ログイン画面(SDDM)用の背景をもう書き出したか(sddmshare.zig)
     sddm_saved: bool = false,
+    /// 解除を水の波紋で見せる(Win+L のロック。ログイン画面は別の演出): 写しを取る → オーバーレイ → ロックを外す
+    ripple_req: bool = false,
+    ripple_started: bool = false,
     /// ログイン画面(greeter.zig)として動いている: 認証は greetd、成功したら ame-shell を終える
     greeter: bool = false,
     pam: ?Pam = null,
@@ -241,6 +247,42 @@ pub const Lock = struct {
     }
 
     pub fn reap(self: *Lock) void {
+        if (self.unlocking and self.ripple_req) {
+            if (!self.ripple_started) {
+                // すべての出力の写しがそろったら、同じ絵を映すオーバーレイを出す
+                var snaps: [MAX_OUT]ripple.Snap = undefined;
+                var n: usize = 0;
+                for (self.views) |v| if (v) |vv| {
+                    if (vv.snap == 0) return;
+                    const sc: c_int = @max(vv.surf.scale, 1);
+                    snaps[n] = .{ .out = vv.out, .tex = vv.snap, .w = @as(c_int, @intCast(vv.surf.width)) * sc, .h = @as(c_int, @intCast(vv.surf.height)) * sc };
+                    n += 1;
+                };
+                self.ripple_started = true;
+                for (&self.views) |*v| if (v.*) |*vv| {
+                    vv.snap = 0; // テクスチャは ripple.zig が持つ
+                };
+                if (!ripple.start(self.app, snaps[0..n])) {
+                    // オーバーレイを出せない: いつもの消え方で外す
+                    for (snaps[0..n]) |sn| {
+                        var t = sn.tex;
+                        c.glDeleteTextures(1, &t);
+                    }
+                    self.ripple_req = false;
+                    self.unlock_s.set(1);
+                    self.scheduleAll();
+                }
+                return;
+            }
+            // オーバーレイが描けた(見た目はロック画面と同じ)ので、ロックを外して波紋を始める
+            if (!ripple.ready()) return;
+            self.ripple_req = false;
+            self.ripple_started = false;
+            self.unlocking = false;
+            self.finish(true);
+            ripple.begin();
+            return;
+        }
         if (self.unlocking and self.unlock_s.x > 0.98) {
             self.unlocking = false;
             self.finish(true);
@@ -275,7 +317,10 @@ pub const Lock = struct {
                 _ = c.write(fds[1], &out, 1 + ml);
                 c._exit(0);
             }
-            const ok = self.pamCheck();
+            // 試験用: 入れ子の試験セッション(AME_SESSION_NESTED=1)で AME_LOCK_FAKE=1 のときだけ、パスワード "ame" で解除できる
+            const fake = std.posix.getenv("AME_LOCK_FAKE") != null and
+                std.mem.eql(u8, std.posix.getenv("AME_SESSION_NESTED") orelse "", "1");
+            const ok = if (fake) std.mem.eql(u8, self.pw[0..self.pw_len], "ame") else self.pamCheck();
             const b: u8 = if (ok) 1 else 0;
             _ = c.write(fds[1], &b, 1);
             c._exit(0);
@@ -317,7 +362,12 @@ pub const Lock = struct {
             if (self.greeter) @import("greeter.zig").saveLastUser();
             self.setMsg("ようこそ");
             self.unlocking = true;
-            self.unlock_s.set(1);
+            if (self.greeter) {
+                self.unlock_s.set(1);
+            } else {
+                self.ripple_req = true;
+                self.ripple_started = false;
+            }
         } else if (n > 1 and b == 2) {
             // greetd の失敗(パスワード以外)
             self.setMsg(buf[1..@intCast(n)]);
@@ -492,6 +542,13 @@ pub const Lock = struct {
         };
         const out_bd: ?*gfx.Backdrop = if (out) |o| &o.backdrop else null;
         if (lockui.draw(self, s, out_bd, cv, primary, dt)) animating = true;
+        // 水の波紋で解除: 描き終えた絵を写し取る(次のループで ripple.zig がオーバーレイに映す)
+        if (self.ripple_req and !self.ripple_started) for (&self.views) |*v| if (v.*) |*vv| if (vv.surf == s and vv.snap == 0) {
+            cv.flush();
+            const sc: c_int = @max(s.scale, 1);
+            vv.snap = ripple.capture(@as(c_int, @intCast(s.width)) * sc, @as(c_int, @intCast(s.height)) * sc);
+            app.reap_pending = true;
+        };
         return animating or self.busy;
     }
 };

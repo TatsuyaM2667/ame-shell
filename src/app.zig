@@ -324,6 +324,7 @@ pub const App = struct {
                 self.lock.reap();
                 self.wallpick.reap();
                 @import("shot.zig").reap(self);
+                @import("ripple.zig").reap(self);
             }
         }
     }

@@ -454,6 +454,32 @@ const up_fs =
     \\}
 ;
 
+/// ロック解除の水の波紋(ripple.zig): ロック画面の写し(u_tex)を、中心から広がる波で押し流して透かす。
+/// 波の前はロック画面、通り過ぎた所は透けてデスクトップが見え、その上に同心円の波紋が少し残って消える。
+/// 出力は乗算済みアルファ。
+const ripple_fs =
+    \\#version 300 es
+    \\precision highp float;
+    \\in vec2 v_uv; uniform sampler2D u_tex; uniform vec2 u_res; uniform float u_r; uniform float u_w; uniform float u_t; out vec4 o;
+    \\void main(){
+    \\  vec2 p = v_uv * u_res;
+    \\  vec2 d = p - u_res * 0.5;
+    \\  float dist = length(d);
+    \\  vec2 n = d / max(dist, 1.0);
+    \\  float x = (dist - u_r) / u_w;
+    \\  float band = exp(-x * x * 1.4);
+    \\  float wave = sin(x * 8.0) * band;
+    \\  vec2 off = n * wave * u_w * 0.12;
+    \\  vec3 col = texture(u_tex, clamp((p - off) / u_res, 0.0, 1.0)).rgb;
+    \\  float a = smoothstep(-0.45, 0.35, x);
+    \\  float light = dot(n, normalize(vec2(-0.6, 0.8))) * cos(x * 8.0) * band;
+    \\  col = col * (1.0 + 0.25 * light) + vec3(pow(max(wave, 0.0), 3.0) * 0.5);
+    \\  float behind = max(-x, 0.0);
+    \\  float rings = pow(max(sin(dist / (u_w * 0.32) - u_t * 16.0), 0.0), 6.0) * exp(-behind * 0.22) * (1.0 - u_t) * 0.16 * (1.0 - a);
+    \\  o = vec4(col * a + vec3(rings), a + rings);
+    \\}
+;
+
 const blit_fs =
     \\#version 300 es
     \\precision mediump float;
@@ -471,6 +497,7 @@ pub const Gpu = struct {
     ctx: c.EGLContext,
     ui: c.GLuint = 0,
     wall: c.GLuint = 0,
+    ripple: c.GLuint = 0,
     down: c.GLuint = 0,
     up: c.GLuint = 0,
     blit: c.GLuint = 0,
@@ -526,6 +553,7 @@ pub const Gpu = struct {
         g.up = try program(fs_vs, up_fs);
         g.blit = try program(fs_vs, blit_fs);
         g.frame = try program(fs_vs, frame_fs);
+        g.ripple = try program(fs_vs, ripple_fs);
         g.u.size = c.glGetUniformLocation(g.ui, "u_size");
         g.u.origin = c.glGetUniformLocation(g.ui, "u_origin");
         g.u.output = c.glGetUniformLocation(g.ui, "u_output");
