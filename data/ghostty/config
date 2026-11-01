@@ -8,46 +8,48 @@ command = ame-term-shell
 shell-integration = none
 shell-integration-features = cursor,title
 
-# ---- 文字 ----
-font-family = JetBrainsMono Nerd Font
-font-family = Noto Sans CJK JP
+# ---- 見た目: foot(share/ame-shell/xdg/foot/foot.ini)と同じ。半透明の夜空色に壁紙が透ける ----
+# 文字(foot と同じ並び: 英数字 → 日本語 → アイコン)
+font-family = JetBrains Mono
+font-family = Noto Sans Mono CJK JP
+font-family = Symbols Nerd Font
 font-size = 12
 font-thicken = false
-adjust-cell-height = 8%
 
-# ---- 見た目: 夜空の紺に、ame のアクセントの青 ----
-background = #0b1020
-foreground = #dfe7f5
-background-opacity = 0.86
-background-blur = true
-cursor-color = #7ab8ff
+# 色: 背景は foot の alpha=0.65 と同じ見た目の透け具合(ghostty は少し薄く出るので 0.7)。文字の背景色(ls の色など)も同じだけ透かす
+background = #060913
+foreground = #cdd6f4
+background-opacity = 0.7
+background-opacity-cells = true
+# River にはぼかしの仕組みが無い(付けても効かず、foot と見た目がずれる)
+background-blur = false
+cursor-color = #cdd6f4
 cursor-style = bar
 cursor-style-blink = true
-selection-background = #2b4a7a
-selection-foreground = #ffffff
-minimum-contrast = 1.1
-# 16 色(黒・赤・緑・黄・青・紫・水色・白 / 明るい版)
-palette = 0=#1b2236
-palette = 1=#ff7a8a
-palette = 2=#7ee0a1
-palette = 3=#ffd58a
-palette = 4=#7ab8ff
-palette = 5=#c8a2ff
-palette = 6=#7fe3e8
-palette = 7=#c9d4e8
-palette = 8=#4b5675
-palette = 9=#ff9aa6
-palette = 10=#a3f0bf
-palette = 11=#ffe3a8
-palette = 12=#a3cfff
-palette = 13=#dcc2ff
-palette = 14=#a6f1f4
-palette = 15=#ffffff
+selection-background = #89b4fa
+selection-foreground = #060913
+# 16 色(foot と同じ)
+palette = 0=#45475a
+palette = 1=#f38ba8
+palette = 2=#a6e3a1
+palette = 3=#f9e2af
+palette = 4=#89b4fa
+palette = 5=#f5c2e7
+palette = 6=#7fdceb
+palette = 7=#bac2de
+palette = 8=#585b70
+palette = 9=#f38ba8
+palette = 10=#a6e3a1
+palette = 11=#f9e2af
+palette = 12=#89b4fa
+palette = 13=#f5c2e7
+palette = 14=#94e2d5
+palette = 15=#a6adc8
 
 # ---- 窓 ----
-window-padding-x = 14
-window-padding-y = 12
-window-padding-balance = true
+window-padding-x = 24
+window-padding-y = 24
+window-padding-balance = false
 # タイル型の WM なのでタイトルバーは要らない(枠は ame-shell が描く)
 window-decoration = false
 gtk-titlebar = false
