@@ -280,17 +280,16 @@ if [ -n "$kbd" ] && [ ! -f "$UHOME/.config/ame-shell/xkb-layout" ]; then
     info "キーボード配列: $layout(コンソールの keymap=$kbd から)"
 fi
 
-# 日本語入力: セッション開始時に fcitx5 が起動するよう、環境変数をユーザーの設定に
+# 日本語入力: fcitx5 用の環境変数をユーザーの ~/.config/ame-shell/environment に(ame-session が読む。
+# 以前の版は river5-extra.sh に書いていたので、そちらに既にあれば作らない)
 if [ "$DO_JA" = 1 ]; then
-    prof="$UHOME/.config/ame-shell/river5-extra.sh"
-    if [ ! -f "$prof" ]; then
-        mkdir -p "$(dirname "$prof")"
-        cat > "$prof" <<'EOF'
-# install-freebsd.sh が作成: 日本語入力(fcitx5 + mozc)
-export XMODIFIERS=@im=fcitx GTK_IM_MODULE=fcitx QT_IM_MODULE=fcitx SDL_IM_MODULE=fcitx
-EOF
+    envf="$UHOME/.config/ame-shell/environment"
+    old="$UHOME/.config/ame-shell/river5-extra.sh"
+    if [ ! -f "$envf" ] && ! grep -q XMODIFIERS "$old" 2>/dev/null; then
+        mkdir -p "$(dirname "$envf")"
+        cp "$REPO/data/examples/environment" "$envf"
         chown -R "$TARGET_USER" "$UHOME/.config/ame-shell"
-        info "$prof を作成(日本語入力)"
+        info "$envf を作成(日本語入力。例: $REPO/data/examples/environment)"
     fi
 fi
 
