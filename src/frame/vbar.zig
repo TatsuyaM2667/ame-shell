@@ -19,7 +19,9 @@ pub const Pop = enum { none, window, clock, volume, network, bluetooth, battery 
 const TAGS = 9;
 const SLOT: f32 = 28;
 
-const HitKind = enum(u8) { logo, tag, window, clock, volume, network, bluetooth, battery, power };
+const HitKind = enum(u8) { logo, tag, special, window, clock, volume, network, bluetooth, battery, power };
+/// 特別なワークスペース(スクラッチパッド。Discord が開く場所)のタグ
+const SPECIAL: u32 = 1 << 20;
 const Hit = struct { kind: HitKind, idx: u8 = 0, y: f32, h: f32 };
 
 pub const Bar = struct {
@@ -45,6 +47,8 @@ pub const Bar = struct {
     /// 画像のロゴが無い OS のロゴ(Nerd Font の Font Logos の 1 文字)と色
     logo_glyph: []const u8 = "",
     logo_color: ?Color = null,
+    /// 特別なワークスペースから戻る先(最後にいた普通のワークスペース)
+    last_normal_tags: u32 = 1,
 
     fn focusedIndex(f: *Frame) f32 {
         const t = f.out.focused_tags;
@@ -147,20 +151,28 @@ pub const Bar = struct {
         // ---- ワークスペース(縦) ----
         const ws_y = y;
         {
-            cv.rect(cx - 15, ws_y - 4, 30, SLOT * TAGS + 8, 15, Color.hex(0xffffff).alpha(0.04));
+            // 特別なワークスペース(スクラッチパッド。Discord が開く場所): 窓があるか、そこにいるときだけ
+            // 番号の列の最後に ✦ を足す(押すと出入り)。そこにいる間は番号の方の選択の印は出さない
+            const in_special = f.out.focused_tags == SPECIAL;
+            if (!in_special and f.out.focused_tags != 0) self.last_normal_tags = f.out.focused_tags;
+            const show_special = in_special or f.out.view_tags & SPECIAL != 0;
+            const rows: f32 = if (show_special) TAGS + 1 else TAGS;
+            cv.rect(cx - 15, ws_y - 4, 30, SLOT * rows + 8, 15, Color.hex(0xffffff).alpha(0.04));
             const a_ = @min(self.lead.x, self.trail.x);
             const b_ = @max(self.lead.x, self.trail.x);
             const iw: f32 = 24 - @min(b_ - a_, 1.0) * 4 + self.squish.x * 3;
             const iy = ws_y + a_ * SLOT + 2;
             const ih = (b_ - a_) * SLOT + SLOT - 4;
-            cv.shadow(cx - iw / 2, iy, iw, ih, iw / 2, 9, acc.alpha(0.45));
-            cv.rectGrad(cx - iw / 2, iy, iw, ih, iw / 2, acc.lighten(0.25), acc);
+            if (!in_special) {
+                cv.shadow(cx - iw / 2, iy, iw, ih, iw / 2, 9, acc.alpha(0.45));
+                cv.rectGrad(cx - iw / 2, iy, iw, ih, iw / 2, acc.lighten(0.25), acc);
+            }
             for (0..TAGS) |i| {
                 const fi: f32 = @floatFromInt(i);
                 const ty = ws_y + fi * SLOT;
                 const hi = self.addHit(.tag, @intCast(i), ty, SLOT);
                 const hv = self.hov(hi);
-                const on = std.math.clamp(1 - @abs(fi - self.lead.x), 0, 1);
+                const on = if (in_special) 0 else std.math.clamp(1 - @abs(fi - self.lead.x), 0, 1);
                 const occ = self.occupied[i].x;
                 const urgent = (f.out.urgent_tags >> @intCast(i)) & 1 == 1;
                 if (hv > 0.01) cv.rect(cx - 12, ty + 2, 24, SLOT - 4, 12, Color.hex(0xffffff).alpha(0.10 * hv));
@@ -173,7 +185,17 @@ pub const Bar = struct {
                     cv.rect(cx - 2, ty + SLOT / 2 - 2, 4, 4, 2, sub.alpha(0.45));
                 }
             }
-            y = ws_y + SLOT * TAGS + 18;
+            if (show_special) {
+                const sy = ws_y + SLOT * TAGS;
+                const hi = self.addHit(.special, 0, sy, SLOT);
+                const hv = self.hov(hi);
+                if (in_special) {
+                    cv.shadow(cx - 12, sy + 2, 24, SLOT - 4, 12, 9, acc.alpha(0.45));
+                    cv.rectGrad(cx - 12, sy + 2, 24, SLOT - 4, 12, acc.lighten(0.25), acc);
+                } else if (hv > 0.01) cv.rect(cx - 12, sy + 2, 24, SLOT - 4, 12, Color.hex(0xffffff).alpha(0.10 * hv));
+                _ = cv.text(cx, sy + SLOT / 2 + 5, 13, if (in_special) dark else txt, "✦", .{ .alignment = .center });
+            }
+            y = ws_y + SLOT * rows + 18;
         }
 
         // ---- 下から: 電源・状態アイコン・時計 ----
@@ -299,7 +321,7 @@ pub const Bar = struct {
                         self.tag_click_ms = now_ms;
                         self.tag_click_idx = h.idx;
                         if (dbl) {
-                            const SPECIAL: u32 = 1 << 20;
+
                             app.focusTags(if (f.out.focused_tags == SPECIAL) @as(u32, 1) << @intCast(h.idx) else SPECIAL);
                             self.tag_click_ms = 0;
                             self.squish.kick(30);
@@ -319,6 +341,10 @@ pub const Bar = struct {
                     .bluetooth => f.toggleNet(1),
                     .battery => f.toggleUtilities(),
                     .power => f.toggleSession(),
+                    .special => {
+                        app.focusTags(if (f.out.focused_tags == SPECIAL) self.last_normal_tags else SPECIAL);
+                        self.squish.kick(30);
+                    },
                     .window => {},
                 }
                 self.hover[i].kick(-6);

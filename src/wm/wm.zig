@@ -49,6 +49,8 @@ pub const Window = struct {
     wm: *Wm,
     obj: *c.struct_river_window_v1,
     node: ?*c.struct_river_node_v1 = null,
+    /// 開いたら、その窓のいる特別なワークスペースへ一緒に移る(Discord)
+    follow: bool = false,
     app_id: [96]u8 = undefined,
     app_id_len: usize = 0,
     title: [256]u8 = undefined,
@@ -293,11 +295,15 @@ pub const Wm = struct {
             w.out = o;
             w.tags = if (o) |oo| oo.tags else 1;
             // Discord は特別なワークスペース(スクラッチパッド。ワークスペースのダブルクリック・Super+P)で開く
-            if (isDiscord(w.app_id[0..w.app_id_len])) w.tags = SCRATCH_TAG;
+            if (isDiscord(w.app_id[0..w.app_id_len])) {
+                w.tags = SCRATCH_TAG;
+                w.follow = true;
+            }
             // ame-shell の再起動前からある窓: 前のタグ・浮き状態に戻す
             if (self.restored(w)) |r| {
                 w.tags = r.tags;
                 w.floating = r.floating;
+                w.follow = false; // 再起動前からある窓では移らない
             }
             if (w.node == null) w.node = c.river_window_v1_get_node(w.obj);
             // タイル型なのでサーバー側の枠(タイトルバー無し)を使ってもらう
@@ -314,6 +320,13 @@ pub const Wm = struct {
             }
             // 大きさの決まっている小窓(ダイアログ等)は浮かせる
             if (w.max_w > 0 and w.max_w == w.min_w and w.max_h > 0 and w.max_h == w.min_h) w.floating = true;
+        }
+
+        // 1b. Discord を開いたら、特別なワークスペースへ一緒に移る(どこにあるか分からなくならないように)
+        for (self.windows.items) |w| {
+            if (!w.follow) continue;
+            w.follow = false;
+            if (w.out) |oo| if (oo.tags != SCRATCH_TAG) self.setTags(oo, SCRATCH_TAG);
         }
 
         // 2. キーバインドの作成と有効化(最初の 1 回)
@@ -1052,7 +1065,10 @@ fn wAppId(data: ?*anyopaque, _: ?*c.struct_river_window_v1, s: [*c]const u8) cal
     w.app_id_len = @min(v.len, w.app_id.len);
     @memcpy(w.app_id[0..w.app_id_len], v[0..w.app_id_len]);
     // app_id が窓の作成より後に届いたとき(まだ表示する前なら)も、Discord は特別なワークスペースへ
-    if (!w.placed and isDiscord(w.app_id[0..w.app_id_len])) w.tags = SCRATCH_TAG;
+    if (!w.placed and w.tags != SCRATCH_TAG and isDiscord(w.app_id[0..w.app_id_len])) {
+        w.tags = SCRATCH_TAG;
+        w.follow = true;
+    }
 }
 fn wTitle(data: ?*anyopaque, _: ?*c.struct_river_window_v1, s: [*c]const u8) callconv(.C) void {
     const w: *Window = @ptrCast(@alignCast(data.?));
