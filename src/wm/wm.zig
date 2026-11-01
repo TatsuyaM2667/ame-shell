@@ -37,6 +37,14 @@ const BTN_MIDDLE = 0x112;
 const ALL_EDGES = c.RIVER_WINDOW_V1_EDGES_TOP | c.RIVER_WINDOW_V1_EDGES_BOTTOM | c.RIVER_WINDOW_V1_EDGES_LEFT | c.RIVER_WINDOW_V1_EDGES_RIGHT;
 const SCRATCH_TAG: u32 = 1 << 20;
 
+/// Discord の窓か(本体・Flatpak の com.discordapp.Discord・vesktop など、app_id に discord / vesktop を含む)
+fn isDiscord(app_id: []const u8) bool {
+    var buf: [96]u8 = undefined;
+    const n = @min(app_id.len, buf.len);
+    const low = std.ascii.lowerString(buf[0..n], app_id[0..n]);
+    return std.mem.indexOf(u8, low, "discord") != null or std.mem.indexOf(u8, low, "vesktop") != null;
+}
+
 pub const Window = struct {
     wm: *Wm,
     obj: *c.struct_river_window_v1,
@@ -284,6 +292,8 @@ pub const Wm = struct {
             const o = self.focusedOutput();
             w.out = o;
             w.tags = if (o) |oo| oo.tags else 1;
+            // Discord は特別なワークスペース(スクラッチパッド。ワークスペースのダブルクリック・Super+P)で開く
+            if (isDiscord(w.app_id[0..w.app_id_len])) w.tags = SCRATCH_TAG;
             // ame-shell の再起動前からある窓: 前のタグ・浮き状態に戻す
             if (self.restored(w)) |r| {
                 w.tags = r.tags;
@@ -1041,6 +1051,8 @@ fn wAppId(data: ?*anyopaque, _: ?*c.struct_river_window_v1, s: [*c]const u8) cal
     const v = if (s != null) std.mem.sliceTo(s, 0) else "";
     w.app_id_len = @min(v.len, w.app_id.len);
     @memcpy(w.app_id[0..w.app_id_len], v[0..w.app_id_len]);
+    // app_id が窓の作成より後に届いたとき(まだ表示する前なら)も、Discord は特別なワークスペースへ
+    if (!w.placed and isDiscord(w.app_id[0..w.app_id_len])) w.tags = SCRATCH_TAG;
 }
 fn wTitle(data: ?*anyopaque, _: ?*c.struct_river_window_v1, s: [*c]const u8) callconv(.C) void {
     const w: *Window = @ptrCast(@alignCast(data.?));

@@ -27,6 +27,9 @@ pub const Bar = struct {
     lead: Spring = Spring.init(0, 0.20, 0.72),
     trail: Spring = Spring.init(0, 0.42, 0.92),
     squish: Spring = Spring.init(0, 0.25, 0.5),
+    /// ワークスペースのダブルクリック(特別なワークスペース = スクラッチパッドへ)の判定
+    tag_click_ms: u64 = 0,
+    tag_click_idx: usize = 99,
     title_t: Spring = Spring.init(1, 0.4, 1.0),
     hover: [24]Spring = [_]Spring{Spring.init(0, 0.2, 1.0)} ** 24,
     occupied: [TAGS]Spring = [_]Spring{Spring.init(0, 0.3, 0.8)} ** TAGS,
@@ -289,6 +292,20 @@ pub const Bar = struct {
                 switch (h.kind) {
                     .logo => app.launcher.toggle(),
                     .tag => {
+                        // ダブルクリック: 特別なワークスペース(Super+P と同じ。Discord はここで開く)へ。
+                        // そこでもう一度ダブルクリックすると、押したワークスペースへもどる
+                        const now_ms = loop.nowMs();
+                        const dbl = self.tag_click_idx == h.idx and now_ms -| self.tag_click_ms < 400;
+                        self.tag_click_ms = now_ms;
+                        self.tag_click_idx = h.idx;
+                        if (dbl) {
+                            const SPECIAL: u32 = 1 << 20;
+                            app.focusTags(if (f.out.focused_tags == SPECIAL) @as(u32, 1) << @intCast(h.idx) else SPECIAL);
+                            self.tag_click_ms = 0;
+                            self.squish.kick(30);
+                            self.hover[i].kick(-6);
+                            return true;
+                        }
                         app.focusTags(@as(u32, 1) << @intCast(h.idx));
                         self.squish.kick(18);
                     },
