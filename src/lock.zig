@@ -22,6 +22,8 @@ const Output = appmod.Output;
 const surface = @import("surface.zig");
 const Surface = surface.Surface;
 const bar = @import("bar.zig");
+const lockui = @import("lockui.zig");
+const framedata = @import("frame/data.zig");
 
 // ---- PAM(ヘッダが無くても動くよう ABI を自前で定義し、dlopen で解決する) ----
 const PAM_SUCCESS = 0;
@@ -68,10 +70,34 @@ pub const Lock = struct {
     dots: [32]Spring = [_]Spring{Spring.init(0, 0.25, 0.55)} ** 32,
     unlock_s: Spring = Spring.init(0, 0.45, 1.0),
     unlocking: bool = false,
+    // ---- iOS 風の見た目(lockui.zig)----
+    /// 0 = 眺める画面(時計・曲・通知)/ 1 = パスワードの入力画面
+    auth: Spring = Spring.init(0, 0.42, 0.9),
+    auth_mode: bool = false,
+    last_input_ms: u64 = 0,
+    time_s: f32 = 0,
+    vinyl: f32 = 0,
+    media_s: Spring = Spring.init(0, 0.5, 0.85),
+    play_s: Spring = Spring.init(0, 0.3, 0.8),
+    expand: Spring = Spring.init(0, 0.4, 0.85),
+    ring: Spring = Spring.init(0, 0.4, 0.85),
+    notif_expanded: bool = false,
+    /// これより新しい ID の通知をロック画面に出す(ロックしてから来たもの)
+    first_notif_id: u32 = 0,
+    cards: [6]lockui.Card = [_]lockui.Card{.{}} ** 6,
+    hits: lockui.Hits = .{},
+    cava: framedata.Cava,
 
     pub fn create(app: *App) !*Lock {
         const self = try app.alloc.create(Lock);
-        self.* = .{ .app = app };
+        self.* = .{ .app = app, .cava = .{ .app = app } };
+        self.cava.ctx = self;
+        self.cava.on_frame = struct {
+            fn f(ctx: *anyopaque) void {
+                const l: *Lock = @ptrCast(@alignCast(ctx));
+                l.scheduleAll();
+            }
+        }.f;
         return self;
     }
 
@@ -142,6 +168,15 @@ pub const Lock = struct {
         self.msg_len = 0;
         self.appear.snap(0);
         self.appear.set(1);
+        self.auth.snap(0);
+        self.auth_mode = false;
+        self.notif_expanded = false;
+        self.expand.snap(0);
+        self.media_s.snap(0);
+        self.play_s.snap(if (self.app.media.status == .playing) 1 else 0);
+        self.first_notif_id = self.app.notifs.next_id;
+        for (&self.cards) |*cd| cd.* = .{};
+        self.updateCava();
         self.unlock_s.snap(0);
         for (self.app.outputs.items, 0..) |o, i| {
             if (i >= MAX_OUT) break;
@@ -155,15 +190,20 @@ pub const Lock = struct {
         return "ok";
     }
 
-    fn scheduleAll(self: *Lock) void {
+    pub fn scheduleAll(self: *Lock) void {
         for (self.views) |v| if (v) |vv| vv.surf.schedule();
     }
 
     pub fn tick(self: *Lock) void {
-        if (self.locked) self.scheduleAll();
+        if (!self.locked) return;
+        // 入力画面のまま 12 秒触らなければ、眺める画面にもどる
+        if (self.auth_mode and self.pw_len == 0 and !self.busy and @import("platform/loop.zig").nowMs() -| self.last_input_ms > 12_000) self.setAuth(false);
+        self.updateCava();
+        self.scheduleAll();
     }
 
     fn finish(self: *Lock, unlock: bool) void {
+        self.cava.stop();
         for (&self.views) |*v| {
             if (v.*) |vv| vv.surf.destroy();
             v.* = null;
@@ -243,6 +283,7 @@ pub const Lock = struct {
         } else {
             self.setMsg("パスワードが違います");
             self.shake.kick(420);
+        self.last_input_ms = @import("platform/loop.zig").nowMs();
         }
         self.scheduleAll();
     }
@@ -252,9 +293,17 @@ pub const Lock = struct {
     fn key(ctx: *anyopaque, _: *Surface, ev: surface.KeyEvent) void {
         const self: *Lock = @ptrCast(@alignCast(ctx));
         if (self.busy or self.unlocking) return;
+        self.last_input_ms = @import("platform/loop.zig").nowMs();
+        // 眺める画面: どのキーでも入力画面へ(文字ならそのまま 1 文字目として入れる)
+        if (!self.auth_mode) {
+            if (ev.sym == c.XKB_KEY_Escape) return;
+            self.setAuth(true);
+        }
         switch (ev.sym) {
             c.XKB_KEY_Return, c.XKB_KEY_KP_Enter => self.startAuth(),
             c.XKB_KEY_Escape => {
+                // 空なら眺める画面へもどる
+                if (self.pw_len == 0) self.setAuth(false);
                 @memset(&self.pw, 0);
                 self.pw_len = 0;
                 for (&self.dots) |*d| d.set(0);
@@ -277,7 +326,60 @@ pub const Lock = struct {
         self.scheduleAll();
     }
 
-    fn pointer(_: *anyopaque, _: *Surface, _: surface.PointerEvent) void {}
+    fn pointer(ctx: *anyopaque, _: *Surface, ev: surface.PointerEvent) void {
+        const self: *Lock = @ptrCast(@alignCast(ctx));
+        if (ev.kind != .press or self.busy or self.unlocking) return;
+        self.last_input_ms = @import("platform/loop.zig").nowMs();
+        if (!self.auth_mode) {
+            switch (self.hits.which(ev.x, ev.y)) {
+                .prev => self.app.media.prev(),
+                .play => self.app.media.toggle(),
+                .next => self.app.media.next(),
+                .stack => self.notif_expanded = !self.notif_expanded,
+                .none => self.setAuth(true),
+            }
+        } else if (ev.button == 0x111 and self.pw_len == 0) self.setAuth(false); // 右クリックでもどる
+        self.scheduleAll();
+    }
+
+    fn setAuth(self: *Lock, on: bool) void {
+        self.auth_mode = on;
+        self.auth.set(if (on) 1 else 0);
+        if (on) self.last_input_ms = @import("platform/loop.zig").nowMs();
+        self.updateCava();
+        self.scheduleAll();
+    }
+
+    /// 眺める画面で曲が流れている間だけ cava を動かす
+    fn updateCava(self: *Lock) void {
+        const want = self.locked and !self.auth_mode and !self.unlocking and self.app.media.status == .playing;
+        if (want and !self.cava.running()) self.cava.start();
+        if (!want and self.cava.running()) self.cava.stop();
+    }
+
+    /// 通知が来た(notify.zig から)。ロック画面のカードを出す
+    pub fn notified(self: *Lock, id: u32) void {
+        if (!self.locked) return;
+        // 一番古いカードの枠を使い回す
+        var slot: usize = 0;
+        for (self.cards, 0..) |cd, i| if (cd.id < self.cards[slot].id) {
+            slot = i;
+        };
+        self.cards[slot] = .{ .id = id };
+        self.cards[slot].s.snap(0);
+        self.cards[slot].s.set(1);
+        self.scheduleAll();
+    }
+
+    /// その通知のカードが出てくる途中か(0 → 1)。見つからなければ出きっている
+    pub fn cardSpring(self: *const Lock, id: u32) f32 {
+        for (self.cards) |cd| if (cd.id == id) return cd.s.x;
+        return 1;
+    }
+
+    pub fn isError(self: *const Lock) bool {
+        return std.mem.startsWith(u8, self.msg[0..self.msg_len], "パスワードが違います");
+    }
 
     // ---- 描画 ----
 
@@ -309,80 +411,18 @@ pub const Lock = struct {
         }
         if (self.unlocking and self.unlock_s.x > 0.98) app.reap_pending = true;
 
-        const W: f32 = @floatFromInt(s.width);
-        const H: f32 = @floatFromInt(s.height);
-        const acc = theme.accent(app);
-        const txt = theme.text(app);
-        const sub = theme.subtext(app);
-        const t = self.appear.x * (1 - self.unlock_s.x);
-
-        // 背景: 壁紙のブラー(ロック画面は不透明でなければならないので下地を必ず塗る)
-        cv.rect(0, 0, W, H, 0, Color.hex(0x050a18));
-        var gl = theme.glass(app);
-        gl.tint.a = 0.25;
-        gl.rim.a = 0;
-        gl.refraction = 0;
-        gl.sparkle = 1.0;
-        cv.glass(0, 0, W, H, 0, gl);
-        cv.rect(0, 0, W, H, 0, Color.hex(0x000000).alpha(0.25 * (1 - t)));
-        // 出そろったら 1 回だけ、この背景(ぼかした壁紙 + ガラスの色味・星)をログイン画面用に書き出す
-        if (primary and !self.sddm_saved and self.appear.x > 0.999 and !self.unlocking) {
-            self.sddm_saved = true;
-            cv.flush();
-            const sc: f32 = cv.scale;
-            @import("sddmshare.zig").saveFramebuffer(0, @intFromFloat(W * sc), @intFromFloat(H * sc), acc, true);
-        }
-
-        cv.save();
-        cv.translate(0, (1 - t) * 30 - self.unlock_s.x * 60);
-        cv.opacity(t);
-        // 時計
-        var cb: [16]u8 = undefined;
-        const clock = bar.formatClock(&cb, app.cfg.clock_24h, false);
-        _ = cv.text(W / 2, H * 0.36, 112, txt, clock, .{ .bold = true, .alignment = .center, .glow = 14, .glow_color = acc.alpha(0.5) });
-        var db: [64]u8 = undefined;
-        _ = cv.text(W / 2, H * 0.36 + 46, 20, sub, bar.formatDate(&db), .{ .alignment = .center });
-
-        // パスワード欄
-        const fw: f32 = 340;
-        const fh: f32 = 56;
-        const fx = W / 2 - fw / 2 + self.shake.x;
-        const fy = H * 0.58;
-        // ユーザーの写真(あれば)
-        const av = app.avatar.texture();
-        if (av != 0) {
-            const az: f32 = 64;
-            cv.shadow(W / 2 - az / 2, fy - az - 14, az, az, az / 2, 16, theme.shadow());
-            cv.image(av, W / 2 - az / 2, fy - az - 18, az, az, az / 2);
-            cv.rectBorder(W / 2 - az / 2 - 1, fy - az - 19, az + 2, az + 2, az / 2 + 1, .{ .a = 0 }, acc.alpha(0.8), 2);
-        }
-        cv.shadow(fx, fy + 8, fw, fh, fh / 2, 22, theme.shadow());
-        cv.glass(fx, fy, fw, fh, fh / 2, theme.glassStrong(app));
-        if (self.busy) cv.rectBorder(fx, fy, fw, fh, fh / 2, .{ .a = 0 }, acc.alpha(0.8), 1.5);
-        var ub: [64]u8 = undefined;
-        const user = currentUser(&ub) orelse "";
-        if (n == 0 and !self.busy) {
-            _ = cv.text(W / 2, fy + fh / 2 + 6, 15, sub.alpha(0.8), if (user.len > 0) user else "パスワード", .{ .alignment = .center });
-        }
-        // 文字数ぶんの丸がポップする(実際の文字は出さない)
-        const spacing: f32 = 18;
-        const shown = @min(n + 1, self.dots.len);
-        const total = @as(f32, @floatFromInt(n)) * spacing;
-        for (0..shown) |i| {
-            const d = self.dots[i].x;
-            if (d < 0.01) continue;
-            const dx = fx + fw / 2 - total / 2 + @as(f32, @floatFromInt(i)) * spacing + spacing / 2;
-            const rr = 5 * d;
-            cv.rect(dx - rr, fy + fh / 2 - rr, rr * 2, rr * 2, rr, acc.lighten(0.3));
-        }
-        if (self.msg_len > 0) {
-            const err = std.mem.startsWith(u8, self.msg[0..self.msg_len], "パスワードが違います");
-            _ = cv.text(W / 2, fy + fh + 34, 14, if (err) theme.danger(app).lighten(0.18) else sub, self.msg[0..self.msg_len], .{ .alignment = .center });
-        }
-        cv.restore();
+        const out_bd: ?*gfx.Backdrop = for (self.views) |v| {
+            if (v) |vv| if (vv.surf == s) break &vv.out.backdrop;
+        } else null;
+        if (lockui.draw(self, s, out_bd, cv, primary, dt)) animating = true;
         return animating or self.busy;
     }
 };
+
+/// 今のユーザー名(無ければ空)
+pub fn currentUserName(buf: []u8) []const u8 {
+    return currentUser(buf) orelse "";
+}
 
 fn currentUser(buf: []u8) ?[:0]const u8 {
     const u = std.posix.getenv("USER") orelse std.posix.getenv("LOGNAME") orelse return null;

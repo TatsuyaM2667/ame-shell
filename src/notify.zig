@@ -321,6 +321,8 @@ pub const Notifs = struct {
         // 履歴(通知センター用)
         self.history.insert(0, n) catch {};
         if (self.history.items.len > HISTORY) _ = self.history.pop();
+        // ロック中ならロック画面のカードを出す
+        self.app.lock.notified(n.id);
         self.unread += 1;
         // 通知停止中(ダッシュボードのトグル)は履歴にだけ残し、ポップアップは出さない
         if (self.app.dashboard.dnd and urgency < 2) {
