@@ -124,7 +124,7 @@ say "1/7 依存パッケージ"
 #   ビルド: ame-shell と Odin のビルドに必要なもの
 APK_BUILD="git curl bash clang llvm-devel linux-headers pkgconf wayland-devel wayland-progs wayland-protocols
  mesa-devel libdrm-devel libxkbcommon-devel freetype-devel harfbuzz-devel fontconfig-devel dbus-devel linux-pam-devel
- gtk4-devel libadwaita-devel gtk4-layer-shell-devel blueprint-compiler gettext-devel ncurses"
+ gtk4-devel libadwaita-devel gtk4-layer-shell-devel blueprint-compiler gettext-devel ncurses glslang-devel"
 #   (2 行目は端末 ghostty のビルド用。Chimera には ghostty のパッケージが無い)
 #   River 0.5 のビルド(Chimera のリポジトリには river が無いので必ずソースから作る)
 APK_RIVER="wlroots0.20-devel libevdev-devel pixman-devel libinput-devel xwayland xwayland-devel"
@@ -272,8 +272,50 @@ else
             tar -xzf "$CACHE/ghostty-$GHOSTTY_VER.tar.gz" -C "$CACHE"
     fi
     rm -rf "$GHOSTTY_PREFIX"
+    GOPTS="-Doptimize=ReleaseFast -Dgtk-x11=false -fsys=freetype -fsys=harfbuzz -fsys=fontconfig -fsys=libpng -fsys=zlib"
+    # glslang: 同梱のものは SPIRV/doc.cpp の最適化だけで 10GB 近いメモリを使い、メモリ 16GB 以下では
+    # 強制終了される(clang terminated with signal KILL)。システムの glslang(glslang-devel)があればそれを使う。
+    # ghostty の pkg/glslang は C ヘッダの翻訳のためだけに同梱の glslang を丸ごとビルドするので、ヘッダの場所だけを渡すよう書き換える
+    if [ -d "$GSRC" ] && { [ -e /usr/lib/libglslang.so ] || [ -e /usr/local/lib/libglslang.so ]; }; then
+        GB="$GSRC/pkg/glslang/build.zig"
+        if grep -q '\.link_libs = &\.{lib},' "$GB" 2>/dev/null; then
+            sed 's/\.link_libs = &\.{lib},/.include_paths = \&.{(b.lazyDependency("glslang", .{}) orelse return).path("")},/' "$GB" > "$GB.ame" && mv "$GB.ame" "$GB"
+        fi
+        GOPTS="$GOPTS -fsys=glslang"
+    fi
+    # 同時に動かすコンパイラの数: C++ の大きなファイルは 1 つで数 GB 使うので、メモリ 4GB あたり 1 つ
+    MEM_GB=$(awk '/^MemTotal:/ { printf "%d", $2 / 1048576 }' /proc/meminfo 2>/dev/null || echo 4)
+    GJOBS=$(( ${MEM_GB:-4} / 4 ))
+    [ "$GJOBS" -lt 1 ] && GJOBS=1
+    NCPU=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
+    [ "$GJOBS" -gt "$NCPU" ] && GJOBS=$NCPU
+    # Chimera の clang は crtbegin.o の場所を聞かれても名前をそのまま返すため、Zig が libc を見つけられない
+    # (LibCRuntimeNotFound)。clang_rt.crtbegin.o / crtend.o の場所を答える小さな cc を挟む
+    GCC_WRAP=""
+    if [ "$(cc -print-file-name=crtbegin.o 2>/dev/null)" = crtbegin.o ]; then
+        RT=$(cc -print-runtime-dir 2>/dev/null || true)
+        if [ -n "$RT" ] && [ -e "$RT/clang_rt.crtbegin.o" ]; then
+            W="$CACHE/zig-cc"
+            mkdir -p "$W/crt"
+            for f in crtbegin.o crtbeginS.o crtbeginT.o; do ln -sf "$RT/clang_rt.crtbegin.o" "$W/crt/$f"; done
+            for f in crtend.o crtendS.o; do ln -sf "$RT/clang_rt.crtend.o" "$W/crt/$f"; done
+            REALCC=$(command -v cc)
+            cat > "$W/cc" <<WRAP
+#!/bin/sh
+# install.sh が作ったもの: Zig の libc 検出のために crtbegin.o / crtend.o の場所を答える
+case "\$1" in
+    -print-file-name=crt*.o) [ \$# -eq 1 ] && [ -e "$W/crt/\${1#-print-file-name=}" ] && { echo "$W/crt/\${1#-print-file-name=}"; exit 0; } ;;
+esac
+exec "$REALCC" "\$@"
+WRAP
+            chmod +x "$W/cc"
+            GCC_WRAP="$W/cc"
+        fi
+    fi
     if [ -x "$ZIG17" ] && [ -d "$GSRC" ] &&
-        (cd "$GSRC" && "$ZIG17" build -Doptimize=ReleaseFast -Dgtk-x11=false --prefix "$GHOSTTY_PREFIX"); then
+        # shellcheck disable=SC2086
+        (cd "$GSRC" && if [ -n "$GCC_WRAP" ]; then export CC="$GCC_WRAP"; fi &&
+            "$ZIG17" build -j"$GJOBS" $GOPTS --prefix "$GHOSTTY_PREFIX"); then
         echo "$GHOSTTY_VER" > "$GHOSTTY_PREFIX/.ame-version"
         info "ghostty $GHOSTTY_VER → $GHOSTTY_PREFIX"
     else
