@@ -540,7 +540,9 @@ elif command -v dinitctl >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
     grep -q ame-greeter /etc/greetd/config.toml 2>/dev/null && DM=greetd
     for svc in dbus $DM networkmanager bluetoothd; do
         [ -f "/usr/lib/dinit.d/$svc" ] || [ -f "/etc/dinit.d/$svc" ] || continue
-        if [ -e "/etc/dinit.d/boot.d/$svc" ] || [ -e "/usr/lib/dinit.d/boot.d/$svc" ]; then
+        # dbus は Chimera では dbus-daemon が起動時に動く(dbus はそれを包むだけ)
+        if [ -e "/etc/dinit.d/boot.d/$svc" ] || [ -e "/usr/lib/dinit.d/boot.d/$svc" ] ||
+            { [ "$svc" = dbus ] && { [ -e /usr/lib/dinit.d/boot.d/dbus-daemon ] || [ -e /etc/dinit.d/boot.d/dbus-daemon ]; }; }; then
             ok "dinit: $svc は有効" "dinit: $svc enabled"
         else
             ng "dinit のサービス $svc が有効になっていません(例: doas dinitctl enable $svc)" "dinit service $svc is not enabled (e.g. doas dinitctl enable $svc)"
@@ -580,7 +582,11 @@ if [ "$USER_MODE" = 1 ]; then
     say "$(m "元に戻す" "Uninstall"): sh $0 --uninstall --user"
 else
     if [ "$HAVE_RIVER03" = 0 ]; then
-        say "$(m "インストール完了(警告 $WARN 件)。SDDM で \"Ame Shell\" を選んでください。" "Installed ($WARN warning(s)). Choose \"Ame Shell\" in SDDM.")"
+        if grep -q ame-greeter /etc/greetd/config.toml 2>/dev/null; then
+            say "$(m "インストール完了(警告 $WARN 件)。再起動すると ame-shell のログイン画面が出ます。" "Installed ($WARN warning(s)). Reboot to get the ame-shell login screen.")"
+        else
+            say "$(m "インストール完了(警告 $WARN 件)。ログイン画面で \"Ame Shell\" を選んでください。" "Installed ($WARN warning(s)). Choose \"Ame Shell\" on the login screen.")"
+        fi
     else
         say "$(m "インストール完了(警告 $WARN 件)。SDDM で \"Ame Shell\"(River 0.3)か \"Ame Shell (River 0.5)\" を選んでください。" "Installed ($WARN warning(s)). Choose \"Ame Shell\" (River 0.3) or \"Ame Shell (River 0.5)\" in SDDM.")"
     fi

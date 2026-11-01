@@ -65,7 +65,7 @@ fi
 # ---- Arch 系(Arch / EndeavourOS / Manjaro など)は専用スクリプトで pacman から依存を入れる ----
 # (そのスクリプトが最後に install.sh --no-deps を呼び戻す)
 if [ "$NO_DEPS" = 0 ] && [ -z "${AME_FROM_ARCH:-}" ] && command -v pacman >/dev/null 2>&1 &&
-    { grep -q '^ID=arch' /etc/os-release 2>/dev/null || grep -qE '^ID_LIKE=.*arch' /etc/os-release 2>/dev/null; }; then
+    { grep -qE '^ID="?arch"?$' /etc/os-release 2>/dev/null || grep -qE '^ID_LIKE=.*arch' /etc/os-release 2>/dev/null; }; then
     fwd=""
     [ "$USER_MODE" = 1 ] && fwd="--user"
     # shellcheck disable=SC2086  # FWD は空白区切りのオプション
@@ -110,7 +110,7 @@ fetch_to() { # fetch_to <url> <file>
 }
 
 echo "ame-shell をインストールします($(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-Linux}") / $ARCH)"
-echo "  インストール先: $([ $USER_MODE = 1 ] && echo "自分用(~/.local)" || echo "全ユーザー用(/usr/local + SDDM)")"
+echo "  インストール先: $([ $USER_MODE = 1 ] && echo "自分用(~/.local)" || echo "全ユーザー用(/usr/local + ログイン画面)")"
 if [ "$ASSUME_YES" = 0 ] && [ -t 0 ]; then
     printf '続けますか? [Y/n] '
     read -r ans || ans=y
@@ -145,7 +145,8 @@ RUN_CMDS="foot zsh greetd dbus-run-session playerctl cava pactl grim slurp wl-co
 export LLVM_CONFIG="${LLVM_CONFIG:-llvm-config}"
 if [ "$NO_DEPS" = 1 ]; then
     info "(--no-deps のため省略)"
-elif command -v apk >/dev/null 2>&1 && grep -q "^ID=chimera" /etc/os-release 2>/dev/null; then
+# os-release の ID は引用符付き(ID="chimera")のこともある。以前は引用符付きを見落とし、パッケージを一度も入れていなかった
+elif command -v apk >/dev/null 2>&1 && grep -qE '^ID="?chimera"?$' /etc/os-release 2>/dev/null; then
     # 未導入のものを「必須」「任意」に分けて集める。必須なのにリポジトリに無いものは止める
     missing=""
     unavailable=""
@@ -345,7 +346,7 @@ fi
 if command -v thunar >/dev/null 2>&1 && command -v xdg-mime >/dev/null 2>&1; then
     cur=$(xdg-mime query default inode/directory 2>/dev/null)
     case "$cur" in
-        ""|*dolphin*)
+        ""|*dolphin*|*kfmclient*|org.kde.*)
             xdg-mime default thunar.desktop inode/directory && info "フォルダを開くアプリ: thunar(Super+E)" ;;
         *) info "フォルダを開くアプリ: $cur(そのまま)" ;;
     esac
