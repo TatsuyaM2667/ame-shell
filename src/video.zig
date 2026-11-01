@@ -28,6 +28,28 @@ const PARAM_OPENGL_INIT_PARAMS = 2;
 const PARAM_OPENGL_FBO = 3;
 const PARAM_FLIP_Y = 4;
 const PARAM_BLOCK_FOR_TARGET_TIME = 12;
+const PARAM_DRM_DISPLAY_V2 = 16;
+/// mpv_opengl_drm_params_v2: ハードウェア復号(VA-API)に使う DRM のレンダーノードを mpv に渡す
+const DrmParamsV2 = extern struct { fd: c_int, crtc_id: c_int, connector_id: c_int, atomic_request_ptr: ?*anyopaque, render_fd: c_int };
+
+/// GPU のレンダーノード(/dev/dri/renderD*)。全プレーヤーで共有して開いたままにする
+var render_fd: c_int = -2;
+
+fn renderNode() c_int {
+    if (render_fd != -2) return render_fd;
+    render_fd = -1;
+    var i: u32 = 128;
+    while (i < 136) : (i += 1) {
+        var pb: [32]u8 = undefined;
+        const p = std.fmt.bufPrintZ(&pb, "/dev/dri/renderD{d}", .{i}) catch break;
+        const fd = c.open(p.ptr, c.O_RDWR | c.O_CLOEXEC);
+        if (fd >= 0) {
+            render_fd = fd;
+            break;
+        }
+    }
+    return render_fd;
+}
 const UPDATE_FRAME: u64 = 1;
 const FORMAT_INT64 = 4;
 const EVENT_NONE = 0;
@@ -161,9 +183,14 @@ pub const Player = struct {
             return null;
         }
         var init_params = GlInitParams{ .get_proc_address = getProc, .ctx = null };
+        // VA-API で復号したコマを、CPU を通さずに(dmabuf で)GL のテクスチャへ渡すため、レンダーノードを渡す。
+        // 渡さないと mpv は復号したコマを CPU へ読み戻してから GL へ上げ直し(vaapi-copy)、その転送が
+        // 描画スレッドを数十 ms 止めて、すべてのアニメーションがカクついていた
+        var drm = DrmParamsV2{ .fd = -1, .crtc_id = -1, .connector_id = -1, .atomic_request_ptr = null, .render_fd = renderNode() };
         var params = [_]RenderParam{
             .{ .type = PARAM_API_TYPE, .data = @constCast(@ptrCast("opengl")) },
             .{ .type = PARAM_OPENGL_INIT_PARAMS, .data = &init_params },
+            .{ .type = if (drm.render_fd >= 0) PARAM_DRM_DISPLAY_V2 else 0, .data = if (drm.render_fd >= 0) @ptrCast(&drm) else null },
             .{ .type = 0, .data = null },
         };
         var rc: ?*MpvRenderCtx = null;
