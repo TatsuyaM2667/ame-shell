@@ -234,7 +234,11 @@ pub const Wallpaper = struct {
                 self.videoFailed(p);
                 return;
             }
-            if (redraw) self.surf.schedule();
+            if (redraw) {
+                self.surf.schedule();
+                // ロック中は壁紙のサーフェスが隠れて描かれないので、ロック画面に描き直してもらう(動画が止まらない)
+                if (self.app.lock.locked) self.app.lock.scheduleAll();
+            }
         };
     }
 
