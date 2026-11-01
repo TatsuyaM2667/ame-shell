@@ -125,10 +125,10 @@ APK_RIVER="wlroots0.20-devel libevdev-devel pixman-devel libinput-devel xwayland
 #   ために KDE Plasma 一式(800 以上のパッケージ)が入ってしまう。テーマは ame(scripts/sddm-theme.sh)
 #   (スクショ: grim slurp wl-clipboard / 波形: cava / 音量・Bluetooth の音: libpulse-progs(pactl)/ 無線: util-linux-rfkill)
 APK_RUN="sddm sddm-theme-none sddm-default-weston weston foot dbus mesa-dri polkit upower power-profiles-daemon playerctl cava pipewire wireplumber libpulse-progs mpv-libs ffmpeg
- grim slurp wl-clipboard swaylock brightnessctl util-linux-rfkill networkmanager bluez
+ grim slurp wl-clipboard swaylock brightnessctl util-linux-rfkill networkmanager bluez thunar tumbler xdg-utils
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  fonts-noto-sans-cjk-otf fonts-nerd-jetbrains-mono fonts-nerd-symbols-only adwaita-icon-theme hicolor-icon-theme"
-APK_OPT="fastfetch wf-recorder wlr-randr"
+APK_OPT="fastfetch wf-recorder wlr-randr gvfs"
 NEED_CMDS="git curl clang wayland-scanner pkg-config"
 # 動かすのに欠かせないコマンド(パッケージを入れた後に確かめる)
 RUN_CMDS="foot sddm dbus-run-session playerctl cava pactl grim slurp wl-copy swaylock brightnessctl rfkill nmcli bluetoothctl"
@@ -293,4 +293,15 @@ elif command -v systemctl >/dev/null 2>&1; then
     fi
 else
     info "(このシステムのユーザーサービスは確認できません。PipeWire が自動で起動するようにしてください)"
+fi
+
+# ---------------------------------------------------------------------------
+# フォルダを開くアプリ(ファイルマネージャ): 決まっていない、または KDE の Dolphin(消した場合など)なら thunar に
+if command -v thunar >/dev/null 2>&1 && command -v xdg-mime >/dev/null 2>&1; then
+    cur=$(xdg-mime query default inode/directory 2>/dev/null)
+    case "$cur" in
+        ""|*dolphin*)
+            xdg-mime default thunar.desktop inode/directory && info "フォルダを開くアプリ: thunar(Super+E)" ;;
+        *) info "フォルダを開くアプリ: $cur(そのまま)" ;;
+    esac
 fi

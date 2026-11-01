@@ -18,6 +18,7 @@ riverctl xcursor-theme Adwaita 24 2>/dev/null
 
 # ---- キーバインド ----
 riverctl map normal Super Return spawn foot
+riverctl map normal Super E spawn 'command -v thunar >/dev/null 2>&1 && exec thunar || exec xdg-open "$HOME"'
 riverctl map normal Super D spawn "ame-ctl launcher toggle"
 riverctl map normal Super A spawn "ame-ctl dashboard toggle"
 riverctl map normal Super N spawn "ame-ctl notifications toggle"

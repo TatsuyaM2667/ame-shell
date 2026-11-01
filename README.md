@@ -202,6 +202,7 @@ PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5
 | Super+Escape | セッション(ロック・ログアウト・再起動・電源オフ。危険な操作は 2 回押し)|
 | Super+L | ロック |
 | Super+Shift+W | 壁紙ピッカー |
+| Super+E | ファイルマネージャ(thunar)|
 | Super+Q / Super+F / Super+Space | 閉じる / 全画面 / フロート |
 | Super+J・K / Super+Shift+J・K | フォーカス / 入れ替え |
 | Super+Ctrl+H・L | 左右の比率 |

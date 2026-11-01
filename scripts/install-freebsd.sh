@@ -101,7 +101,7 @@ REQUIRED="
 "
 # あれば使う: 無ければ飛ばす(その機能だけ使えない)。"a|b" は「a が無ければ b」
 OPTIONAL="
- wf-recorder mpv ffmpeg fastfetch wlr-randr
+ wf-recorder mpv ffmpeg fastfetch wlr-randr thunar tumbler xdg-utils
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  noto-sans-jp nerd-fonts-symbols|nerd-fonts jetbrains-mono
 "
@@ -269,6 +269,10 @@ sh "$REPO/scripts/sddm-theme.sh" --user "$TARGET_USER"
 
 # foot・fastfetch の設定を ame-shell のものに(元のファイルは *.ame-bak に残る)
 su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_CONFIG_HOME= sh '$REPO/scripts/app-config.sh'"
+# フォルダを開くアプリ: 決まっていなければ thunar に
+if command -v thunar >/dev/null 2>&1 && command -v xdg-mime >/dev/null 2>&1; then
+    su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_CONFIG_HOME= sh -c '[ -n \"\$(xdg-mime query default inode/directory 2>/dev/null)\" ] || xdg-mime default thunar.desktop inode/directory'"
+fi
 
 # キーボード配列: コンソールの keymap(rc.conf の keymap="jp.kbd" など)と同じ配列を Wayland でも使う
 kbd=$(sysrc -n keymap 2>/dev/null || true)
