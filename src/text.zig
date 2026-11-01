@@ -90,11 +90,37 @@ pub const Fonts = struct {
             if (self.loadPattern(ui)) |i| try self.chains[bold].append(i);
             const ic = std.fmt.bufPrintZ(&name_buf, "{s}", .{icon_family}) catch "monospace";
             if (self.loadPattern(ic)) |i| try self.chains[bold].append(i);
+            // 設定のアイコン用フォント(既定 JetBrainsMono Nerd Font)が無くても、記号だけの
+            // Symbols Nerd Font があればアイコンを出せるように。fontconfig は無い名前でも別のフォントを
+            // 返すので、本当にアイコンの文字を持っているときだけ加える
+            if (!self.chainHas(bold, NERD_PROBE)) {
+                if (self.loadPattern("Symbols Nerd Font")) |i| {
+                    if (c.FT_Get_Char_Index(self.faces.items[i].ft, NERD_PROBE) != 0) try self.chains[bold].append(i);
+                }
+            }
             // 最後の砦: 日本語の sans-serif
             if (self.loadPattern("sans-serif:lang=ja")) |i| try self.chains[bold].append(i);
         }
         if (self.chains[0].items.len == 0) return error.NoFonts;
+        if (!self.chainHas(0, NERD_PROBE)) {
+            std.log.warn("fonts: Nerd Font のアイコン(U+{X})を持つフォントがありません。バーのアイコンが豆腐(☒)になります。" ++
+                "Symbols Nerd Font を入れてください(Chimera: fonts-nerd-symbols-only / Arch: ttf-nerd-fonts-symbols / FreeBSD: nerd-fonts)", .{NERD_PROBE});
+        }
+        if (!self.chainHas(0, 0x3042)) { // 「あ」
+            std.log.warn("fonts: 日本語のフォントがありません(Chimera: fonts-noto-sans-cjk-otf / Arch: noto-fonts-cjk / FreeBSD: noto-sans-jp)", .{});
+        }
         return self;
+    }
+
+    /// バーで使う Material Design のアイコン(nf-md-)の 1 つ。これがあれば Nerd Font が使えるとみなす
+    const NERD_PROBE: u32 = 0xF075A;
+
+    /// チェーンのどれかのフォントがこの文字を持っているか
+    fn chainHas(self: *Fonts, chain: u1, cp: u32) bool {
+        for (self.chains[chain].items) |fi| {
+            if (c.FT_Get_Char_Index(self.faces.items[fi].ft, cp) != 0) return true;
+        }
+        return false;
     }
 
     /// fontconfig のパターン文字列から最適なフォントを探し、顔を読み込んで番号を返す。

@@ -49,6 +49,8 @@ pub const Entry = struct {
     keywords: []const u8 = "",
     exec: []const u8 = "",
     icon: []const u8 = "",
+    /// StartupWMClass(ウィンドウの app_id / WM_CLASS が .desktop の名前と違うアプリ用。Electron・JetBrains など)
+    wm_class: []const u8 = "",
     terminal: bool = false,
     uses: u32 = 0,
     /// 最後に起動した時刻(UNIX 秒)。よく使う順(frecency)の計算に使う
@@ -787,14 +789,26 @@ pub const Launcher = struct {
         for (self.entries.items) |*e| {
             const stem = if (std.mem.endsWith(u8, e.id, ".desktop")) e.id[0 .. e.id.len - 8] else e.id;
             if (eqi(stem, app_id)) return e;
+            // StartupWMClass はアプリ自身が「この窓はこの .desktop」と宣言したもの
+            if (e.wm_class.len > 0 and eqi(e.wm_class, app_id)) return e;
             if (best != null) continue;
             // 逆ドメイン名の最後の部分 / 実行ファイル名 / 表示名
             const last = if (std.mem.lastIndexOfScalar(u8, stem, '.')) |i| stem[i + 1 ..] else stem;
-            var it = std.mem.tokenizeAny(u8, e.exec, " \t");
-            const exe = std.fs.path.basename(it.next() orelse "");
-            if (eqi(last, app_id) or eqi(exe, app_id) or eqi(e.name, app_id)) best = e;
+            if (eqi(last, app_id) or eqi(execName(e.exec), app_id) or eqi(e.name, app_id)) best = e;
         }
         return best;
+    }
+
+    /// Exec= の実行ファイル名。"env FOO=1 app" や "/usr/bin/env app" の env と変数の指定は飛ばす
+    fn execName(exec: []const u8) []const u8 {
+        var it = std.mem.tokenizeAny(u8, exec, " \t");
+        while (it.next()) |t| {
+            const b = std.fs.path.basename(t);
+            if (std.mem.eql(u8, b, "env")) continue;
+            if (std.mem.indexOfScalar(u8, t, '=') != null and t[0] != '-') continue;
+            return b;
+        }
+        return "";
     }
 
     pub fn entryIcon(self: *Launcher, e: *Entry) c.GLuint {
@@ -1110,7 +1124,7 @@ fn parseDesktop(a: std.mem.Allocator, id: []const u8, data: []const u8) ?Entry {
         const k = std.mem.trim(u8, line[0..eq], " ");
         const v = std.mem.trim(u8, line[eq + 1 ..], " ");
         const dup = a.dupe(u8, v) catch continue;
-        if (std.mem.eql(u8, k, "Name")) e.name = dup else if (std.mem.eql(u8, k, "Name[ja]")) e.name_ja = dup else if (std.mem.eql(u8, k, "GenericName") and e.generic.len == 0) e.generic = dup else if (std.mem.eql(u8, k, "GenericName[ja]")) e.generic = dup else if (std.mem.eql(u8, k, "Comment") and e.comment.len == 0) e.comment = dup else if (std.mem.eql(u8, k, "Comment[ja]")) e.comment = dup else if (std.mem.eql(u8, k, "Keywords")) e.keywords = dup else if (std.mem.eql(u8, k, "Exec")) e.exec = dup else if (std.mem.eql(u8, k, "Icon")) e.icon = dup else if (std.mem.eql(u8, k, "Terminal")) e.terminal = std.mem.eql(u8, v, "true") else if (std.mem.eql(u8, k, "Type")) is_app = std.mem.eql(u8, v, "Application") else if (std.mem.eql(u8, k, "NoDisplay") or std.mem.eql(u8, k, "Hidden")) {
+        if (std.mem.eql(u8, k, "Name")) e.name = dup else if (std.mem.eql(u8, k, "Name[ja]")) e.name_ja = dup else if (std.mem.eql(u8, k, "GenericName") and e.generic.len == 0) e.generic = dup else if (std.mem.eql(u8, k, "GenericName[ja]")) e.generic = dup else if (std.mem.eql(u8, k, "Comment") and e.comment.len == 0) e.comment = dup else if (std.mem.eql(u8, k, "Comment[ja]")) e.comment = dup else if (std.mem.eql(u8, k, "Keywords")) e.keywords = dup else if (std.mem.eql(u8, k, "Exec")) e.exec = dup else if (std.mem.eql(u8, k, "Icon")) e.icon = dup else if (std.mem.eql(u8, k, "StartupWMClass")) e.wm_class = dup else if (std.mem.eql(u8, k, "Terminal")) e.terminal = std.mem.eql(u8, v, "true") else if (std.mem.eql(u8, k, "Type")) is_app = std.mem.eql(u8, v, "Application") else if (std.mem.eql(u8, k, "NoDisplay") or std.mem.eql(u8, k, "Hidden")) {
             if (std.mem.eql(u8, v, "true")) return null;
         }
     }
@@ -1160,8 +1174,7 @@ const IconWorker = struct {
                     if (src) |sp| px = icons.decode(sp, THUMB_W, THUMB_H, true);
                 } else |_| {}
             } else {
-                var buf: [600]u8 = undefined;
-                if (icons.lookup(j.name, &buf)) |p| px = icons.decode(p, ICON_PX, ICON_PX, false);
+                px = icons.load(j.name, ICON_PX);
             }
             a.free(j.name);
             self.mutex.lock();
