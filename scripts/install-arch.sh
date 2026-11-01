@@ -38,9 +38,15 @@ BUILD="git curl bash base-devel clang llvm pkgconf wayland wayland-protocols mes
 # River 0.5(ame-shell がウィンドウマネージャを兼ねるセッション)
 RIVER="river xorg-xwayland"
 # 動かすのに必要なもの・あると使うもの
-RUN="sddm foot playerctl cava pipewire pipewire-pulse wireplumber libpulse mpv ffmpeg grim slurp wl-clipboard swaylock
- brightnessctl networkmanager bluez bluez-utils util-linux xdg-desktop-portal-wlr noto-fonts-cjk ttf-jetbrains-mono-nerd
+# (pipewire-audio: Bluetooth のイヤホン・スピーカー(bluez5 のプラグイン)/ libpulse: pactl /
+#  ttf-nerd-fonts-symbols: バーのアイコン / hicolor・adwaita: アプリのアイコン)
+RUN="sddm foot polkit playerctl cava pipewire pipewire-audio pipewire-pulse wireplumber libpulse mpv ffmpeg grim slurp wl-clipboard swaylock
+ brightnessctl networkmanager bluez bluez-utils util-linux
+ xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
+ noto-fonts-cjk ttf-jetbrains-mono-nerd ttf-nerd-fonts-symbols hicolor-icon-theme adwaita-icon-theme
  fastfetch wf-recorder wlr-randr"
+# 動かすのに欠かせないコマンド(入れた後に確かめる)
+RUN_CMDS="foot sddm dbus-run-session playerctl cava pactl grim slurp wl-copy swaylock brightnessctl rfkill nmcli bluetoothctl"
 # 日本語入力(あれば)
 JA="fcitx5 fcitx5-mozc fcitx5-gtk fcitx5-qt fcitx5-configtool"
 
@@ -68,6 +74,10 @@ fi
 for c in git clang wayland-scanner pkg-config odin; do
     command -v "$c" >/dev/null 2>&1 || die "$c が見つかりません(pacman -S で入れてください)"
 done
+# スクショ・波形・音量などに欠かせないもの: 1 つずつ入れて飛ばしたものがあれば、ここで止める
+lack=""
+for c in $RUN_CMDS; do command -v "$c" >/dev/null 2>&1 || lack="$lack $c"; done
+[ -n "$lack" ] && die "次のコマンドが見つかりません(pacman -S で入れてから再実行してください):$lack"
 info "river: $(river -version 2>&1 || echo なし) / odin: $(odin version 2>&1 | head -n 1)"
 
 say "2/3 サービス"

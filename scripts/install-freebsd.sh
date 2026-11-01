@@ -91,18 +91,19 @@ say "1/5 パッケージ"
 export ASSUME_ALWAYS_YES=yes
 pkg -N >/dev/null 2>&1 || pkg bootstrap -y
 pkg update -q
-# 必須: これが無いとビルドできない / セッションが動かない
+# 必須: これが無いとビルドできない / セッションが動かない / スクショ・波形・メディア・ロック・アイコンが使えない
 REQUIRED="
  git cmake ninja gmake bash pkgconf llvm18 zstd wayland wayland-protocols
  mesa-libs mesa-dri libglvnd libxkbcommon xkeyboard-config freetype2 harfbuzz fontconfig dbus
  libepoll-shim libinotify
  river sddm xorg-minimal seatd foot curl
+ playerctl cava swaylock grim slurp wl-clipboard hicolor-icon-theme adwaita-icon-theme
 "
 # あれば使う: 無ければ飛ばす(その機能だけ使えない)。"a|b" は「a が無ければ b」
 OPTIONAL="
- playerctl cava swaylock grim slurp wl-clipboard wf-recorder mpv ffmpeg fastfetch wlr-randr
- xdg-desktop-portal xdg-desktop-portal-wlr
- noto-sans-jp nerd-fonts-symbols jetbrains-mono
+ wf-recorder mpv ffmpeg fastfetch wlr-randr
+ xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
+ noto-sans-jp nerd-fonts-symbols|nerd-fonts jetbrains-mono
 "
 # 日本語入力。fcitx5 用の Mozc は latest リポジトリにしか無いことがある(quarterly には無い)ので候補を順に試す
 [ "$DO_JA" = 1 ] && OPTIONAL="$OPTIONAL fcitx5 fcitx5-qt6 fcitx5-gtk3 fcitx5-configtool ja-fcitx5-mozc|ja-fcitx5-mozc3"
