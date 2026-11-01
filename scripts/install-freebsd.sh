@@ -103,6 +103,7 @@ REQUIRED="
 OPTIONAL="
  wf-recorder mpv ffmpeg fastfetch wlr-randr thunar tumbler xdg-utils upower polkit greetd
  ghostty zsh zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza bat
+ libva mesa-gallium-va
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  noto-sans-jp nerd-fonts-symbols|nerd-fonts jetbrains-mono
 "

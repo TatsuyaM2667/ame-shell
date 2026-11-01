@@ -106,6 +106,15 @@ if [ -z "$GUSER" ] || [ "$GUSER" = root ]; then
 fi
 [ -n "$GUSER" ] || GUSER=_greetd
 
+# greeter のユーザーが画面(DRM)と入力を使えるように(logind が無い・seatd の環境や Arch で要ることがある)
+for g in video input _seatd; do
+    getent group "$g" >/dev/null 2>&1 || continue
+    id -Gn "$GUSER" 2>/dev/null | tr " " "\n" | grep -qx "$g" && continue
+    if [ "$(uname -s)" = FreeBSD ]; then run pw groupmod "$g" -m "$GUSER"
+    else run usermod -aG "$g" "$GUSER"; fi
+    info "$GUSER を $g グループに追加"
+done
+
 # ---- 1. config.toml ----
 TMP=$(mktemp "${TMPDIR:-/tmp}/ame-greetd.XXXXXX") || exit 1
 trap 'rm -f "$TMP"' EXIT
