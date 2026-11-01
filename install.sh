@@ -430,3 +430,10 @@ elif [ "$MOZC" = 1 ]; then
 else
     case "${LANG:-}" in ja_*) info "日本語入力 Mozc が入っていません。sh install.sh --mozc でソースからビルドできます(10〜20 分)" ;; esac
 fi
+
+# ---------------------------------------------------------------------------
+# Flatpak の Zed: 既定では自分をサンドボックスの外(ホスト)で起動し直そうとするが、Zed は glibc 向けなので
+# musl の Chimera では実行できず(No such file or directory)、何も起きない。サンドボックスの中で動かす
+if command -v flatpak >/dev/null 2>&1 && flatpak info --user dev.zed.Zed >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl; then
+    flatpak override --user --env=ZED_FLATPAK_NO_ESCAPE=1 dev.zed.Zed && info "Zed(Flatpak): サンドボックスの中で動かす設定にしました(ZED_FLATPAK_NO_ESCAPE=1)"
+fi

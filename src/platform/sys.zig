@@ -347,6 +347,7 @@ pub fn run(argv: []const ?[*:0]const u8, buf: []u8) ?[]const u8 {
         _ = c.dup2(fds[1], 1);
         const devnull = c.open("/dev/null", c.O_WRONLY);
         if (devnull >= 0) _ = c.dup2(devnull, 2);
+        childDefaults();
         _ = c.execvp(args[0].?, @ptrCast(&args));
         c._exit(127);
     }
@@ -366,6 +367,18 @@ pub fn run(argv: []const ?[*:0]const u8, buf: []u8) ?[]const u8 {
 
 /// ランチャー等から GUI アプリを起動する。二重 fork + setsid でシェルから切り離し、
 /// シェルが再起動してもアプリが道連れにならないようにする。
+/// fork した子で exec の前に呼ぶ: ame-shell が無視している SIGCHLD / SIGPIPE を既定に戻し、マスクも空にする。
+/// 無視(SIG_IGN)は exec をまたいで引き継がれるので、戻さないと起動したアプリの waitpid が ECHILD で失敗する
+/// (flatpak run の g_spawn_sync が失敗し、Flatpak のアプリが起動しないなど)
+pub fn childDefaults() void {
+    const dfl = std.posix.Sigaction{ .handler = .{ .handler = std.posix.SIG.DFL }, .mask = std.posix.empty_sigset, .flags = 0 };
+    std.posix.sigaction(std.posix.SIG.CHLD, &dfl, null) catch {};
+    std.posix.sigaction(std.posix.SIG.PIPE, &dfl, null) catch {};
+    var sigset: c.sigset_t = undefined;
+    _ = c.sigemptyset(&sigset);
+    _ = c.sigprocmask(c.SIG_SETMASK, &sigset, null);
+}
+
 pub fn spawnDetached(cmdline: [*:0]const u8) void {
     const pid = c.fork();
     if (pid < 0) return;
@@ -377,6 +390,7 @@ pub fn spawnDetached(cmdline: [*:0]const u8) void {
         _ = c.sigemptyset(&sigset);
         _ = c.sigprocmask(c.SIG_SETMASK, &sigset, null);
         const argv = [_:null]?[*:0]const u8{ "/bin/sh", "-c", cmdline, null };
+        childDefaults();
         _ = c.execv("/bin/sh", @ptrCast(&argv));
         c._exit(127);
     }
@@ -397,6 +411,7 @@ pub fn spawnReader(argv: []const ?[*:0]const u8, out_pid: *c_int) ?c_int {
         _ = c.dup2(fds[1], 1);
         const devnull = c.open("/dev/null", c.O_WRONLY);
         if (devnull >= 0) _ = c.dup2(devnull, 2);
+        childDefaults();
         _ = c.execvp(args[0].?, @ptrCast(&args));
         c._exit(127);
     }
@@ -420,6 +435,7 @@ pub fn spawnReaderAll(argv: []const ?[*:0]const u8, out_pid: *c_int) ?c_int {
         // 対話的な確認を求めるコマンドが止まらないように標準入力は空に
         const devnull = c.open("/dev/null", c.O_RDONLY);
         if (devnull >= 0) _ = c.dup2(devnull, 0);
+        childDefaults();
         _ = c.execvp(args[0].?, @ptrCast(&args));
         c._exit(127);
     }

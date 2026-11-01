@@ -445,6 +445,7 @@ const Ff = struct {
             var sigset: c.sigset_t = undefined;
             _ = c.sigemptyset(&sigset);
             _ = c.sigprocmask(c.SIG_SETMASK, &sigset, null);
+            @import("platform/sys.zig").childDefaults();
             _ = c.execv("/bin/sh", @ptrCast(&argv));
             c._exit(127);
         }
@@ -520,6 +521,7 @@ fn runWait(argv: []const ?[*:0]const u8) bool {
             _ = c.dup2(devnull, 1);
             _ = c.dup2(devnull, 2);
         }
+        @import("platform/sys.zig").childDefaults();
         _ = c.execvp(argv[0].?, @ptrCast(argv.ptr));
         c._exit(127);
     }
