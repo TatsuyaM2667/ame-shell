@@ -143,7 +143,8 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
     }
     {
         // ぼかし: 現れるときに少し、入力画面で強く。解除で消える
-        const blur = clamp01(0.25 * (1 - appear) + a * 0.95) * (1 - un);
+        // ログイン画面は全体をすりガラスにして、真ん中の穴からだけ壁紙を見せる(下の portal)
+        const blur = if (self.greeter) 1.0 else clamp01(0.25 * (1 - appear) + a * 0.95) * (1 - un);
         if (blur > 0.01) {
             cv.save();
             cv.opacity(blur);
@@ -158,8 +159,13 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         // 文字を読みやすく: 上と下を少し暗く(入力画面ではさらに全体を)
         cv.rectGrad(0, 0, W, H * 0.45, 0, black.alpha(0.28 * (1 - un)), black.alpha(0));
         cv.rectGrad(0, H * 0.6, W, H * 0.4, 0, black.alpha(0), black.alpha(0.38 * (1 - un)));
-        cv.rect(0, 0, W, H, 0, black.alpha((0.22 * a + 0.3 * (1 - appear)) * (1 - un)));
+        if (self.greeter) {
+            cv.rect(0, 0, W, H, 0, black.alpha(0.30));
+        } else {
+            cv.rect(0, 0, W, H, 0, black.alpha((0.22 * a + 0.3 * (1 - appear)) * (1 - un)));
+        }
     }
+    if (self.greeter) if (out_backdrop) |bd| portal(self, cv, bd, W, H, acc, appear, a, un);
 
     // ログイン画面用に、入力画面の背景(ぼかした壁紙)を 1 回だけ書き出す(sddmshare.zig)
     if (primary and !self.sddm_saved and appear > 0.999 and a > 0.999 and !self.unlocking) {
@@ -561,6 +567,38 @@ fn greeterBar(self: *Lock, cv: *gfx.Canvas, W: f32, H: f32, e: f32) void {
         x -= 10;
     }
     cv.restore();
+}
+
+/// ログイン画面の穴: すりガラスの真ん中に丸い穴があき、そこからだけくっきりした壁紙が見える。
+/// 入力画面では写真の後ろへ移って、写真を囲む壁紙の輪になる。ログインに成功すると穴が画面いっぱいに
+/// 広がり、中の壁紙は拡大した状態から等倍へ戻っていく(穴を抜けてホームへ出るように)
+fn portal(self: *Lock, cv: *gfx.Canvas, bd: *gfx.Backdrop, W: f32, H: f32, acc: Color, appear: f32, a: f32, un: f32) void {
+    if (bd.scene.tex == 0) return;
+    // 穴の中心と半径: 眺める画面 → 入力画面(写真の中心。lockui の入力画面と同じ位置)→ 解除で画面全体
+    const idle_r = @min(W, H) * 0.17 * (1 + 0.025 * @sin(self.time_s * 1.4));
+    const auth_cy = H * 0.42 + 46;
+    var cx = W / 2;
+    var cy = lerp(H * 0.55, auth_cy, a);
+    var r = lerp(idle_r, 46 + 18, a) * appear;
+    const full = @sqrt(W * W + H * H) / 2 + 8;
+    // 解除: 少しためてから一気に広がる(バネの値を二乗して出だしを遅く)
+    const e = un * un;
+    cx = lerp(cx, W / 2, e);
+    cy = lerp(cy, H / 2, e);
+    r = lerp(r, full, e);
+    if (r < 1) return;
+    // 穴の外側にアクセント色の光
+    cv.shadow(cx - r, cy - r, r * 2, r * 2, r, 34, acc.alpha(0.45 * (1 - e)));
+    // 中の壁紙: 拡大(1.35 倍)から等倍へ。穴の位置に対応する部分を切り出す(FBO は下から上)
+    const zoom = lerp(1.35, 1.0, e);
+    const hw = r / zoom;
+    const ua = (cx - hw) / W;
+    const ub = (cx + hw) / W;
+    const v_top = 1 - (cy - hw) / H;
+    const v_bot = 1 - (cy + hw) / H;
+    cv.imageEx(bd.scene.tex, cx - r, cy - r, r * 2, r * 2, r, .{ ua, v_top, ub, v_bot }, 0, 0, 1, 1);
+    // 縁: 細い光の輪(広がるにつれて消える)
+    cv.rectBorder(cx - r, cy - r, r * 2, r * 2, r, .{ .a = 0 }, white.alpha(0.35 * (1 - e)), 1.5);
 }
 
 /// 文字の上を光が左から右へ流れる(iOS の「スライドでロック解除」)

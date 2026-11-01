@@ -171,6 +171,8 @@ pub const Lock = struct {
     /// ログイン画面として始める(greetd から AME_GREETER=1 で起動されたとき。App.init から)
     pub fn greet(self: *Lock) void {
         self.greeter = true;
+        // ログインの成功で穴が広がる演出は、ゆっくり見せる
+        self.unlock_s.response = 0.9;
         if (self.app.lock_mgr == null or !self.startSession()) {
             std.log.err("greeter: コンポジタが ext-session-lock-v1 に未対応のため、ログイン画面を出せません", .{});
             self.app.running = false;
