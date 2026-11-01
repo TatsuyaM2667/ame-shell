@@ -15,7 +15,7 @@
 | wpctl / pactl(音量) | 任意 | あり |
 | playerctl(メディア) / curl(アート取得) | 任意 | あり |
 | brightnessctl(明るさ) | 任意 | あり |
-| nmcli / bluetoothctl(トグル) | 任意 | あり |
+| NetworkManager / BlueZ(D-Bus で直接。nmcli / bluetoothctl は使わない) | 任意 | あり |
 | foot / rivertile | セッション | あり |
 | sddm / elogind または seatd / turnstile / dbus | セッション | あり(PAM: system-login に pam_turnstile・pam_elogind) |
 

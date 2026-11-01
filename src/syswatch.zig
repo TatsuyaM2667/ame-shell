@@ -13,6 +13,7 @@ const c = @import("c.zig");
 const App = @import("app.zig").App;
 const loop = @import("platform/loop.zig");
 const sys = @import("platform/sys.zig");
+const netdbus = @import("platform/netdbus.zig");
 const netpanel = @import("frame/netpanel.zig");
 
 /// libdbus の DBusError と同じレイアウト(notify.zig と同じ理由)
@@ -176,12 +177,19 @@ pub const SysWatch = struct {
         if (app.dashboard.surf) |s| s.schedule();
     }
 
-    /// BlueZ が動いているか。動いていないときに bluetoothctl を呼ぶと、デーモンを待って返ってこない
+    /// BlueZ が動いているか。動いていないときに BlueZ を呼ぶと、デーモンを待って返ってこない
     /// (FreeBSD に BlueZ は無い。Bluetooth は netgraph + hcsecd)
     pub fn bluezRunning(self: *SysWatch) bool {
         if (builtin.os.tag == .freebsd) return false;
-        const conn = self.conn orelse return sys.hasCommand("bluetoothctl");
+        const conn = self.conn orelse return false;
         return c.dbus_bus_name_has_owner(conn, "org.bluez", null) != 0;
+    }
+
+    /// NetworkManager が動いているか(Wi-Fi の設定パネル用)
+    pub fn nmRunning(self: *SysWatch) bool {
+        if (builtin.os.tag == .freebsd) return false;
+        const conn = self.conn orelse return false;
+        return c.dbus_bus_name_has_owner(conn, "org.freedesktop.NetworkManager", null) != 0;
     }
 
     /// アダプタの電源が入っているか(FreeBSD: ng_ubt が付いたアダプタがあるか)
@@ -192,7 +200,7 @@ pub const SysWatch = struct {
         }
         if (!self.bluezRunning()) return false;
         var out: [512]u8 = undefined;
-        const s = sys.run(&.{ "bluetoothctl", "show" }, &out) orelse return false;
+        const s = netdbus.run(&.{ "bluetoothctl", "show" }, &out) orelse return false;
         return std.mem.indexOf(u8, s, "Powered: yes") != null;
     }
 
@@ -205,7 +213,7 @@ pub const SysWatch = struct {
             const st = s[i + 10 ..];
             return !(std.mem.startsWith(u8, st, "DISCONNECTED") or std.mem.startsWith(u8, st, "INTERFACE_DISABLED"));
         }
-        const s = sys.run(&.{ "nmcli", "radio", "wifi" }, &out) orelse return null;
+        const s = netdbus.run(&.{ "nmcli", "radio", "wifi" }, &out) orelse return null;
         return std.mem.startsWith(u8, s, "enabled");
     }
 

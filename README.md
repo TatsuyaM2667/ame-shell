@@ -167,7 +167,7 @@ FreeBSD での違い:
 ### 手動でビルドする
 
 必要: Zig 0.13、Odin、wayland-scanner、wayland / EGL / GLESv2 / xkbcommon / freetype / harfbuzz / fontconfig / dbus の開発ファイル(FreeBSD は加えて libepoll-shim・libinotify)。
-実行時に使うもの: `wpctl` / `pactl`(PipeWire)・`nmcli`・`bluetoothctl`・`rfkill`・`curl`・`xdg-desktop-portal` と `-gtk`(ユーザーの写真を選ぶ画面)・`libmpv`(動画壁紙、任意)・`ffmpeg`(動画のサムネイル、任意)・`wf-recorder`(録画、`~/Videos` に保存、任意)。
+実行時に使うもの: `wpctl` / `pactl`(PipeWire)・NetworkManager と BlueZ(コマンドは使わず D-Bus で直接)・`rfkill`・`curl`・`xdg-desktop-portal` と `-gtk`(ユーザーの写真を選ぶ画面)・`libmpv`(動画壁紙、任意)・`ffmpeg`(動画のサムネイル、任意)・`wf-recorder`(録画、`~/Videos` に保存、任意)。
 フォント: 日本語(Noto Sans CJK)と Nerd Font のアイコン(JetBrainsMono Nerd Font か Symbols Nerd Font)。無いと起動時にログ(`session.log`)へ入れるパッケージ名を出します。
 スクショのコマンドが無いときは通知で、cava が無い・音を拾えないときはメディアの波形の場所に理由を表示します。
 

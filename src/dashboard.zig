@@ -17,6 +17,7 @@ const surface = @import("surface.zig");
 const Surface = surface.Surface;
 const loop = @import("platform/loop.zig");
 const sys = @import("platform/sys.zig");
+const netdbus = @import("platform/netdbus.zig");
 const wasm = @import("wasm.zig");
 const abi = @import("widget_abi.zig");
 const bar = @import("bar.zig");
@@ -166,11 +167,11 @@ pub const Dashboard = struct {
                     // wpa_supplicant: 切断して自動接続も止める / 再接続
                     sys.spawnDetached(if (self.store.wifi_on != 0) "wpa_cli disconnect" else "wpa_cli reconnect")
                 else
-                    sys.spawnDetached(if (self.store.wifi_on != 0) "nmcli radio wifi off" else "nmcli radio wifi on");
+                    netdbus.detached(&.{ "nmcli", "radio", "wifi", if (self.store.wifi_on != 0) "off" else "on" });
                 self.store.wifi_on ^= 1;
             },
             .toggle_bt => if (app.syswatch.bluezRunning()) {
-                sys.spawnDetached(if (self.store.bt_on != 0) "bluetoothctl power off" else "bluetoothctl power on");
+                netdbus.detached(&.{ "ame-bt", "power", if (self.store.bt_on != 0) "off" else "on" });
                 self.store.bt_on ^= 1;
             },
             .toggle_dnd => self.dnd = !self.dnd,

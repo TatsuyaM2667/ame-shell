@@ -1,7 +1,7 @@
 // OS 依存のデータ取得(sysfs / procfs / 外部コマンド)。
 //
 // init(dinit/systemd)には依存せず、カーネルのインターフェースと、どの
-// ディストリにもある小さなコマンド(wpctl, brightnessctl, nmcli)だけを使う。
+// ディストリにもある小さなコマンド(wpctl, brightnessctl)だけを使う(Wi-Fi・Bluetooth は netdbus.zig で D-Bus)。
 // コマンドが無い環境ではその機能だけ「不明」として扱い、シェルは動き続ける。
 const std = @import("std");
 const c = @import("../c.zig");
@@ -32,7 +32,7 @@ pub fn power(a: PowerAction) void {
     });
 }
 
-/// PATH にそのコマンドがあるか(nmcli・bluetoothctl の無い環境で、パネルに理由を出すため)
+/// PATH にそのコマンドがあるか(無い環境で、パネルに理由を出すため)
 pub fn hasCommand(name: []const u8) bool {
     const path = std.posix.getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
     var it = std.mem.splitScalar(u8, path, ':');
@@ -256,19 +256,12 @@ pub fn network() Net {
         }
         if (is_wifi) break;
     }
-    // Wi-Fi なら SSID を表示したい。nmcli があれば聞く(無ければ IF 名のまま)。
+    // Wi-Fi なら SSID を表示したい。NetworkManager に D-Bus で聞く(動いていなければ IF 名のまま)。
     if (n.kind == .wifi) {
-        var out: [256]u8 = undefined;
-        if (run(&.{ "nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi", "list", "--rescan", "no" }, &out)) |s| {
-            var lines = std.mem.splitScalar(u8, s, '\n');
-            while (lines.next()) |l| {
-                if (std.mem.startsWith(u8, l, "yes:")) {
-                    const ssid = l[4..];
-                    n.name_len = @min(ssid.len, n.name_buf.len);
-                    @memcpy(n.name_buf[0..n.name_len], ssid[0..n.name_len]);
-                    break;
-                }
-            }
+        var out: [64]u8 = undefined;
+        if (@import("netdbus.zig").activeSsid(&out)) |ssid| {
+            n.name_len = @min(ssid.len, n.name_buf.len);
+            @memcpy(n.name_buf[0..n.name_len], ssid[0..n.name_len]);
         }
     }
     return n;
@@ -413,7 +406,7 @@ pub fn spawnReader(argv: []const ?[*:0]const u8, out_pid: *c_int) ?c_int {
     return fds[0];
 }
 
-/// spawnReader と同じだが、標準エラーも同じ pipe に流す(nmcli 等のエラーメッセージを表示するため)
+/// spawnReader と同じだが、標準エラーも同じ pipe に流す(エラーメッセージを表示するため)
 pub fn spawnReaderAll(argv: []const ?[*:0]const u8, out_pid: *c_int) ?c_int {
     var fds: [2]c_int = undefined;
     if (c.pipe2(&fds, c.O_CLOEXEC) != 0) return null;

@@ -2,7 +2,8 @@
 //   Wi-Fi     … オン/オフ、スキャン、一覧(電波の強さ・鍵・保存済み・接続中)、パスワード入力、接続/切断
 //   Bluetooth … 電源、スキャン、一覧(ペア済み・接続中を上に)、ペアリング+接続 / 切断
 //
-// 裏では nmcli / bluetoothctl を「1 つずつ順番に」非同期で実行し(キュー)、完了は pipe の EOF で知る。
+// 裏では NetworkManager / BlueZ への D-Bus の呼び出し(platform/netdbus.zig。nmcli / bluetoothctl と同じ形の結果を返す)を
+// 「1 つずつ順番に」ワーカースレッドで実行し(キュー)、完了は pipe の EOF で知る。
 // 引数はシェルを通さず渡すので、SSID やパスワードにどんな文字が入っていても安全。
 const std = @import("std");
 const c = @import("../c.zig");
@@ -14,6 +15,7 @@ const theme = @import("../theme.zig");
 const surface = @import("../surface.zig");
 const sys = @import("../platform/sys.zig");
 const loop = @import("../platform/loop.zig");
+const netdbus = @import("../platform/netdbus.zig");
 const Frame = @import("frame.zig").Frame;
 /// FreeBSD: Wi-Fi は wpa_supplicant(wpa_cli)、Bluetooth は netgraph + hcsecd(機器の追加は root の bluetooth-config)
 const is_bsd = @import("builtin").os.tag == .freebsd;
@@ -144,7 +146,11 @@ fn pump(st: *State) void {
     const r = &st.running.?;
     for (0..r.argc) |i| av[i] = @ptrCast(&r.args[i]);
     st.out_len = 0;
-    st.fd = sys.spawnReaderAll(av[0..r.argc], &st.pid) orelse {
+    // nmcli / bluetoothctl / ame-bt はコマンドを起動せず、D-Bus で直接(platform/netdbus.zig)
+    var sl: [10][]const u8 = undefined;
+    for (0..r.argc) |i| sl[i] = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&r.args[i])), 0);
+    const fd_opt = if (netdbus.handles(sl[0])) netdbus.spawn(sl[0..r.argc]) else sys.spawnReaderAll(av[0..r.argc], &st.pid);
+    st.fd = fd_opt orelse {
         st.running = null;
         setStatus(st, "コマンドを実行できません", true);
         return;
@@ -370,10 +376,7 @@ fn finish(st: *State, j: Job, out: []const u8) void {
 fn startBtScan(st: *State) void {
     const f = st.frame orelse return;
     if (st.scan_fd >= 0) return;
-    var sb: [128]u8 = undefined;
-    var zb: [129]u8 = undefined;
-    const script = std.fmt.bufPrintZ(&zb, "{s}", .{btScript(f, &sb)}) catch return;
-    st.scan_fd = sys.spawnReaderAll(&.{ "sh", script.ptr, "--scan", "10" }, &st.scan_pid) orelse {
+    st.scan_fd = netdbus.spawn(&.{ "ame-bt", "scan", "10" }) orelse {
         st.busy_scan = false;
         return;
     };
@@ -396,11 +399,6 @@ fn onScanRead(ctx: *anyopaque, fd: c_int, _: u32) void {
     f.schedule();
 }
 
-/// Bluetooth の操作をまとめたスクリプト(data/bt-connect.sh: rfkill の解除・電源・ペアリング・音の出力先)
-fn btScript(f: *Frame, buf: []u8) []const u8 {
-    return std.fmt.bufPrint(buf, "{s}/bt-connect.sh", .{f.app.shareDir()}) catch "bt-connect.sh";
-}
-
 fn firstLine(s: []const u8) []const u8 {
     const nl = std.mem.indexOfScalar(u8, s, '\n') orelse return s;
     return s[0..nl];
@@ -412,10 +410,10 @@ fn restartAppear(st: *State) void {
 
 pub fn refreshWifi(st: *State, rescan: bool) void {
     if (is_bsd) return refreshWifiBsd(st, rescan);
-    if (!sys.hasCommand("nmcli")) {
-        setStatus(st, "Wi-Fi の設定には NetworkManager(nmcli)が必要です", false);
+    if (st.frame) |f| if (!f.app.syswatch.nmRunning()) {
+        setStatus(st, "Wi-Fi の設定には NetworkManager が必要です(動いていません)", false);
         return;
-    }
+    };
     // 一覧は NetworkManager が覚えている結果をすぐ出し(十数 ms)、スキャンは待たずに頼むだけにする。
     // スキャンが終わると NetworkManager のシグナルで syswatch がもう一度ここを呼ぶ(--rescan auto/yes は
     // 終わるまで最大 5 秒ほど返らず、その間ほかの操作も列で待たされていた)
@@ -433,12 +431,8 @@ pub fn refreshWifi(st: *State, rescan: bool) void {
 
 pub fn refreshBt(st: *State) void {
     if (is_bsd) return refreshBtBsd(st);
-    if (!sys.hasCommand("bluetoothctl")) {
-        setStatus(st, "Bluetooth の設定には BlueZ(bluetoothctl)が必要です", false);
-        return;
-    }
     if (st.frame) |f| if (!f.app.syswatch.bluezRunning()) {
-        // bluetoothd が動いていないと bluetoothctl はデーモンを待って返らず、列が詰まる
+        // bluetoothd が動いていないと、呼び出しが応答を待って止まり列が詰まる
         setStatus(st, "Bluetooth のサービス(bluetoothd)が動いていません", true);
         return;
     };
@@ -935,9 +929,7 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
             push(st, makeJob(.wifi_down, &.{ "nmcli", "radio", "wifi", if (st.wifi_on) "on" else "off" }, if (st.wifi_on) "Wi-Fi をオンにしました" else "Wi-Fi をオフにしました"));
         } else {
             st.bt_on = !st.bt_on;
-            var sb: [128]u8 = undefined;
-            const script = btScript(f, &sb);
-            push(st, makeJob(.bt_power, &.{ "sh", script, "--power", if (st.bt_on) "on" else "off" }, if (st.bt_on) "Bluetooth をオンにしました" else "Bluetooth をオフにしました"));
+            push(st, makeJob(.bt_power, &.{ "ame-bt", "power", if (st.bt_on) "on" else "off" }, if (st.bt_on) "Bluetooth をオンにしました" else "Bluetooth をオフにしました"));
         }
         return true;
     }
@@ -988,13 +980,13 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
             setStatus(st, "接続しています…(イヤホンはケースの蓋を開けておく)", false);
             var sb: [128]u8 = undefined;
             const script = std.fmt.bufPrint(&sb, "{s}/bt-connect.sh", .{f.app.shareDir()}) catch "bt-connect.sh";
-            push(st, makeJob(.bt_action, &.{ "sh", script, mac }, std.fmt.bufPrint(&msg, "{s} に接続しました", .{d.name()}) catch "接続しました"));
+            push(st, makeJob(.bt_action, &.{ "ame-bt", "connect", mac, script }, std.fmt.bufPrint(&msg, "{s} に接続しました", .{d.name()}) catch "接続しました"));
         } else {
             // 未ペア: ペアリング → 信頼 → 接続 を順に(引数はシェル展開されない位置引数で渡す)
             setStatus(st, "ペアリングしています…", false);
             var sb: [128]u8 = undefined;
             const script = std.fmt.bufPrint(&sb, "{s}/bt-connect.sh", .{f.app.shareDir()}) catch "bt-connect.sh";
-            push(st, makeJob(.bt_action, &.{ "sh", script, "--pair", mac }, std.fmt.bufPrint(&msg, "{s} とペアリングしました", .{d.name()}) catch "ペアリングしました"));
+            push(st, makeJob(.bt_action, &.{ "ame-bt", "pair", mac, script }, std.fmt.bufPrint(&msg, "{s} とペアリングしました", .{d.name()}) catch "ペアリングしました"));
         }
     }
     return true;

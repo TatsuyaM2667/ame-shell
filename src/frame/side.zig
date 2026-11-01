@@ -10,6 +10,7 @@ const gfx = @import("../gfx.zig");
 const theme = @import("../theme.zig");
 const surface = @import("../surface.zig");
 const sys = @import("../platform/sys.zig");
+const netdbus = @import("../platform/netdbus.zig");
 const data = @import("data.zig");
 const vbar = @import("vbar.zig");
 const Frame = @import("frame.zig").Frame;
@@ -178,15 +179,12 @@ fn utilPress(f: *Frame, i: usize) void {
     var out: [128]u8 = undefined;
     switch (b) {
         .wifi => {
-            _ = sys.run(&.{ "nmcli", "radio", "wifi", if (app.dashboard.store.wifi_on != 0) "off" else "on" }, &out);
+            _ = netdbus.run(&.{ "nmcli", "radio", "wifi", if (app.dashboard.store.wifi_on != 0) "off" else "on" }, &out);
             app.dashboard.queryRadiosPub();
         },
         .bt => {
-            // data/bt-connect.sh: 入れるときは rfkill のブロックも外す(外さないと BlueZ は電源を入れられない)
-            var sb: [160]u8 = undefined;
-            if (std.fmt.bufPrintZ(&sb, "{s}/bt-connect.sh", .{app.shareDir()})) |script| {
-                _ = sys.run(&.{ "sh", script.ptr, "--power", if (app.dashboard.store.bt_on != 0) "off" else "on" }, &out);
-            } else |_| {}
+            // 入れるときは rfkill のブロックも外す(外さないと BlueZ は電源を入れられない)。D-Bus で直接(platform/netdbus.zig)
+            _ = netdbus.run(&.{ "ame-bt", "power", if (app.dashboard.store.bt_on != 0) "off" else "on" }, &out);
             app.dashboard.queryRadiosPub();
             f.bar.bt_on = app.dashboard.store.bt_on != 0;
         },
