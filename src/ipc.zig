@@ -87,6 +87,7 @@ const help =
     \\  window close|fullscreen|float|focus-next|focus-prev|swap-next|swap-prev
     \\  screenshot region|full|clip   (範囲 / 全体を ~/Pictures/Screenshots に保存してコピー / 全体をコピーだけ)
     \\  avatar pick           (ユーザーの写真をファイル選択の画面から選ぶ)
+    \\  media play-pause|next|previous   (再生中の曲の操作)
     \\  lock
     \\  reload                 (設定の再読込)
     \\  widgets reload
@@ -210,6 +211,9 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
     } else if (eq(u8, cmd, "avatar")) {
         if (!eq(u8, arg, "pick")) return "error: avatar pick";
         app.wallpick.openAvatarFile();
+    } else if (eq(u8, cmd, "media")) {
+        // 再生中の曲の操作(MPRIS を D-Bus で。playerctl は使わない)
+        if (eq(u8, arg, "play-pause") or eq(u8, arg, "toggle")) app.media.toggle() else if (eq(u8, arg, "next")) app.media.next() else if (eq(u8, arg, "previous") or eq(u8, arg, "prev")) app.media.prev() else return "error: media play-pause|next|previous";
     } else if (eq(u8, cmd, "screenshot")) {
         const k = @import("shot.zig").Kind.parse(if (arg.len > 0) arg else "region") orelse return "error: screenshot region|full|clip";
         @import("shot.zig").take(app, k, 0);

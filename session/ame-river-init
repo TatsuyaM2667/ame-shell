@@ -56,9 +56,9 @@ for mode in normal locked; do
     riverctl map $mode None XF86AudioMute spawn "ame-ctl volume mute"
     riverctl map $mode None XF86MonBrightnessUp spawn "ame-ctl brightness up"
     riverctl map $mode None XF86MonBrightnessDown spawn "ame-ctl brightness down"
-    riverctl map $mode None XF86AudioPlay spawn "playerctl play-pause"
-    riverctl map $mode None XF86AudioNext spawn "playerctl next"
-    riverctl map $mode None XF86AudioPrev spawn "playerctl previous"
+    riverctl map $mode None XF86AudioPlay spawn "ame-ctl media play-pause"
+    riverctl map $mode None XF86AudioNext spawn "ame-ctl media next"
+    riverctl map $mode None XF86AudioPrev spawn "ame-ctl media previous"
 done
 
 # ---- レイアウト ----

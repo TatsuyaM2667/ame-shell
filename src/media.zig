@@ -1,4 +1,4 @@
-// メディア(MPRIS): `playerctl --follow` を常駐させ、出力行が来たときだけ状態を更新する
+// メディア(MPRIS): 音楽プレイヤーと D-Bus で直接やりとりする(src/mpris.zig)。信号が来たときだけ状態を更新する
 // (ポーリングしない)。アルバムアートは file:// ならそのまま、http(s) なら curl で
 // キャッシュへ取得(完了を pipe の EOF で検知)。読み込んだ画像から Odin で主色を抽出し、
 // テーマのアクセント色をその色へ滑らかに遷移させる。
@@ -10,6 +10,7 @@ const App = @import("app.zig").App;
 const c = @import("c.zig");
 const gfx = @import("gfx.zig");
 const Lyrics = @import("lyrics.zig").Lyrics;
+const Mpris = @import("mpris.zig").Mpris;
 const loop = @import("platform/loop.zig");
 const sys = @import("platform/sys.zig");
 const theme = @import("theme.zig");
@@ -46,6 +47,8 @@ pub const Media = struct {
     shuffle: bool = false,
     loop_mode: u8 = 0, // 0=なし 1=プレイリスト 2=1 曲
     last_resync_ms: u64 = 0,
+    /// 音楽プレイヤーとのやりとり(D-Bus の MPRIS。playerctl は使わない)
+    mpris: ?*Mpris = null,
 
     pub fn create(app: *App) !*Media {
         const self = try app.alloc.create(Media);
@@ -58,7 +61,6 @@ pub const Media = struct {
                 a.dashboard.dataChanged();
             }
         }.f;
-        try app.loop.add(self.restart_timer.fd, c.EPOLLIN, self, onRestart);
         // 再生アプリ(music-tui)が歌詞ファイルを書くのは、歌詞を取得できた後(曲が変わった通知より遅い)。
         // 曲の情報は変わったときしか通知されないので、ファイルそのものを見張って拾う
         if (std.posix.getenv("XDG_RUNTIME_DIR")) |rd| {
@@ -80,44 +82,8 @@ pub const Media = struct {
     }
 
     fn start(self: *Media) void {
-        // \t 区切りで1行1イベント。position はイベント時点の値(以降は時間で外挿)
-        const fmt = "{{status}}\t{{playerName}}\t{{artist}}\t{{title}}\t{{mpris:artUrl}}\t{{mpris:length}}\t{{position}}\t{{xesam:album}}";
-        const fd = sys.spawnReader(&.{ "playerctl", "--follow", "metadata", "--format", fmt }, &self.pid) orelse {
-            std.log.info("media: playerctl が無いのでメディア表示は無効", .{});
-            return;
-        };
-        self.fd = fd;
-        self.app.loop.add(fd, c.EPOLLIN, self, onRead) catch {};
-    }
-
-    fn onRestart(ctx: *anyopaque, _: c_int, _: u32) void {
-        const self: *Media = @ptrCast(@alignCast(ctx));
-        self.restart_timer.ack();
-        self.start();
-    }
-
-    fn onRead(ctx: *anyopaque, fd: c_int, _: u32) void {
-        const self: *Media = @ptrCast(@alignCast(ctx));
-        while (true) {
-            const n = c.read(fd, self.linebuf[self.line_len..].ptr, self.linebuf.len - self.line_len);
-            if (n == 0) {
-                // playerctl が終了した → 少し待って再起動(落ち続けても 10 秒間隔なので負荷は無い)
-                self.app.loop.remove(fd);
-                _ = c.close(fd);
-                self.fd = -1;
-                self.restart_timer.arm(10_000, 0);
-                return;
-            }
-            if (n < 0) break;
-            self.line_len += @intCast(n);
-            while (std.mem.indexOfScalar(u8, self.linebuf[0..self.line_len], '\n')) |nl| {
-                self.parseLine(self.linebuf[0..nl]);
-                const rest = self.line_len - nl - 1;
-                std.mem.copyForwards(u8, self.linebuf[0..rest], self.linebuf[nl + 1 .. self.line_len]);
-                self.line_len = rest;
-            }
-            if (self.line_len == self.linebuf.len) self.line_len = 0; // 異常に長い行は捨てる
-        }
+        // 曲の情報は D-Bus(MPRIS)の信号で受け取る(playerctl の常駐プロセスは使わない)
+        if (self.mpris == null) self.mpris = Mpris.create(self.app, self);
     }
 
     fn set(dst: []u8, len: *usize, src: []const u8) void {
@@ -128,34 +94,22 @@ pub const Media = struct {
         if (len.* > 0 and len.* < src.len and dst[len.* - 1] >= 0xC0) len.* -= 1;
     }
 
-    fn parseLine(self: *Media, line: []const u8) void {
-        var f = std.mem.splitScalar(u8, line, '\t');
-        const status = f.next() orelse "";
-        const player = f.next() orelse "";
-        const artist = f.next() orelse "";
-        const title = f.next() orelse "";
-        const art = f.next() orelse "";
-        const len_us = f.next() orelse "";
-        const pos_us = f.next() orelse "";
-        const album = f.next() orelse "";
+    /// MPRIS(src/mpris.zig)から: 今のプレイヤーの状態をまとめて反映する
+    pub fn applyState(self: *Media, playing: ?bool, player: []const u8, artist: []const u8, title: []const u8, art: []const u8, length_s: f32, pos_s: f32, album: []const u8) void {
         const prev_status = self.status;
-        self.status = if (std.mem.eql(u8, status, "Playing")) .playing else if (std.mem.eql(u8, status, "Paused")) .paused else .none;
+        self.status = if (playing) |p| (if (p) .playing else .paused) else .none;
         set(&self.player, &self.player_len, player);
         set(&self.artist, &self.artist_len, artist);
         set(&self.title, &self.title_len, title);
         set(&self.album, &self.album_len, album);
-        self.length_s = (std.fmt.parseFloat(f32, len_us) catch 0) / 1e6;
-        // ライブ配信などは長さが無意味な値(数日以上)になるので「不明」扱いにする
-        if (self.length_s > 86400) self.length_s = 0;
-        self.pos_s = (std.fmt.parseFloat(f32, pos_us) catch 0) / 1e6;
+        self.length_s = if (length_s > 86400) 0 else length_s;
+        self.pos_s = pos_s;
         self.pos_at_ms = loop.nowMs();
         if (!std.mem.eql(u8, art, self.art_url[0..self.art_len])) {
             set(&self.art_url, &self.art_len, art);
             self.loadArt();
         }
-        // 曲が変わったら歌詞を取りに行く(同じ曲なら何もしない)
         if (self.status != .none) self.lyrics.request(self.artist[0..self.artist_len], self.title[0..self.title_len], self.length_s);
-        // 再生アプリ自身の歌詞ファイル(music-tui)があればそちらを優先
         if (self.status != .none) self.lyrics.trySidecar(self.player[0..self.player_len]);
         if (self.status == .none and prev_status != .none) {
             self.dropArt();
@@ -245,16 +199,13 @@ pub const Media = struct {
 
     // ---- 操作 ----
     pub fn toggle(self: *Media) void {
-        _ = self;
-        sys.spawnDetached("playerctl play-pause");
+        if (self.mpris) |m| m.playPause();
     }
     pub fn next(self: *Media) void {
-        _ = self;
-        sys.spawnDetached("playerctl next");
+        if (self.mpris) |m| m.next();
     }
     pub fn prev(self: *Media) void {
-        _ = self;
-        sys.spawnDetached("playerctl previous");
+        if (self.mpris) |m| m.previous();
     }
     pub const resyncPosition = resync;
     pub const debugFake = debugFakeImpl;
@@ -276,52 +227,38 @@ fn usable(col: Color) Color {
 
 // ---- 歌詞表示のための補助(Media のメソッドとして使う) ----
 
-/// playerctl --follow は再生位置の変化(シーク)を通知しないので、歌詞を表示している間だけ
-/// 3 秒おきに実際の位置を聞き直してずれを補正する。
+/// 再生位置のずれの補正: 歌詞を表示している間だけ、3 秒おきにプレイヤーへ位置を聞く(MPRIS の Position)。
+/// シーク(Seeked の信号)と再生状態の変化は信号で受け取っているので、これは念のための補正
 pub fn resync(self: *Media) void {
     if (self.status != .playing) return;
     if (loop.nowMs() -| self.last_resync_ms < 3000) return;
     self.last_resync_ms = loop.nowMs();
-    var out: [64]u8 = undefined;
-    const s = sys.run(&.{ "playerctl", "position" }, &out) orelse return;
-    const p = std.fmt.parseFloat(f32, s) catch return;
+    const m = self.mpris orelse return;
+    const p = m.position() orelse return;
     self.pos_s = p;
     self.pos_at_ms = loop.nowMs();
 }
 
 /// 再生位置を sec 秒へ(歌詞の行をクリックしたとき)。表示はすぐに新しい位置から進める
 pub fn seekTo(self: *Media, sec: f32) void {
-    var buf: [64]u8 = undefined;
-    const cmd = std.fmt.bufPrintZ(&buf, "playerctl position {d:.2}", .{@max(sec, 0)}) catch return;
-    sys.spawnDetached(cmd.ptr);
+    if (self.mpris) |m| m.seek(sec);
     self.pos_s = @max(sec, 0);
     self.pos_at_ms = loop.nowMs();
     // 直後の位置問い合わせが古い位置を返すことがあるので、次の補正は少し後に
     self.last_resync_ms = loop.nowMs();
 }
 
-/// シャッフル・リピートの状態を問い合わせる(メディア画面を開いたとき)
+/// シャッフル・リピートの状態(MPRIS の信号で常に最新。ここでは何もしない)
 pub fn queryModes(self: *Media) void {
-    var out: [64]u8 = undefined;
-    if (sys.run(&.{ "playerctl", "shuffle" }, &out)) |s| self.shuffle = std.mem.eql(u8, s, "On");
-    if (sys.run(&.{ "playerctl", "loop" }, &out)) |s| self.loop_mode = if (std.mem.eql(u8, s, "Playlist")) 1 else if (std.mem.eql(u8, s, "Track")) 2 else 0;
+    _ = self;
 }
 
 pub fn toggleShuffle(self: *Media) void {
-    var out: [8]u8 = undefined;
-    _ = sys.run(&.{ "playerctl", "shuffle", "toggle" }, &out);
-    queryModes(self);
+    if (self.mpris) |m| m.toggleShuffle();
 }
 
 pub fn cycleLoop(self: *Media) void {
-    const next: [*:0]const u8 = switch (self.loop_mode) {
-        0 => "Playlist",
-        1 => "Track",
-        else => "None",
-    };
-    var out: [8]u8 = undefined;
-    _ = sys.run(&.{ "playerctl", "loop", next }, &out);
-    queryModes(self);
+    if (self.mpris) |m| m.cycleLoop();
 }
 
 /// 試験用: 実際のプレイヤー無しで「再生中」の状態を作る(ipc の debug-media から。AME_DEBUG 時のみ)
@@ -340,7 +277,7 @@ pub fn debugFakeImpl(self: *Media, spec: []const u8) void {
     self.length_s = len;
     self.pos_s = pos;
     self.pos_at_ms = loop.nowMs();
-    self.last_resync_ms = loop.nowMs() + 3_600_000; // 本物の playerctl で上書きしない
+    self.last_resync_ms = loop.nowMs() + 3_600_000; // 本物のプレイヤーの位置で上書きしない
     self.lyrics.request(artist, title, len);
     self.lyrics.trySidecar("demo");
     self.app.dashboard.dataChanged();

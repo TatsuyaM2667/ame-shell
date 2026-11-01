@@ -97,7 +97,7 @@ REQUIRED="
  mesa-libs mesa-dri libglvnd libxkbcommon xkeyboard-config freetype2 harfbuzz fontconfig dbus
  libepoll-shim libinotify
  river sddm xorg-minimal seatd foot curl
- playerctl swaylock grim slurp wl-clipboard hicolor-icon-theme adwaita-icon-theme pulseaudio
+ swaylock grim slurp wl-clipboard hicolor-icon-theme adwaita-icon-theme pulseaudio
 "
 # あれば使う: 無ければ飛ばす(その機能だけ使えない)。"a|b" は「a が無ければ b」
 OPTIONAL="

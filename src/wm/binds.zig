@@ -74,9 +74,9 @@ const fixed = [_]Bind{
     .{ .keysym = c.XKB_KEY_XF86AudioMute, .mods = NONE, .action = .{ .ame = "volume mute" } },
     .{ .keysym = c.XKB_KEY_XF86MonBrightnessUp, .mods = NONE, .action = .{ .ame = "brightness up" } },
     .{ .keysym = c.XKB_KEY_XF86MonBrightnessDown, .mods = NONE, .action = .{ .ame = "brightness down" } },
-    .{ .keysym = c.XKB_KEY_XF86AudioPlay, .mods = NONE, .action = .{ .spawn = "playerctl play-pause" } },
-    .{ .keysym = c.XKB_KEY_XF86AudioNext, .mods = NONE, .action = .{ .spawn = "playerctl next" } },
-    .{ .keysym = c.XKB_KEY_XF86AudioPrev, .mods = NONE, .action = .{ .spawn = "playerctl previous" } },
+    .{ .keysym = c.XKB_KEY_XF86AudioPlay, .mods = NONE, .action = .{ .ame = "media play-pause" } },
+    .{ .keysym = c.XKB_KEY_XF86AudioNext, .mods = NONE, .action = .{ .ame = "media next" } },
+    .{ .keysym = c.XKB_KEY_XF86AudioPrev, .mods = NONE, .action = .{ .ame = "media previous" } },
 };
 
 /// 1〜9 のタグ操作を足した全バインド

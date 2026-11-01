@@ -516,7 +516,7 @@ fi
 if command -v ghostty >/dev/null 2>&1 || [ -x "$DESTDIR$PREFIX/bin/ghostty" ]; then say "  [ok] ghostty"; else chk foot foot "端末(ghostty が無いので foot)" "terminal (foot; ghostty not found)"; fi
 chk zsh zsh "端末のシェル" "terminal shell"
 chk dbus-run-session dbus "D-Bus" "D-Bus"
-chk playerctl playerctl "メディア" "media"
+
 
 chk grim grim "スクショ" "screenshots"
 chk slurp slurp "範囲のスクショ" "region screenshots"
