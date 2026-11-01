@@ -24,8 +24,23 @@ export AME_GREETER=1
 export XDG_SESSION_TYPE=wayland
 export XDG_CURRENT_DESKTOP=river
 export XDG_SESSION_DESKTOP=ame-greeter
-# 状態(ame-shell の state)は greeter のユーザーのホームに
+# 状態(ame-shell の state)は greeter のユーザーのホームに。無いと ame-river5-init のログの
+# リダイレクトに失敗して ame-shell が起動せず、greetd が数秒おきに起動し直す(カーソルが点滅し続ける)ので作る
 export XDG_STATE_HOME="${HOME:-/tmp}/.local/state"
+mkdir -p "$XDG_STATE_HOME/ame-shell" 2>/dev/null
+
+# ---- 閉じ込め防止 ----
+# greetd は greeter が終わるとすぐ起動し直し、そのたびに画面を VT7 へ切り替える(TTY に逃げても戻される)。
+# 60 秒以内に 3 回起動したら、ame-shell のログイン画面はあきらめて greetd 付属の文字のログイン(agreety)にする
+STARTS="${HOME:-/tmp}/ame-greeter-starts"
+now=$(date +%s)
+recent=$(awk -v now="$now" '$1 > now - 60' "$STARTS" 2>/dev/null)
+printf '%s\n%s\n' "$recent" "$now" | grep -v '^$' > "$STARTS.new" 2>/dev/null && mv -f "$STARTS.new" "$STARTS" 2>/dev/null
+if [ "$(grep -c . "$STARTS" 2>/dev/null || echo 0)" -ge 3 ] && command -v agreety >/dev/null 2>&1; then
+    log "ログイン画面が 60 秒以内に 3 回起動したため、文字のログイン(agreety)にします / falling back to agreety (log: $LOG)"
+    : > "$STARTS"
+    exec agreety --cmd "$SELF_DIR/ame-session --river5"
+fi
 
 # カーソル: ame-shell のテーマ(無ければ Adwaita)
 export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"

@@ -11,7 +11,8 @@
 REF_PX_PER_MM=6.4      # 1920px / 300mm
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}/ame-shell/output-scale"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ame-shell"
-log() { printf '%s [display-scale] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$STATE_DIR/session.log"; }
+mkdir -p "$STATE_DIR" 2>/dev/null
+log() { printf '%s [display-scale] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$STATE_DIR/session.log" 2>/dev/null; }
 
 command -v wlr-randr >/dev/null 2>&1 || { log "wlr-randr がないため拡大率は変えません / wlr-randr not found"; exit 0; }
 

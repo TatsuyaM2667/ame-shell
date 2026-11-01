@@ -6,6 +6,12 @@
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ame-shell"
 LOG="$STATE_DIR/session.log"
+# ログの置き場が無い・書けないと、ame-shell >> "$LOG" のリダイレクトに失敗して ame-shell 自体が起動しない
+# (ログイン画面の _greetd ユーザーで起きた: カーソルが点滅し続ける再起動の繰り返し)。作れなければログは捨てる
+mkdir -p "$STATE_DIR" 2>/dev/null
+if ! { : >> "$LOG"; } 2>/dev/null; then
+    LOG=/dev/null
+fi
 log() { printf '%s [river5-init] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
 
 log "WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-?}"
