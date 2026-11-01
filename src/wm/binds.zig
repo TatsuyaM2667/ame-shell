@@ -26,7 +26,8 @@ const fixed = [_]Bind{
     // ファイルマネージャ(thunar。無ければフォルダを開く既定のアプリ)
     .{ .keysym = c.XKB_KEY_e, .mods = SUPER, .action = .{ .spawn = "command -v thunar >/dev/null 2>&1 && exec thunar || exec xdg-open \"$HOME\"" } },
     .{ .keysym = c.XKB_KEY_s, .mods = SUPER, .action = .{ .spawn = "$HOME/.local/bin/control-center.sh" } },
-    .{ .keysym = c.XKB_KEY_r, .mods = SUPER | SHIFT, .action = .{ .spawn = "$HOME/.local/bin/toggle-record.sh" } },
+    // ame-shell を読み込み直す(更新を入れた後など。窓はそのまま)。録画はサイドバーのボタンから
+    .{ .keysym = c.XKB_KEY_r, .mods = SUPER | SHIFT, .action = .{ .ame = "restart" } },
     // ame-shell
     .{ .keysym = c.XKB_KEY_d, .mods = SUPER, .action = .{ .ame = "launcher toggle" } },
     .{ .keysym = c.XKB_KEY_a, .mods = SUPER, .action = .{ .ame = "dashboard toggle" } },
