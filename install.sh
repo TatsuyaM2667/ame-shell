@@ -111,44 +111,68 @@ fi
 
 # ---------------------------------------------------------------------------
 say "1/4 依存パッケージ"
-# ビルドに必要なもの / 動かすのに必要なもの / River 0.5 のビルドに必要なもの(Chimera Linux の名前)
-APK_BUILD="git curl bash clang llvm-devel pkgconf wayland-devel wayland-progs mesa-devel libxkbcommon-devel freetype-devel harfbuzz-devel fontconfig-devel dbus-devel"
-APK_RUN="sddm foot dbus playerctl cava pipewire wireplumber libpulse-progs mpv-libs ffmpeg grim slurp wl-clipboard swaylock brightnessctl networkmanager bluez xdg-desktop-portal-wlr fonts-noto-sans-cjk-otf fonts-nerd-jetbrains-mono"
-APK_RIVER="wlroots0.20-devel wayland-protocols libevdev-devel pixman-devel libinput-devel xwayland xwayland-devel"
+# Chimera Linux のパッケージ名(すべて `apk search -e` で実在を確認済み)。
+# APK_BUILD / APK_RIVER / APK_RUN は必須: 入れられなければ止める。APK_OPT は無くても動く(その機能だけ使えない)
+#   ビルド: ame-shell と Odin のビルドに必要なもの
+APK_BUILD="git curl bash clang llvm-devel linux-headers pkgconf wayland-devel wayland-progs wayland-protocols
+ mesa-devel libdrm-devel libxkbcommon-devel freetype-devel harfbuzz-devel fontconfig-devel dbus-devel linux-pam-devel"
+#   River 0.5 のビルド(Chimera のリポジトリには river が無いので必ずソースから作る)
+APK_RIVER="wlroots0.20-devel libevdev-devel pixman-devel libinput-devel xwayland xwayland-devel"
+#   動かすのに必要なもの。pipewire-pulse は pipewire パッケージに含まれる
+#   (スクショ: grim slurp wl-clipboard / 波形: cava / 音量・Bluetooth の音: libpulse-progs(pactl)/ 無線: util-linux-rfkill)
+APK_RUN="sddm foot dbus mesa-dri polkit playerctl cava pipewire wireplumber libpulse-progs mpv-libs ffmpeg
+ grim slurp wl-clipboard swaylock brightnessctl util-linux-rfkill networkmanager bluez
+ xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
+ fonts-noto-sans-cjk-otf fonts-nerd-jetbrains-mono fonts-nerd-symbols-only adwaita-icon-theme hicolor-icon-theme"
+APK_OPT="fastfetch wf-recorder wlr-randr"
 NEED_CMDS="git curl clang wayland-scanner pkg-config"
-# 新規インストール直後の Chimera で不足していたもの
-APK_BUILD="$APK_BUILD bash curl llvm-devel linux-headers pkgconf wayland-devel wayland-protocols wlroots0.20-devel libxkbcommon-devel pixman-devel libinput-devel libevdev-devel dbus-devel mesa-devel freetype-devel harfbuzz-devel fontconfig-devel libdrm-devel linux-pam-devel"
-APK_RUN="$APK_RUN mesa-dri foot sddm playerctl fonts-noto-sans-cjk fonts-nerd-symbols-only adwaita-icon-theme hicolor-icon-theme"
+# 動かすのに欠かせないコマンド(パッケージを入れた後に確かめる)
+RUN_CMDS="foot sddm dbus-run-session playerctl cava pactl grim slurp wl-copy swaylock brightnessctl rfkill nmcli bluetoothctl"
 # Odin のビルドは llvm-config という名前を探せないため明示する
 export LLVM_CONFIG="${LLVM_CONFIG:-llvm-config}"
 if [ "$NO_DEPS" = 1 ]; then
     info "(--no-deps のため省略)"
 elif command -v apk >/dev/null 2>&1 && grep -q "^ID=chimera" /etc/os-release 2>/dev/null; then
+    # 未導入のものを「必須」「任意」に分けて集める。必須なのにリポジトリに無いものは止める
     missing=""
     unavailable=""
-    for p in $APK_BUILD $APK_RUN $APK_RIVER; do
+    for p in $APK_BUILD $APK_RIVER $APK_RUN; do
         apk info -e "$p" >/dev/null 2>&1 && continue
-        if [ -n "$(apk search -qe "$p" 2>/dev/null)" ]; then
-            missing="$missing $p"
-        else
-            unavailable="$unavailable $p"
-        fi
+        if [ -n "$(apk search -qe "$p" 2>/dev/null)" ]; then missing="$missing $p"; else unavailable="$unavailable $p"; fi
     done
-    [ -n "$unavailable" ] && info "リポジトリに無いため飛ばします:$unavailable"
-    if [ -z "$missing" ]; then
+    opt_missing=""
+    for p in $APK_OPT; do
+        apk info -e "$p" >/dev/null 2>&1 && continue
+        [ -n "$(apk search -qe "$p" 2>/dev/null)" ] && opt_missing="$opt_missing $p"
+    done
+    [ -n "$unavailable" ] && die "必須のパッケージがリポジトリにありません:$unavailable
+    (doas apk update を実行してからやり直してください。それでも無ければ不具合として報告してください)"
+    if [ -z "$missing$opt_missing" ]; then
         info "すべて導入済み"
     elif [ "$SU" = none ]; then
-        info "root 権限が無いため、次のパッケージは入れられません:$missing"
+        die "root 権限(doas / sudo)が無いため、次のパッケージを入れられません。入れてから再実行してください:
+      doas apk add$missing$opt_missing"
     else
-        info "インストール:$missing"
+        info "インストール:$missing$opt_missing"
+        # まとめて入れられなければ 1 つずつ(どれが原因か分かるように)。必須が入らなければ止める
         # shellcheck disable=SC2086
-        as_root apk add $missing || info "一部のパッケージを入れられませんでした(続けます)"
+        if ! as_root apk add $missing $opt_missing; then
+            failed=""
+            for p in $missing; do as_root apk add "$p" || failed="$failed $p"; done
+            for p in $opt_missing; do as_root apk add "$p" || info "  (任意のため飛ばしました: $p)"; done
+            [ -n "$failed" ] && die "必須のパッケージを入れられませんでした:$failed"
+        fi
     fi
+    lack=""
+    for cmd in $RUN_CMDS; do command -v "$cmd" >/dev/null 2>&1 || lack="$lack $cmd"; done
+    [ -n "$lack" ] && die "パッケージを入れた後も次のコマンドが見つかりません:$lack"
+    info "必須のコマンドはすべてあります($RUN_CMDS)"
 else
     info "このディストリのパッケージは自動では入れません。ビルドには次のコマンドとライブラリの開発ファイルが必要です:"
     info "  コマンド: $NEED_CMDS"
     info "  ライブラリ: wayland, EGL/GLESv2(mesa), xkbcommon, freetype, harfbuzz, fontconfig, dbus"
-    for cmd in $NEED_CMDS; do command -v "$cmd" >/dev/null 2>&1 || info "  見つかりません: $cmd"; done
+    info "  動かすのに必要なコマンド: $RUN_CMDS"
+    for cmd in $NEED_CMDS $RUN_CMDS; do command -v "$cmd" >/dev/null 2>&1 || info "  見つかりません: $cmd"; done
 fi
 
 # ---------------------------------------------------------------------------
