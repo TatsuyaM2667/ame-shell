@@ -32,13 +32,26 @@ pub const SysWatch = struct {
     /// バッテリーの通知: 0 = まだ / 1 = 20% / 2 = 10% / 3 = 5% を知らせた(電源につなぐと 0 に戻る)
     bat_level: u8 = 0,
     bat_notif: u32 = 0,
+    /// 充電器の抜き差しの通知(電源の状態の前回の値・通知の番号・満充電までの時間を出せたか)
+    prev_ac: ?bool = null,
+    chg_notif: u32 = 0,
+    chg_has_time: bool = false,
+    chg_tries: u8 = 0,
+    /// 挿した直後は消費電力が落ち着かず時間を出せないので、少し後にもう一度読む
+    chg_timer: loop.Timer,
+    /// 挿した機器: 名前・種類・ボリュームの名前がそろうまで少し待ってから知らせる(Linux)
+    pend: [6]Pending = [_]Pending{.{}} ** 6,
+    n_pend: usize = 0,
+    pend_timer: loop.Timer,
     /// 接続中の USB 機器の名前(抜いたときに名前を出すため。キーは sysfs の DEVPATH / FreeBSD の ugenX.Y)
     usb: [24]UsbDev = [_]UsbDev{.{}} ** 24,
 
     pub fn create(app: *App) !*SysWatch {
         const self = try app.alloc.create(SysWatch);
-        self.* = .{ .app = app, .debounce = try loop.Timer.init() };
+        self.* = .{ .app = app, .debounce = try loop.Timer.init(), .chg_timer = try loop.Timer.init(), .pend_timer = try loop.Timer.init() };
+        try app.loop.add(self.pend_timer.fd, c.EPOLLIN, self, onPend);
         try app.loop.add(self.debounce.fd, c.EPOLLIN, self, onDebounce);
+        try app.loop.add(self.chg_timer.fd, c.EPOLLIN, self, onChgTimer);
         if (builtin.os.tag == .linux) {
             self.openUevent();
             self.seedUsb();
@@ -78,6 +91,7 @@ pub const SysWatch = struct {
             if (std.mem.indexOf(u8, msg, "SUBSYSTEM=power_supply") != null) self.mark(.power);
             if (std.mem.indexOf(u8, msg, "SUBSYSTEM=net\x00") != null) self.mark(.net);
             if (std.mem.indexOf(u8, msg, "SUBSYSTEM=usb\x00") != null) self.usbUevent(msg);
+            if (std.mem.indexOf(u8, msg, "SUBSYSTEM=block\x00") != null) self.blockUevent(msg);
         }
     }
 
@@ -127,6 +141,9 @@ pub const SysWatch = struct {
             const path = std.mem.sliceTo(c.dbus_message_get_path(msg) orelse continue, 0);
             if (std.mem.startsWith(u8, path, "/org/bluez")) {
                 self.mark(.bt);
+                if (self.app.cfg.notify_usb and std.mem.indexOf(u8, path, "/dev_") != null and
+                    c.dbus_message_is_signal(msg, "org.freedesktop.DBus.Properties", "PropertiesChanged") != 0)
+                    self.btConnectedSignal(msg, path);
             } else if (std.mem.startsWith(u8, path, "/org/freedesktop/NetworkManager")) {
                 self.mark(.net);
             } else if (c.dbus_message_is_signal(msg, "org.freedesktop.DBus", "NameOwnerChanged") != 0) {
@@ -136,6 +153,70 @@ pub const SysWatch = struct {
                 }
             }
         }
+    }
+
+    /// Bluetooth の機器がつながった・切れた(BlueZ の Device1 の Connected)。名前と種類を通知する
+    fn btConnectedSignal(self: *SysWatch, msg: *c.DBusMessage, path: []const u8) void {
+        var it: c.DBusMessageIter = undefined;
+        if (c.dbus_message_iter_init(msg, &it) == 0 or c.dbus_message_iter_get_arg_type(&it) != c.DBUS_TYPE_STRING) return;
+        var iface: [*c]const u8 = null;
+        c.dbus_message_iter_get_basic(&it, @ptrCast(&iface));
+        if (iface == null or !std.mem.eql(u8, std.mem.sliceTo(iface, 0), "org.bluez.Device1")) return;
+        _ = c.dbus_message_iter_next(&it);
+        if (c.dbus_message_iter_get_arg_type(&it) != c.DBUS_TYPE_ARRAY) return;
+        var a: c.DBusMessageIter = undefined;
+        c.dbus_message_iter_recurse(&it, &a);
+        var connected: ?bool = null;
+        while (c.dbus_message_iter_get_arg_type(&a) == c.DBUS_TYPE_DICT_ENTRY) : (_ = c.dbus_message_iter_next(&a)) {
+            var e: c.DBusMessageIter = undefined;
+            c.dbus_message_iter_recurse(&a, &e);
+            var k: [*c]const u8 = null;
+            c.dbus_message_iter_get_basic(&e, @ptrCast(&k));
+            if (k == null or !std.mem.eql(u8, std.mem.sliceTo(k, 0), "Connected")) continue;
+            _ = c.dbus_message_iter_next(&e);
+            var v: c.DBusMessageIter = undefined;
+            c.dbus_message_iter_recurse(&e, &v);
+            if (c.dbus_message_iter_get_arg_type(&v) != c.DBUS_TYPE_BOOLEAN) continue;
+            var b: c.dbus_bool_t = 0;
+            c.dbus_message_iter_get_basic(&v, &b);
+            connected = b != 0;
+        }
+        const on = connected orelse return;
+        var nb: [96]u8 = undefined;
+        var ib: [48]u8 = undefined;
+        const name = self.bluezProp(path, "Alias", &nb) orelse "Bluetooth の機器";
+        const icon = self.bluezProp(path, "Icon", &ib) orelse "";
+        const kind: []const u8 = if (std.mem.startsWith(u8, icon, "audio-head")) "ヘッドホン" else if (std.mem.startsWith(u8, icon, "audio")) "オーディオ機器" else if (std.mem.eql(u8, icon, "input-mouse")) "マウス" else if (std.mem.eql(u8, icon, "input-keyboard")) "キーボード" else if (std.mem.startsWith(u8, icon, "input-gaming")) "ゲームパッド" else if (std.mem.startsWith(u8, icon, "phone")) "スマートフォン" else "Bluetooth の機器";
+        var sb: [96]u8 = undefined;
+        const summary = std.fmt.bufPrint(&sb, "{s}を{s}", .{ kind, if (on) "接続しました" else "切断しました" }) catch "Bluetooth";
+        self.app.notifs.post("Bluetooth", summary, name, 0);
+    }
+
+    /// BlueZ の機器の文字列のプロパティ(同期。すぐ返る)
+    fn bluezProp(self: *SysWatch, path: []const u8, prop: [*:0]const u8, buf: []u8) ?[]const u8 {
+        const conn = self.conn orelse return null;
+        var pz: [160]u8 = undefined;
+        const p = std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return null;
+        const m = c.dbus_message_new_method_call("org.bluez", p.ptr, "org.freedesktop.DBus.Properties", "Get") orelse return null;
+        var i: [*c]const u8 = "org.bluez.Device1";
+        var pr: [*c]const u8 = prop;
+        _ = c.dbus_message_append_args(m, c.DBUS_TYPE_STRING, &i, c.DBUS_TYPE_STRING, &pr, c.DBUS_TYPE_INVALID);
+        const r = c.dbus_connection_send_with_reply_and_block(conn, m, 500, null);
+        c.dbus_message_unref(m);
+        const reply = r orelse return null;
+        defer c.dbus_message_unref(reply);
+        var it: c.DBusMessageIter = undefined;
+        if (c.dbus_message_iter_init(reply, &it) == 0 or c.dbus_message_iter_get_arg_type(&it) != c.DBUS_TYPE_VARIANT) return null;
+        var v: c.DBusMessageIter = undefined;
+        c.dbus_message_iter_recurse(&it, &v);
+        if (c.dbus_message_iter_get_arg_type(&v) != c.DBUS_TYPE_STRING) return null;
+        var s: [*c]const u8 = null;
+        c.dbus_message_iter_get_basic(&v, @ptrCast(&s));
+        if (s == null) return null;
+        const str = std.mem.sliceTo(s, 0);
+        const n = @min(str.len, buf.len);
+        @memcpy(buf[0..n], str[0..n]);
+        return buf[0..n];
     }
 
     const Kind = enum { power, net, bt };
@@ -225,6 +306,11 @@ pub const SysWatch = struct {
         const app = self.app;
         const b = app.sys.battery;
         if (!app.cfg.notify_battery or !b.present) return;
+        // 充電器を挿した・抜いた(状態が変わったときだけ)
+        if (self.prev_ac) |pa| if (pa != b.on_ac) self.acChanged(b);
+        self.prev_ac = b.on_ac;
+        // 挿したときに時間が分からなかった: 分かったら同じ通知を書き換える(1 回だけ)
+        if (self.chg_notif != 0 and b.on_ac and !self.chg_has_time and b.minutes != null) self.postCharging(b);
         if (b.on_ac) {
             if (self.bat_notif != 0) app.notifs.dismiss(self.bat_notif, 3);
             self.bat_notif = 0;
@@ -246,6 +332,69 @@ pub const SysWatch = struct {
         };
         const body = (if (t.len > 0) std.fmt.bufPrint(&bb, "{s}({s})", .{ advice, t }) else std.fmt.bufPrint(&bb, "{s}", .{advice})) catch advice;
         self.bat_notif = app.notifs.postUrgency("バッテリー", summary, body, self.bat_notif, if (lvl >= 2) 2 else 1);
+    }
+
+    fn acChanged(self: *SysWatch, b: sys.Battery) void {
+        const app = self.app;
+        if (b.on_ac) {
+            self.chg_has_time = false;
+            self.chg_tries = 0;
+            self.postCharging(b);
+            // 挿した直後は消費電力の値が落ち着かないので、8 秒後と 30 秒後に読み直して時間を出す
+            self.chg_timer.arm(8_000, 22_000);
+        } else {
+            self.chg_timer.disarm();
+            var sb: [96]u8 = undefined;
+            var tb: [48]u8 = undefined;
+            var bb: [128]u8 = undefined;
+            const t = @import("bar.zig").batteryTime(&tb, b);
+            const summary = std.fmt.bufPrint(&sb, "電源から外しました · {d}%", .{b.percent}) catch "電源から外しました";
+            const body = (if (t.len > 0) std.fmt.bufPrint(&bb, "バッテリーで動作しています({s})", .{t}) else std.fmt.bufPrint(&bb, "バッテリーで動作しています", .{})) catch "";
+            // 充電の通知と同じ枠を使い回す(挿す・抜くを繰り返しても積み重ならない)
+            self.chg_notif = app.notifs.postUrgency("電源", summary, body, self.chg_notif, 1);
+        }
+    }
+
+    /// 「充電しています · 72% / 満充電まであと 1 時間 12 分(14:35 ごろ)」
+    fn postCharging(self: *SysWatch, b: sys.Battery) void {
+        var sb: [96]u8 = undefined;
+        var bb: [160]u8 = undefined;
+        const summary = if (b.full or b.percent >= 100)
+            "充電器を接続しました · 満充電です"
+        else if (!b.charging)
+            (std.fmt.bufPrint(&sb, "充電器を接続しました · {d}%", .{b.percent}) catch "充電器を接続しました")
+        else
+            (std.fmt.bufPrint(&sb, "充電しています · {d}%", .{b.percent}) catch "充電しています");
+        var body: []const u8 = "";
+        if (b.full or b.percent >= 100) {
+            body = "電源から動作しています";
+        } else if (!b.charging) {
+            body = "充電は止まっています(充電の上限・保護モード)";
+        } else if (b.minutes) |m| {
+            // 終わる時刻
+            var t: c.time_t = c.time(null) + @as(c.time_t, @intCast(m)) * 60;
+            var tm: c.struct_tm = undefined;
+            _ = c.localtime_r(&t, &tm);
+            body = (if (m >= 60)
+                std.fmt.bufPrint(&bb, "満充電まであと {d} 時間 {d} 分({d}:{d:0>2} ごろ)", .{ m / 60, m % 60, @as(u32, @intCast(tm.tm_hour)), @as(u32, @intCast(tm.tm_min)) })
+            else
+                std.fmt.bufPrint(&bb, "満充電まであと {d} 分({d}:{d:0>2} ごろ)", .{ m, @as(u32, @intCast(tm.tm_hour)), @as(u32, @intCast(tm.tm_min)) })) catch "";
+        } else {
+            body = "満充電までの時間を計算しています…";
+        }
+        self.chg_has_time = b.minutes != null or b.full or !b.charging;
+        self.chg_notif = self.app.notifs.postUrgency("電源", summary, body, self.chg_notif, 1);
+    }
+
+    fn onChgTimer(ctx: *anyopaque, _: c_int, _: u32) void {
+        const self: *SysWatch = @ptrCast(@alignCast(ctx));
+        self.chg_timer.ack();
+        self.chg_tries += 1;
+        if (self.chg_has_time or self.chg_tries > 6) {
+            self.chg_timer.disarm();
+            return;
+        }
+        self.app.refreshSys(false); // → checkBattery が時間の分かった通知に書き換える
     }
 
     // ---------------- USB(Linux: uevent) ----------------
@@ -324,6 +473,25 @@ pub const SysWatch = struct {
         self.usbUevent(msg);
     }
 
+    const Pending = struct {
+        devpath: [256]u8 = undefined,
+        len: usize = 0,
+        /// ブロックデバイス(USB メモリ・SD カード)なら sdb などの名前
+        blk: [32]u8 = undefined,
+        blk_len: usize = 0,
+    };
+
+    fn pushPending(self: *SysWatch, devpath: []const u8, blk: []const u8, delay_ms: u64) void {
+        if (self.n_pend >= self.pend.len) return;
+        const p = &self.pend[self.n_pend];
+        p.len = @min(devpath.len, p.devpath.len);
+        @memcpy(p.devpath[0..p.len], devpath[0..p.len]);
+        p.blk_len = @min(blk.len, p.blk.len);
+        @memcpy(p.blk[0..p.blk_len], blk[0..p.blk_len]);
+        self.n_pend += 1;
+        self.pend_timer.arm(delay_ms, 0);
+    }
+
     fn usbUevent(self: *SysWatch, msg: []const u8) void {
         if (!self.app.cfg.notify_usb) return;
         const devtype = ueventField(msg, "DEVTYPE") orelse return;
@@ -331,15 +499,128 @@ pub const SysWatch = struct {
         const action = ueventField(msg, "ACTION") orelse return;
         const devpath = ueventField(msg, "DEVPATH") orelse return;
         if (std.mem.eql(u8, action, "add")) {
+            // 挿した瞬間は製品名・インターフェース(種類)がまだ無いことがあるので、少し待ってから読む
+            self.pushPending(devpath, "", 900);
+        } else if (std.mem.eql(u8, action, "remove")) {
+            const name = self.usbForget(devpath) orelse return; // 覚えていない = ハブ・内蔵・ストレージ(ブロックの方で知らせる)
+            self.app.notifs.post("USB", "USB 機器を取り外しました", name, 0);
+        }
+    }
+
+    /// USB メモリ・SD カード・外付けディスク(ブロックデバイスの disk)
+    fn blockUevent(self: *SysWatch, msg: []const u8) void {
+        if (!self.app.cfg.notify_usb) return;
+        const devtype = ueventField(msg, "DEVTYPE") orelse return;
+        if (!std.mem.eql(u8, devtype, "disk")) return;
+        const name = ueventField(msg, "DEVNAME") orelse return;
+        const action = ueventField(msg, "ACTION") orelse return;
+        const devpath = ueventField(msg, "DEVPATH") orelse return;
+        for ([_][]const u8{ "loop", "ram", "zram", "dm-", "md", "nbd" }) |p| if (std.mem.startsWith(u8, name, p)) return;
+        var kb: [40]u8 = undefined;
+        const key = std.fmt.bufPrint(&kb, "blk:{s}", .{name}) catch return;
+        if (std.mem.eql(u8, action, "add")) {
+            // ボリュームの名前(/dev/disk/by-label)は udev がパーティションを調べてから作るので長めに待つ
+            self.pushPending(devpath, name, 2000);
+        } else if (std.mem.eql(u8, action, "remove")) {
+            const disp = self.usbForget(key) orelse return;
+            var sb: [96]u8 = undefined;
+            const summary = std.fmt.bufPrint(&sb, "{s}を取り外しました", .{if (std.mem.startsWith(u8, name, "mmcblk")) "SD カード" else "ストレージ"}) catch "取り外しました";
+            self.app.notifs.post("ストレージ", summary, disp, 0);
+        } else if (std.mem.eql(u8, action, "change")) {
+            // カードリーダーにカードを入れた(大きさが 0 から変わる)
+            var szb: [32]u8 = undefined;
+            var pz: [96]u8 = undefined;
+            const p = std.fmt.bufPrintZ(&pz, "/sys/block/{s}/size", .{name}) catch return;
+            const sz = std.fmt.parseInt(u64, sys.readFile(p, &szb) orelse "0", 10) catch 0;
+            if (sz > 0) {
+                for (self.usb) |u| if (u.key_len > 0 and std.mem.eql(u8, u.key[0..u.key_len], key)) return;
+                self.pushPending(devpath, name, 2000);
+            }
+        }
+    }
+
+    fn onPend(ctx: *anyopaque, _: c_int, _: u32) void {
+        const self: *SysWatch = @ptrCast(@alignCast(ctx));
+        self.pend_timer.ack();
+        const n = self.n_pend;
+        self.n_pend = 0;
+        for (self.pend[0..n]) |*p| {
+            const devpath = p.devpath[0..p.len];
+            if (p.blk_len > 0) {
+                self.notifyBlock(p.blk[0..p.blk_len], devpath);
+                continue;
+            }
             var nb: [128]u8 = undefined;
-            const info = usbInfo(devpath, &nb) orelse return;
+            const info = usbInfo(devpath, &nb) orelse continue;
+            // ストレージはブロックデバイスの方で、容量・ボリュームの名前つきで知らせる
+            if (std.mem.eql(u8, info.kind, "ストレージ")) continue;
             self.usbRemember(devpath, info.name);
             var sb: [96]u8 = undefined;
             self.app.notifs.post("USB", std.fmt.bufPrint(&sb, "{s}を接続しました", .{info.kind}) catch "USB 機器を接続しました", info.name, 0);
-        } else if (std.mem.eql(u8, action, "remove")) {
-            const name = self.usbForget(devpath) orelse return; // 覚えていない = ハブ・内蔵の機器
-            self.app.notifs.post("USB", "USB 機器を取り外しました", name, 0);
         }
+    }
+
+    /// 「USB メモリを接続しました / KIOXIA TransMemory · 32 GB · 「BACKUP」」
+    fn notifyBlock(self: *SysWatch, name: []const u8, devpath: []const u8) void {
+        var pz: [128]u8 = undefined;
+        var rb: [64]u8 = undefined;
+        const is_usb = std.mem.indexOf(u8, devpath, "/usb") != null;
+        const is_mmc = std.mem.startsWith(u8, name, "mmcblk");
+        const removable = blk: {
+            const p = std.fmt.bufPrintZ(&pz, "/sys/block/{s}/removable", .{name}) catch break :blk false;
+            break :blk std.mem.eql(u8, sys.readFile(p, &rb) orelse "0", "1");
+        };
+        if (!is_usb and !is_mmc and !removable) return; // 内蔵のディスク
+        const size: u64 = blk: {
+            const p = std.fmt.bufPrintZ(&pz, "/sys/block/{s}/size", .{name}) catch break :blk 0;
+            break :blk (std.fmt.parseInt(u64, sys.readFile(p, &rb) orelse "0", 10) catch 0) * 512;
+        };
+        if (size == 0) return; // メディアの入っていないカードリーダー
+        var vb: [64]u8 = undefined;
+        var mb: [64]u8 = undefined;
+        const vendor = if (std.fmt.bufPrintZ(&pz, "/sys/block/{s}/device/vendor", .{name})) |p| sys.readFile(p, &vb) orelse "" else |_| "";
+        const model = if (std.fmt.bufPrintZ(&pz, "/sys/block/{s}/device/model", .{name})) |p| sys.readFile(p, &mb) orelse "" else |_| "";
+        // ボリュームの名前(/dev/disk/by-label のうち、この機器のパーティションを指すもの)
+        var lb: [160]u8 = undefined;
+        var ll: usize = 0;
+        if (std.fs.cwd().openDir("/dev/disk/by-label", .{ .iterate = true })) |dir_| {
+            var dir = dir_;
+            defer dir.close();
+            var it = dir.iterate();
+            while (it.next() catch null) |ent| {
+                var tb: [256]u8 = undefined;
+                const target = dir.readLink(ent.name, &tb) catch continue;
+                if (!std.mem.startsWith(u8, std.fs.path.basename(target), name)) continue;
+                if (ll > 0) ll += (std.fmt.bufPrint(lb[ll..], "・", .{}) catch "").len;
+                // udev は空白などを \x20 のように書く
+                var i: usize = 0;
+                while (i < ent.name.len and ll < lb.len) : (i += 1) {
+                    if (ent.name[i] == '\\' and i + 3 < ent.name.len and ent.name[i + 1] == 'x') {
+                        lb[ll] = std.fmt.parseInt(u8, ent.name[i + 2 .. i + 4], 16) catch '?';
+                        i += 3;
+                    } else lb[ll] = ent.name[i];
+                    ll += 1;
+                }
+            }
+        } else |_| {}
+        var db: [96]u8 = undefined;
+        const disp = (if (vendor.len > 0 and model.len > 0 and std.mem.indexOf(u8, model, vendor) == null)
+            std.fmt.bufPrint(&db, "{s} {s}", .{ vendor, model })
+        else if (model.len > 0)
+            std.fmt.bufPrint(&db, "{s}", .{model})
+        else if (ll > 0)
+            std.fmt.bufPrint(&db, "{s}", .{lb[0..ll]})
+        else
+            std.fmt.bufPrint(&db, "{s}", .{name})) catch name;
+        const gb = @as(f64, @floatFromInt(size)) / 1e9;
+        var szb: [24]u8 = undefined;
+        const size_s = (if (gb >= 1000) std.fmt.bufPrint(&szb, "{d:.1} TB", .{gb / 1000}) else if (gb >= 10) std.fmt.bufPrint(&szb, "{d:.0} GB", .{gb}) else std.fmt.bufPrint(&szb, "{d:.1} GB", .{gb})) catch "";
+        var bb: [256]u8 = undefined;
+        const body = (if (ll > 0) std.fmt.bufPrint(&bb, "{s} · {s} · 「{s}」", .{ disp, size_s, lb[0..ll] }) else std.fmt.bufPrint(&bb, "{s} · {s}", .{ disp, size_s })) catch disp;
+        const summary: []const u8 = if (is_mmc) "SD カードを挿しました" else if (is_usb and gb < 300) "USB メモリを接続しました" else "外付けのストレージを接続しました";
+        var kb: [40]u8 = undefined;
+        if (std.fmt.bufPrint(&kb, "blk:{s}", .{name})) |key| self.usbRemember(key, disp) else |_| {}
+        self.app.notifs.post("ストレージ", summary, body, 0);
     }
 
     const UsbDev = struct {
