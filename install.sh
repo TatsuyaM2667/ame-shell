@@ -116,11 +116,25 @@ APK_BUILD="git curl bash clang llvm-devel pkgconf wayland-devel wayland-progs me
 APK_RUN="sddm foot dbus playerctl cava pipewire wireplumber libpulse-progs mpv-libs ffmpeg grim slurp wl-clipboard swaylock brightnessctl networkmanager bluez xdg-desktop-portal-wlr fonts-noto-sans-cjk-otf fonts-nerd-jetbrains-mono"
 APK_RIVER="wlroots0.20-devel wayland-protocols libevdev-devel pixman-devel libinput-devel xwayland xwayland-devel"
 NEED_CMDS="git curl clang wayland-scanner pkg-config"
+# 新規インストール直後の Chimera で不足していたもの
+APK_BUILD="$APK_BUILD bash curl llvm-devel linux-headers pkgconf wayland-devel wayland-protocols wlroots0.20-devel libxkbcommon-devel pixman-devel libinput-devel libevdev-devel dbus-devel mesa-devel freetype-devel harfbuzz-devel fontconfig-devel libdrm-devel linux-pam-devel"
+APK_RUN="$APK_RUN mesa-dri foot sddm playerctl fonts-noto-sans-cjk fonts-nerd-symbols-only adwaita-icon-theme hicolor-icon-theme"
+# Odin のビルドは llvm-config という名前を探せないため明示する
+export LLVM_CONFIG="${LLVM_CONFIG:-llvm-config}"
 if [ "$NO_DEPS" = 1 ]; then
     info "(--no-deps のため省略)"
 elif command -v apk >/dev/null 2>&1 && grep -q "^ID=chimera" /etc/os-release 2>/dev/null; then
     missing=""
-    for p in $APK_BUILD $APK_RUN $APK_RIVER; do apk info -e "$p" >/dev/null 2>&1 || missing="$missing $p"; done
+    unavailable=""
+    for p in $APK_BUILD $APK_RUN $APK_RIVER; do
+        apk info -e "$p" >/dev/null 2>&1 && continue
+        if [ -n "$(apk search -qe "$p" 2>/dev/null)" ]; then
+            missing="$missing $p"
+        else
+            unavailable="$unavailable $p"
+        fi
+    done
+    [ -n "$unavailable" ] && info "リポジトリに無いため飛ばします:$unavailable"
     if [ -z "$missing" ]; then
         info "すべて導入済み"
     elif [ "$SU" = none ]; then

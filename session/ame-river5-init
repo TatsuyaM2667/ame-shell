@@ -1,4 +1,7 @@
 #!/bin/sh
+# ユーザーの自動起動(~/.config/ame-shell/autostart)
+_ame_autostart="${XDG_CONFIG_HOME:-$HOME/.config}/ame-shell/autostart"
+[ -x "$_ame_autostart" ] && "$_ame_autostart" >/dev/null 2>&1 &
 # ame-river5-init: River 0.5 用の初期化スクリプト(POSIX sh)。
 # River 0.5 ではウィンドウの配置・キー操作・アニメーションを ame-shell(内蔵 WM)が担当する。
 # River 0.3 用の設定コマンドやレイアウト生成器は使わない(River 0.5 はその文字列を含む init を拒否する)。ユーザーの ~/.config/river/init は読まず、触りもしない。
