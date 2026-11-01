@@ -58,8 +58,20 @@ pub const Hits = struct {
     play: [4]f32 = .{ 0, 0, 0, 0 },
     next: [4]f32 = .{ 0, 0, 0, 0 },
     stack: [4]f32 = .{ 0, 0, 0, 0 },
+    // ログイン画面だけ: ユーザーの切り替え・セッション・再起動・電源オフ
+    uprev: [4]f32 = .{ 0, 0, 0, 0 },
+    unext: [4]f32 = .{ 0, 0, 0, 0 },
+    session: [4]f32 = .{ 0, 0, 0, 0 },
+    reboot: [4]f32 = .{ 0, 0, 0, 0 },
+    poweroff: [4]f32 = .{ 0, 0, 0, 0 },
 
-    pub fn which(self: *const Hits, x: f32, y: f32) enum { none, prev, play, next, stack } {
+    pub const Hit = enum { none, prev, play, next, stack, uprev, unext, session, reboot, poweroff };
+    pub fn which(self: *const Hits, x: f32, y: f32) Hit {
+        if (inRect(self.uprev, x, y)) return .uprev;
+        if (inRect(self.unext, x, y)) return .unext;
+        if (inRect(self.session, x, y)) return .session;
+        if (inRect(self.reboot, x, y)) return .reboot;
+        if (inRect(self.poweroff, x, y)) return .poweroff;
         if (inRect(self.prev, x, y)) return .prev;
         if (inRect(self.play, x, y)) return .play;
         if (inRect(self.next, x, y)) return .next;
@@ -398,7 +410,7 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         } else {
             cv.rect(ax, ay, az, az, az / 2, acc.alpha(0.6));
             var ub0: [64]u8 = undefined;
-            const uname0 = lockmod.currentUserName(&ub0);
+            const uname0 = self.userName(&ub0);
             if (uname0.len > 0) _ = cv.text(W / 2, ay + az / 2 + 14, 40, white, uname0[0..1], .{ .bold = true, .alignment = .center });
         }
         // 縁: 確認中は回る弧
@@ -409,8 +421,16 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
             cv.rectBorder(ax - 3, ay - 3, az + 6, az + 6, az / 2 + 3, .{ .a = 0 }, acc.alpha(0.85), 2.5);
         }
         var ub: [64]u8 = undefined;
-        const user = lockmod.currentUserName(&ub);
+        const user = self.userName(&ub);
         _ = cv.text(W / 2, ay + az + 34, 20, txt, user, .{ .bold = true, .alignment = .center });
+        // ログイン画面: 写真の左右の ‹ › でユーザーを切り替え
+        if (self.greeter and @import("greeter.zig").st.n_users > 1) {
+            const mid = ay + az / 2;
+            _ = cv.text(ax - 34, mid + 10, 30, white.alpha(0.75), "‹", .{ .alignment = .center });
+            _ = cv.text(ax + az + 34, mid + 10, 30, white.alpha(0.75), "›", .{ .alignment = .center });
+            self.hits.uprev = .{ ax - 54, mid - 24, 40, 48 };
+            self.hits.unext = .{ ax + az + 14, mid - 24, 40, 48 };
+        }
 
         // 入力欄
         const fw: f32 = 300;
@@ -446,14 +466,44 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
     // ---- 下: 光が流れる案内とホームバー ----
     {
         const e = stagger(appear, 6);
-        const hint = if (a > 0.5) "Esc でもどる" else "キーを押すかクリックしてロックを解除";
+        const hint = if (a > 0.5) "Esc でもどる" else if (self.greeter) "キーを押すかクリックしてログイン" else "キーを押すかクリックしてロックを解除";
         const hy = H - 46 + (1 - e) * 16;
         shimmer(cv, W / 2, hy, 14, hint, self.time_s, e);
         cv.rect(W / 2 - 67, H - 16, 134, 5, 2.5, white.alpha(0.75 * e));
+        if (self.greeter) greeterBar(self, cv, W, H, e);
     }
 
     cv.restore();
     return animating;
+}
+
+/// ログイン画面の下の隅: 左にセッション(押すと切り替え)、右に再起動・電源オフ
+fn greeterBar(self: *Lock, cv: *gfx.Canvas, W: f32, H: f32, e: f32) void {
+    const g = @import("greeter.zig");
+    const app = self.app;
+    cv.save();
+    cv.opacity(e);
+    const ph: f32 = 32;
+    const y = H - 24 - ph;
+    if (g.st.n_sessions > 0) {
+        var sb: [96]u8 = undefined;
+        const label = std.fmt.bufPrint(&sb, "{s}{s}", .{ g.sessionName(), if (g.st.n_sessions > 1) "  ⇄" else "" }) catch "";
+        const w = cv.measure(label, 13, false) + 28;
+        cv.glass(24, y, w, ph, ph / 2, theme.glass(app));
+        _ = cv.text(24 + 14, y + 21, 13, white.alpha(0.85), label, .{});
+        self.hits.session = .{ 24, y, w, ph };
+    }
+    const labels = [_][]const u8{ "\u{F0709}  再起動", "\u{F0425}  電源オフ" };
+    var x = W - 24;
+    for (labels, 0..) |l, i| {
+        const w = cv.measure(l, 13, false) + 28;
+        x -= w;
+        cv.glass(x, y, w, ph, ph / 2, theme.glass(app));
+        _ = cv.text(x + 14, y + 21, 13, white.alpha(0.85), l, .{});
+        if (i == 0) self.hits.reboot = .{ x, y, w, ph } else self.hits.poweroff = .{ x, y, w, ph };
+        x -= 10;
+    }
+    cv.restore();
 }
 
 /// 文字の上を光が左から右へ流れる(iOS の「スライドでロック解除」)

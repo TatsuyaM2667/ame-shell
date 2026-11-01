@@ -11,7 +11,7 @@
 #
 # 行うこと:
 #  1. テーマ(Main.qml など)を SDDM のテーマの場所へ。theme.conf には共有の置き場(sharedir)を書く
-#  2. 共有の置き場 /var/lib/ame-shell/sddm/<ユーザー>(FreeBSD は /var/db/…)を、その人が書けるように作る。
+#  2. 共有の置き場 /var/lib/ame-shell/greeter/<ユーザー>(FreeBSD は /var/db/…)を、その人が書けるように作る。
 #     ame-shell がここへ、ロック画面の背景(backdrop.bmp)・写真(avatar.bmp)・アクセント色(state)を書き出し、
 #     次のログイン画面からそのまま使われる(root は要らない。src/sddmshare.zig)
 #  3. 壁紙が画像・動画なら、それを background.jpg に(共有の置き場がまだ空のときの背景)
@@ -59,12 +59,12 @@ if [ "$(uname -s)" = FreeBSD ]; then
     THEMES="/usr/local/share/sddm/themes"
     CONFD="/usr/local/etc/sddm.conf.d"
     MAINCONF="/usr/local/etc/sddm.conf"
-    SHARE="/var/db/ame-shell/sddm"
+    SHARE="/var/db/ame-shell/greeter"
 else
     THEMES="/usr/share/sddm/themes"
     CONFD="/etc/sddm.conf.d"
     MAINCONF="/etc/sddm.conf"
-    SHARE="/var/lib/ame-shell/sddm"
+    SHARE="/var/lib/ame-shell/greeter"
 fi
 NAME=ame
 DIR="$THEMES/$NAME"

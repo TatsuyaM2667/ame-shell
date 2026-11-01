@@ -2,5 +2,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
+// BMP: ログイン画面が、ユーザーごとの置き場の写真・壁紙(src/sddmshare.zig が書く)を読む
+#define STBI_ONLY_BMP
 #define STBI_NO_STDIO_FAILURE_STRINGS
 #include "stb_image.h"

@@ -8,7 +8,8 @@
 #   その他: --prefix DIR / --destdir DIR(疑似 root への試験)/ --dry-run
 #          --yes(インストール後の設定を確認せずに行う)/ --no-setup(インストール後の設定をしない)
 #   インストール後の設定(Linux の全ユーザー用のみ、1 つずつ確認): video・input グループへの追加、
-#   SDDM・NetworkManager・bluetoothd の有効化(dinit)、NetworkManager の polkit ルール(wheel)
+#   NetworkManager・bluetoothd の有効化(dinit)、NetworkManager の polkit ルール(wheel)、
+#   ログイン画面を ame-shell(greetd、scripts/greeter-setup.sh)に。greetd が無く SDDM があれば SDDM のテーマ
 #
 # 入力は zig-out/ のビルド成果物とこのリポジトリ内のファイルだけ(ここではビルドしない。ビルドは install.sh)。
 # 追加したファイルは $PREFIX/share/ame-shell/installed-files に記録し、--uninstall はそれだけを消す。
@@ -34,7 +35,7 @@ while [ $# -gt 0 ]; do
         --user) USER_MODE=1; shift ;;
         --yes|-y) ASSUME_YES=1; shift ;;
         --no-setup) NO_SETUP=1; shift ;;
-        -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -232,6 +233,7 @@ install_file "$OUT/bin/ame-ctl" "$PREFIX/bin/ame-ctl" 755
 install_file "$HERE/ame-session" "$PREFIX/bin/ame-session" 755
 install_file "$HERE/ame-update" "$PREFIX/bin/ame-update" 755
 install_file "$HERE/ame-term-shell" "$PREFIX/bin/ame-term-shell" 755
+install_file "$HERE/ame-greeter" "$PREFIX/bin/ame-greeter" 755
 # ame-update が git pull してビルドし直すための、ソースの場所の記録
 tmp=$(mktemp "${TMPDIR:-/tmp}/ame-src.XXXXXX") || exit 1
 echo "$ROOT" > "$tmp"
@@ -371,10 +373,10 @@ if [ "$USER_MODE" = 0 ] && [ "$OS" != FreeBSD ] && [ "$NO_SETUP" = 0 ] && [ -z "
             later "usermod -aG $groups $U"
         fi
     fi
-    # 2. dinit のサービス(SDDM・NetworkManager・Bluetooth)。boot.d へのリンクで「次の起動から」有効にする
+    # 2. dinit のサービス(NetworkManager・Bluetooth。ログイン画面は 4 で)。boot.d へのリンクで「次の起動から」有効にする
     #    (dinitctl enable はすぐに起動するため、インストール中に画面が SDDM に切り替わってしまう)
     if command -v dinitctl >/dev/null 2>&1 && [ -d /etc/dinit.d ]; then
-        for svc in sddm networkmanager bluetoothd; do
+        for svc in networkmanager bluetoothd; do
             [ -f "/usr/lib/dinit.d/$svc" ] || [ -f "/etc/dinit.d/$svc" ] || continue
             [ -e "/etc/dinit.d/boot.d/$svc" ] && continue
             if ask "dinit のサービス $svc を有効にしますか?(次の起動から)" "Enable dinit service $svc? (from next boot)"; then
@@ -412,9 +414,26 @@ RULES
             later "$(m "polkit のルール" "polkit rule"): $RULE"
         fi
     fi
-    # 4. ログイン画面(SDDM)をロック画面と同じ見た目にし、SDDM の設定を上書きする(scripts/sddm-theme.sh)。
+    # 4. ログイン画面: greetd があれば ame-shell のログイン画面(ロック画面と同じ見た目。SDDM は要らなくなる)。
+    #    greetd が無く SDDM があるときは、SDDM のテーマをロック画面と同じ見た目に(下の 5)
+    GREETD_DONE=0
+    if command -v greetd >/dev/null 2>&1 && [ -f "$ROOT/scripts/greeter-setup.sh" ]; then
+        if grep -q "ame-greeter" /etc/greetd/config.toml 2>/dev/null ||
+            ask "ログイン画面を ame-shell(greetd。ロック画面と同じ見た目)にしますか?SDDM は使わなくなります" \
+                "Use the ame-shell login screen (greetd, same look as the lock screen) instead of SDDM?"; then
+            if [ "$DRY" = 1 ]; then
+                sh "$ROOT/scripts/greeter-setup.sh" --user "$U" --prefix "$PREFIX" --dry-run
+            else
+                sh "$ROOT/scripts/greeter-setup.sh" --user "$U" --prefix "$PREFIX" --manifest "$TMP_MANIFEST" && ok "ログイン画面: ame-shell(greetd)" "login screen: ame-shell (greetd)"
+            fi
+            GREETD_DONE=1
+        else
+            later "sh $ROOT/scripts/greeter-setup.sh --user $U"
+        fi
+    fi
+    # 5. SDDM を使うなら: ロック画面と同じ見た目にし、SDDM の設定を上書きする(scripts/sddm-theme.sh)。
     #    テーマ ame・ame-shell が背景や写真を書き出す置き場・weston のキオスク(kwin_wayland より軽い)
-    if command -v sddm >/dev/null 2>&1 && [ -f "$ROOT/scripts/sddm-theme.sh" ]; then
+    if [ "$GREETD_DONE" = 0 ] && command -v sddm >/dev/null 2>&1 && [ -f "$ROOT/scripts/sddm-theme.sh" ]; then
         SDDM_CONF=/etc/sddm.conf.d/zz-ame.conf
         if grep -qx "$SDDM_CONF" "$MANIFEST" 2>/dev/null ||
             ask "ログイン画面(SDDM)をロック画面と同じ見た目にし、SDDM の設定を上書きしますか?(テーマ ame、コンポジタ weston)" \
@@ -452,7 +471,11 @@ chk() {
     if command -v "$1" >/dev/null 2>&1; then say "  [ok] $1"
     else ng "$1 がありません($3: $PKG $2)" "$1 not found ($4: $PKG $2)"; fi
 }
-[ "$USER_MODE" = 0 ] && chk sddm sddm "ログイン画面" "login screen"
+if [ "$USER_MODE" = 0 ]; then
+    if command -v greetd >/dev/null 2>&1; then say "  [ok] greetd"
+    elif command -v sddm >/dev/null 2>&1; then say "  [ok] sddm"
+    else ng "ログイン画面(greetd)がありません($PKG greetd)" "no login manager (greetd) found ($PKG greetd)"; fi
+fi
 chk foot foot "端末" "terminal"
 chk dbus-run-session dbus "D-Bus" "D-Bus"
 chk playerctl playerctl "メディア" "media"
@@ -477,7 +500,9 @@ if [ "$OS" = FreeBSD ]; then
     done
     chk swaylock swaylock "ロック" "lock screen"
 elif command -v dinitctl >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
-    for svc in dbus sddm networkmanager bluetoothd; do
+    DM=sddm
+    grep -q ame-greeter /etc/greetd/config.toml 2>/dev/null && DM=greetd
+    for svc in dbus $DM networkmanager bluetoothd; do
         [ -f "/usr/lib/dinit.d/$svc" ] || [ -f "/etc/dinit.d/$svc" ] || continue
         if [ -e "/etc/dinit.d/boot.d/$svc" ] || [ -e "/usr/lib/dinit.d/boot.d/$svc" ]; then
             ok "dinit: $svc は有効" "dinit: $svc enabled"

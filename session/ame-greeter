@@ -1,0 +1,65 @@
+#!/bin/sh
+# ame-greeter: ame-shell のログイン画面。greetd が greeter のユーザー(Chimera: _greetd)で起動する(POSIX sh)。
+# River 0.5 の中で ame-shell をログイン画面のモード(AME_GREETER=1、src/greeter.zig)で動かす。
+# 見た目はロック画面と同じ。パスワードが合うと greetd がセッション(既定は「Ame Shell」)を始め、
+# ame-shell と River はここで終わる。
+#
+# 設定: /etc/greetd/config.toml の [default_session] command(scripts/greeter-setup.sh が書く)
+# ログ: ~(greeter のユーザーのホーム。Chimera は /var/lib/greetd)/ame-greeter.log
+# 試す: AME_GREETER_FAKE=1 なら greetd を使わず、パスワード "ame" で成功したことにする(何も起動しない)
+
+case "$0" in
+    */*) SELF_DIR=$(cd "$(dirname "$0")" && pwd) ;;
+    *) SELF_DIR=$(dirname "$(command -v "$0")") ;;
+esac
+PREFIX_DIR=$(dirname "$SELF_DIR")
+export PATH="$SELF_DIR:$PATH"
+
+LOG="${HOME:-/tmp}/ame-greeter.log"
+if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 1048576 ]; then mv -f "$LOG" "$LOG.old"; fi
+log() { printf '%s [ame-greeter] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
+log "=== start (user $(id -un), pid $$) ==="
+
+export AME_GREETER=1
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=river
+export XDG_SESSION_DESKTOP=ame-greeter
+# 状態(ame-shell の state)は greeter のユーザーのホームに
+export XDG_STATE_HOME="${HOME:-/tmp}/.local/state"
+
+# カーソル: ame-shell のテーマ(無ければ Adwaita)
+export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
+if [ -d "$PREFIX_DIR/share/icons/ame/cursors" ]; then
+    export XCURSOR_PATH="$PREFIX_DIR/share/icons:/usr/share/icons:/usr/local/share/icons"
+    export XCURSOR_THEME=ame
+else
+    export XCURSOR_THEME=Adwaita
+fi
+# アプリの既定設定(foot など)は使わないが、フォントの設定などのため XDG_CONFIG_DIRS はそのまま
+
+# キーボード配列(scripts/greeter-setup.sh が、インストールした人の配列を書いておく)
+for f in /var/lib/ame-shell/greeter/xkb-layout /var/db/ame-shell/greeter/xkb-layout; do
+    if [ -z "${XKB_DEFAULT_LAYOUT:-}" ] && [ -s "$f" ]; then
+        kl=$(head -n 1 "$f" | tr -d ' \t\r')
+        [ -n "$kl" ] && export XKB_DEFAULT_LAYOUT="$kl"
+    fi
+done
+
+# River 0.5(ame-shell がウィンドウマネージャを兼ねる)
+RIVER=""
+for r in "${AME_RIVER5:-}" "$PREFIX_DIR/opt/river-0.5/bin/river"; do
+    [ -n "$r" ] && [ -x "$r" ] && { RIVER="$r"; break; }
+done
+if [ -z "$RIVER" ] && command -v river >/dev/null 2>&1; then
+    case "$(river -version 2>&1)" in 0.[4-9]*|[1-9]*) RIVER=river ;; esac
+fi
+INIT="$PREFIX_DIR/share/ame-shell/ame-river5-init"
+[ -x "$INIT" ] || INIT="$SELF_DIR/ame-river5-init"
+if [ -z "$RIVER" ] || [ ! -x "$INIT" ]; then
+    log "ERROR: River 0.5 または ame-river5-init が見つかりません / River 0.5 not found"
+    # greetd が何度も起動し直さないよう少し待つ(TTY でログインして直せるように)
+    sleep 10
+    exit 1
+fi
+log "river $("$RIVER" -version 2>&1) ($RIVER) / layout ${XKB_DEFAULT_LAYOUT:-default}"
+exec "$RIVER" -c "$INIT" >> "$LOG" 2>&1

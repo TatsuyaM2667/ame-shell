@@ -21,7 +21,7 @@ Rectangle {
     readonly property color subText: "#a9b6d6"
     readonly property color errColor: "#ff8a9a"
     readonly property string fontFamily: config.font || "Noto Sans CJK JP"
-    readonly property string shareDir: config.sharedir || "/var/lib/ame-shell/sddm"
+    readonly property string shareDir: config.sharedir || "/var/lib/ame-shell/greeter"
     // ロック画面と同じ論理 px で描く。高 DPI を Qt が拡大しない画面では、ame-shell と同じく大きな画面ほど拡大
     readonly property real k: Screen.devicePixelRatio > 1 ? 1 : Math.max(1, Math.floor(height / 1200 * 4) / 4)
 

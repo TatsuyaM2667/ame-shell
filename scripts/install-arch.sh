@@ -4,7 +4,7 @@
 #
 #   1. pacman で依存パッケージ(公式リポジトリだけ。AUR は使わない)
 #      River 0.5・Odin・wlroots 0.20 も公式にあるので、ソースからのビルドは ame-shell 本体と Zig 0.13 の取得だけ
-#   2. サービス: sddm・NetworkManager・bluetooth を有効に(すでに別のログイン画面が有効ならそのまま)
+#   2. サービス: NetworkManager・bluetooth を有効に(ログイン画面は install-session.sh の設定で ame-shell(greetd)に)
 #   3. install.sh --no-deps でビルドとインストール(Zig 0.13 は公式の配布物を ~/.cache に。Arch の zig は新しすぎるため)
 # パッケージ名は Arch の core / extra のデータベースで確認済み(2026-10)。
 
@@ -40,13 +40,13 @@ RIVER="river xorg-xwayland"
 # 動かすのに必要なもの・あると使うもの
 # (pipewire-audio: Bluetooth のイヤホン・スピーカー(bluez5 のプラグイン)/ libpulse: pactl /
 #  ttf-nerd-fonts-symbols: バーのアイコン / hicolor・adwaita: アプリのアイコン)
-RUN="sddm weston foot polkit playerctl cava pipewire pipewire-audio pipewire-pulse wireplumber libpulse mpv ffmpeg grim slurp wl-clipboard swaylock
+RUN="greetd foot polkit playerctl cava pipewire pipewire-audio pipewire-pulse wireplumber libpulse mpv ffmpeg grim slurp wl-clipboard swaylock
  brightnessctl networkmanager bluez bluez-utils util-linux thunar tumbler gvfs xdg-utils
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  noto-fonts-cjk ttf-jetbrains-mono-nerd ttf-nerd-fonts-symbols hicolor-icon-theme adwaita-icon-theme
  fastfetch wf-recorder wlr-randr"
 # 動かすのに欠かせないコマンド(入れた後に確かめる)
-RUN_CMDS="foot sddm dbus-run-session playerctl cava pactl grim slurp wl-copy swaylock brightnessctl rfkill nmcli bluetoothctl"
+RUN_CMDS="foot greetd dbus-run-session playerctl cava pactl grim slurp wl-copy swaylock brightnessctl rfkill nmcli bluetoothctl"
 # 日本語入力(あれば)
 JA="fcitx5 fcitx5-mozc fcitx5-gtk fcitx5-qt fcitx5-configtool"
 
@@ -84,17 +84,12 @@ say "2/3 サービス"
 if [ "$USER_MODE" = 1 ] || [ "$SU" = none ]; then
     info "(自分用のインストールのため、サービスは変更しません)"
 elif command -v systemctl >/dev/null 2>&1; then
-    # ログイン画面: ほかのもの(gdm / lightdm など)が有効ならそれを尊重する
-    if systemctl is-enabled display-manager.service >/dev/null 2>&1; then
-        info "ログイン画面: $(readlink /etc/systemd/system/display-manager.service 2>/dev/null | sed 's#.*/##') が有効(そのまま。SDDM にするなら: sudo systemctl enable -f sddm)"
-    else
-        as_root systemctl enable sddm.service >/dev/null 2>&1 && info "sddm を有効にしました(次の起動から)"
-    fi
+    # ログイン画面は、インストール後の設定(install-session.sh)で ame-shell(greetd)にするかを聞く
     for s in NetworkManager bluetooth; do
         systemctl is-enabled "$s.service" >/dev/null 2>&1 || { as_root systemctl enable --now "$s.service" >/dev/null 2>&1 && info "$s を有効にしました"; }
     done
 else
-    info "(systemctl が無いため、sddm / NetworkManager / bluetooth は手動で有効にしてください)"
+    info "(systemctl が無いため、NetworkManager / bluetooth は手動で有効にしてください)"
 fi
 
 say "3/3 ame-shell のビルドとインストール"

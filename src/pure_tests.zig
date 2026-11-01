@@ -4,6 +4,7 @@ const anim = @import("anim.zig");
 test {
     _ = @import("config.zig");
     _ = @import("portal.zig");
+    _ = @import("greeter.zig");
 }
 
 test "spring converges and is velocity-continuous" {

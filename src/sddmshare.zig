@@ -2,7 +2,7 @@
 //
 // SDDM のテーマは別のユーザー(sddm)で動き、ホーム(0700)は読めない。そこでインストーラが
 // ユーザーごとに書き込める置き場を用意する(scripts/sddm-theme.sh):
-//   Linux: /var/lib/ame-shell/sddm/<ユーザー名>/   FreeBSD: /var/db/ame-shell/sddm/<ユーザー名>/
+//   Linux: /var/lib/ame-shell/greeter/<ユーザー名>/   FreeBSD: /var/db/ame-shell/greeter/<ユーザー名>/
 // 置き場が無い・書けないときは何もしない(SDDM のテーマは自前の背景で表示する)。
 //
 // 書き出すもの:
@@ -26,7 +26,7 @@ pub fn dir(buf: []u8) ?[:0]const u8 {
         return if (c.access(p.ptr, c.W_OK) == 0) p else null;
     }
     const user = std.posix.getenv("USER") orelse std.posix.getenv("LOGNAME") orelse return null;
-    const root = if (builtin.os.tag == .freebsd) "/var/db/ame-shell/sddm" else "/var/lib/ame-shell/sddm";
+    const root = if (builtin.os.tag == .freebsd) "/var/db/ame-shell/greeter" else "/var/lib/ame-shell/greeter";
     const p = std.fmt.bufPrintZ(buf, "{s}/{s}", .{ root, user }) catch return null;
     if (c.access(p.ptr, c.W_OK) != 0) return null;
     return p;
@@ -43,8 +43,38 @@ pub fn saveFramebuffer(fbo: c.GLuint, w: c_int, h: c_int, accent: Color, tinted:
     c.glPixelStorei(c.GL_PACK_ALIGNMENT, 1);
     c.glReadPixels(0, 0, w, h, c.GL_RGBA, c.GL_UNSIGNED_BYTE, px);
     c.glBindFramebuffer(c.GL_FRAMEBUFFER, 0);
-    const job = Job{ .px = px, .w = @intCast(w), .h = @intCast(h), .accent = accent, .tinted = tinted };
+    const job = Job{ .px = px, .w = @intCast(w), .h = @intCast(h), .accent = accent, .tinted = tinted, .name = "backdrop", .max_w = MAX_W };
     var j = job;
+    @memcpy(j.dir[0..d.len], d);
+    j.dir_len = d.len;
+    const t = std.Thread.spawn(.{}, writeBackdrop, .{j}) catch {
+        std.c.free(px);
+        return;
+    };
+    t.detach();
+}
+
+/// 壁紙そのもの(ぼかす前)を書き出す: ログイン画面(ame-shell の greeter)がその人の壁紙で表示するため。
+/// mode はオーロラ・雨なら絵は要らない(greeter が自分で描く)ので wallmode だけ書く
+pub fn saveWallpaper(fbo: c.GLuint, w: c_int, h: c_int, mode: []const u8) void {
+    var db: [256]u8 = undefined;
+    const d = dir(&db) orelse return;
+    var pb: [320]u8 = undefined;
+    if (std.fmt.bufPrint(&pb, "{s}/wallmode", .{d})) |p| {
+        if (std.fs.cwd().createFile(p, .{})) |f| {
+            defer f.close();
+            f.writer().print("{s}\n", .{mode}) catch {};
+        } else |_| {}
+    } else |_| {}
+    const is_image = std.mem.eql(u8, mode, "image") or std.mem.eql(u8, mode, "video");
+    if (!is_image or w <= 0 or h <= 0) return;
+    const n: usize = @intCast(w * h * 4);
+    const px: [*]u8 = @ptrCast(std.c.malloc(n) orelse return);
+    c.glBindFramebuffer(c.GL_FRAMEBUFFER, fbo);
+    c.glPixelStorei(c.GL_PACK_ALIGNMENT, 1);
+    c.glReadPixels(0, 0, w, h, c.GL_RGBA, c.GL_UNSIGNED_BYTE, px);
+    c.glBindFramebuffer(c.GL_FRAMEBUFFER, 0);
+    var j = Job{ .px = px, .w = @intCast(w), .h = @intCast(h), .accent = .{}, .tinted = false, .name = "wallpaper", .max_w = 1920, .state = false };
     @memcpy(j.dir[0..d.len], d);
     j.dir_len = d.len;
     const t = std.Thread.spawn(.{}, writeBackdrop, .{j}) catch {
@@ -60,6 +90,11 @@ const Job = struct {
     h: usize,
     accent: Color,
     tinted: bool,
+    /// 書き出すファイルの名前(.bmp を除く)と、横幅の上限
+    name: []const u8,
+    max_w: usize,
+    /// state(アクセント色)も書くか
+    state: bool = true,
     dir: [256]u8 = undefined,
     dir_len: usize = 0,
 };
@@ -69,11 +104,11 @@ fn writeBackdrop(j: Job) void {
     const d = j.dir[0..j.dir_len];
     // ぼかした絵なので縮めても見た目は変わらない(大きな画面で 15MB にならないように)
     var step: usize = 1;
-    while (j.w / step > MAX_W) step += 1;
+    while (j.w / step > j.max_w) step += 1;
     const ow = j.w / step;
     const oh = j.h / step;
     var pb: [320]u8 = undefined;
-    const tmp = std.fmt.bufPrint(&pb, "{s}/backdrop.bmp.tmp", .{d}) catch return;
+    const tmp = std.fmt.bufPrint(&pb, "{s}/{s}.bmp.tmp", .{ d, j.name }) catch return;
     // GL の読み出しは下の行から、BMP も下の行から(高さを正で書く)なので、そのまま並べればよい
     writeBmp(tmp, ow, oh, struct {
         fn get(ctx: *const Job, s: usize, x: usize, y: usize) [3]u8 {
@@ -82,9 +117,9 @@ fn writeBackdrop(j: Job) void {
         }
     }.get, &j, step) catch return;
     var fb: [320]u8 = undefined;
-    const final = std.fmt.bufPrint(&fb, "{s}/backdrop.bmp", .{d}) catch return;
+    const final = std.fmt.bufPrint(&fb, "{s}/{s}.bmp", .{ d, j.name }) catch return;
     std.fs.cwd().rename(tmp, final) catch return;
-    writeState(d, j.accent, j.tinted);
+    if (j.state) writeState(d, j.accent, j.tinted);
 }
 
 fn writeState(d: []const u8, accent: Color, tinted: bool) void {

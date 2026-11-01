@@ -365,6 +365,19 @@ pub const Wallpaper = struct {
 
     fn draw(ctx: *anyopaque, s: *Surface, _: *gfx.Canvas, dt: f32) bool {
         const self: *Wallpaper = @ptrCast(@alignCast(ctx));
+        return self.frame(s, dt, true);
+    }
+
+    /// ロック画面・ログイン画面の下では壁紙のサーフェスに frame が来ない(描かれない)ので、
+    /// ロック画面の描画から壁紙のシーンを進める(オーロラが動き続け、切り替えも最後まで進む)。
+    /// 動画は EGL の current を切り替える必要があるので進めない(止まったコマのまま)
+    pub fn advanceForLock(self: *Wallpaper, dt: f32) void {
+        const s = self.surf;
+        if (self.player != null or self.prev_player != null) return;
+        _ = self.frame(s, dt, false);
+    }
+
+    fn frame(self: *Wallpaper, s: *Surface, dt: f32, to_screen: bool) bool {
         const app = self.app;
         const cfg = &app.cfg;
         const now = loop.nowMs();
@@ -417,7 +430,7 @@ pub const Wallpaper = struct {
             .cb = Color.hex(cfg.aurora_b),
             .cc = Color.hex(cfg.aurora_c),
         }, cfg.blur);
-        self.out.backdrop.blitTo(&app.gpu, @intCast(s.width * @as(u32, @intCast(s.scale))), @intCast(s.height * @as(u32, @intCast(s.scale))));
+        if (to_screen) self.out.backdrop.blitTo(&app.gpu, @intCast(s.width * @as(u32, @intCast(s.scale))), @intCast(s.height * @as(u32, @intCast(s.scale))));
 
         if (!transitioning and (self.prev_img.tex != 0 or self.prev_player != null)) self.dropPrev();
         // ガラス面は壁紙が変わった直後だけ描き直す(ライブ壁紙の毎フレームでは描き直さない:
@@ -429,6 +442,7 @@ pub const Wallpaper = struct {
             self.sddm_pending = false;
             const bd = &self.out.backdrop;
             @import("sddmshare.zig").saveFramebuffer(bd.blurred_fbo, bd.blurred_w, bd.blurred_h, theme.accent(app), false);
+            @import("sddmshare.zig").saveWallpaper(bd.scene.fbo, bd.scene.w, bd.scene.h, @tagName(self.mode));
         }
         if (transitioning or self.first_frames < 2) {
             app.backdropChanged(self.out);

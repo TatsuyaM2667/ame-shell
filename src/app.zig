@@ -280,6 +280,12 @@ pub const App = struct {
         app.supertap.start();
 
         for (app.outputs.items) |o| app.setupOutput(o);
+        // ログイン画面(greetd から AME_GREETER=1 で起動されたとき): すぐにロック画面と同じ画面を出す
+        if (@import("greeter.zig").enabled()) {
+            @import("greeter.zig").load();
+            @import("greeter.zig").applyUser(app);
+            app.lock.greet();
+        }
         app.initialized = true;
         logRss("after-surfaces");
         return app;

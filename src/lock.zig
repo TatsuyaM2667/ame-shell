@@ -55,6 +55,8 @@ pub const Lock = struct {
     locked: bool = false,
     /// このロックで、ログイン画面(SDDM)用の背景をもう書き出したか(sddmshare.zig)
     sddm_saved: bool = false,
+    /// ログイン画面(greeter.zig)として動いている: 認証は greetd、成功したら ame-shell を終える
+    greeter: bool = false,
     pam: ?Pam = null,
     service: [:0]const u8 = "ame-shell",
     pw: [256]u8 = undefined,
@@ -158,7 +160,21 @@ pub const Lock = struct {
             self.app.notifs.post("ame-shell", "画面をロックできません", why, 0);
             return "error: lock unavailable (see notification)";
         }
-        const sess = c.ext_session_lock_manager_v1_lock(self.app.lock_mgr) orelse return "error: lock request failed";
+        if (!self.startSession()) return "error: lock request failed";
+        return "ok";
+    }
+
+    /// ログイン画面として始める(greetd から AME_GREETER=1 で起動されたとき。App.init から)
+    pub fn greet(self: *Lock) void {
+        self.greeter = true;
+        if (self.app.lock_mgr == null or !self.startSession()) {
+            std.log.err("greeter: コンポジタが ext-session-lock-v1 に未対応のため、ログイン画面を出せません", .{});
+            self.app.running = false;
+        }
+    }
+
+    fn startSession(self: *Lock) bool {
+        const sess = c.ext_session_lock_manager_v1_lock(self.app.lock_mgr) orelse return false;
         self.session = sess;
         _ = c.ext_session_lock_v1_add_listener(sess, &session_listener, self);
         self.locked = true;
@@ -187,7 +203,7 @@ pub const Lock = struct {
         // ランチャー等は閉じておく(ロック解除後に開いたままにならないように)
         self.app.launcher.close();
         self.app.dashboard.close();
-        return "ok";
+        return true;
     }
 
     pub fn scheduleAll(self: *Lock) void {
@@ -222,6 +238,8 @@ pub const Lock = struct {
         if (self.unlocking and self.unlock_s.x > 0.98) {
             self.unlocking = false;
             self.finish(true);
+            // ログイン画面: セッションは greetd が始める。ame-shell(と River)は終わる
+            if (self.greeter) self.app.running = false;
         }
     }
 
@@ -239,6 +257,18 @@ pub const Lock = struct {
         }
         if (pid == 0) {
             _ = c.close(fds[0]);
+            if (self.greeter) {
+                // greetd に認証とセッションの開始を頼む。結果 1 バイト + 失敗の理由
+                var m: [160]u8 = undefined;
+                var ml: usize = 0;
+                const r = @import("greeter.zig").authenticate(self.pw[0..self.pw_len], &m, &ml);
+                @memset(&self.pw, 0);
+                var out: [161]u8 = undefined;
+                out[0] = r;
+                @memcpy(out[1 .. 1 + ml], m[0..ml]);
+                _ = c.write(fds[1], &out, 1 + ml);
+                c._exit(0);
+            }
             const ok = self.pamCheck();
             const b: u8 = if (ok) 1 else 0;
             _ = c.write(fds[1], &b, 1);
@@ -269,17 +299,23 @@ pub const Lock = struct {
 
     fn onAuthDone(ctx: *anyopaque, fd: c_int, _: u32) void {
         const self: *Lock = @ptrCast(@alignCast(ctx));
-        var b: u8 = 0;
-        const n = c.read(fd, &b, 1);
+        var buf: [161]u8 = undefined;
+        const n = c.read(fd, &buf, buf.len);
+        const b: u8 = if (n >= 1) buf[0] else 0;
         self.app.loop.remove(fd);
         _ = c.close(fd);
         self.auth_fd = -1;
         self.busy = false;
         self.pw_len = 0;
-        if (n == 1 and b == 1) {
+        if (n >= 1 and b == 1) {
+            if (self.greeter) @import("greeter.zig").saveLastUser();
             self.setMsg("ようこそ");
             self.unlocking = true;
             self.unlock_s.set(1);
+        } else if (n > 1 and b == 2) {
+            // greetd の失敗(パスワード以外)
+            self.setMsg(buf[1..@intCast(n)]);
+            self.shake.kick(420);
         } else {
             self.setMsg("パスワードが違います");
             self.shake.kick(420);
@@ -330,12 +366,33 @@ pub const Lock = struct {
         const self: *Lock = @ptrCast(@alignCast(ctx));
         if (ev.kind != .press or self.busy or self.unlocking) return;
         self.last_input_ms = @import("platform/loop.zig").nowMs();
+        // ログイン画面のボタン(どちらの画面でも)
+        if (self.greeter) {
+            const g = @import("greeter.zig");
+            switch (self.hits.which(ev.x, ev.y)) {
+                .uprev, .unext => |h| {
+                    g.cycleUser(self.app, if (h == .uprev) -1 else 1);
+                    self.msg_len = 0;
+                    self.scheduleAll();
+                    return;
+                },
+                .session => {
+                    g.cycleSession(1);
+                    self.scheduleAll();
+                    return;
+                },
+                .reboot => return g.power(true),
+                .poweroff => return g.power(false),
+                else => {},
+            }
+        }
         if (!self.auth_mode) {
             switch (self.hits.which(ev.x, ev.y)) {
                 .prev => self.app.media.prev(),
                 .play => self.app.media.toggle(),
                 .next => self.app.media.next(),
                 .stack => self.notif_expanded = !self.notif_expanded,
+                .uprev, .unext, .session, .reboot, .poweroff => {},
                 .none => self.setAuth(true),
             }
         } else if (ev.button == 0x111 and self.pw_len == 0) self.setAuth(false); // 右クリックでもどる
@@ -377,6 +434,12 @@ pub const Lock = struct {
         return 1;
     }
 
+    /// 入力画面に出す名前(ログイン画面では選んでいるユーザー)
+    pub fn userName(self: *const Lock, buf: []u8) []const u8 {
+        if (self.greeter) return @import("greeter.zig").userName();
+        return currentUserName(buf);
+    }
+
     pub fn isError(self: *const Lock) bool {
         return std.mem.startsWith(u8, self.msg[0..self.msg_len], "パスワードが違います");
     }
@@ -411,9 +474,17 @@ pub const Lock = struct {
         }
         if (self.unlocking and self.unlock_s.x > 0.98) app.reap_pending = true;
 
-        const out_bd: ?*gfx.Backdrop = for (self.views) |v| {
-            if (v) |vv| if (vv.surf == s) break &vv.out.backdrop;
+        const out: ?*Output = for (self.views) |v| {
+            if (v) |vv| if (vv.surf == s) break vv.out;
         } else null;
+        // 壁紙のシーンをロック画面から進める(オーロラが動き続ける。wallpaper.zig)
+        if (out) |o| if (o.wall) |w| {
+            w.advanceForLock(dt);
+            // 壁紙の描画で変わった描き先の大きさを、このサーフェスに戻す
+            c.glBindFramebuffer(c.GL_FRAMEBUFFER, 0);
+            c.glViewport(0, 0, @intFromFloat(@as(f32, @floatFromInt(s.width)) * cv.scale), @intFromFloat(@as(f32, @floatFromInt(s.height)) * cv.scale));
+        };
+        const out_bd: ?*gfx.Backdrop = if (out) |o| &o.backdrop else null;
         if (lockui.draw(self, s, out_bd, cv, primary, dt)) animating = true;
         return animating or self.busy;
     }

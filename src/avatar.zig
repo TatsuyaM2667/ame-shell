@@ -24,6 +24,8 @@ pub const Avatar = struct {
     loading: bool = false,
     /// 読み込み中にもう一度 reload された(読み終えたら読み直す)
     again: bool = false,
+    /// 写真を消して頭文字の表示にもどす(描画中に GL のテクスチャを消す)
+    clear_pending: bool = false,
 
     pub fn create(app: *App) !*Avatar {
         const self = try app.alloc.create(Avatar);
@@ -52,7 +54,12 @@ pub const Avatar = struct {
             return;
         }
         var buf: [600]u8 = undefined;
-        const path = resolve(&buf) orelse return;
+        const path = resolve(&buf) orelse {
+            // 写真が無い(ログイン画面で写真の無い人を選んだなど): 前の写真を消す
+            self.clear_pending = true;
+            self.app.redrawAll();
+            return;
+        };
         const owned = std.heap.c_allocator.dupeZ(u8, path) catch return;
         self.loading = true;
         const t = std.Thread.spawn(.{}, work, .{ self, owned }) catch {
@@ -96,6 +103,11 @@ pub const Avatar = struct {
 
     /// 描画中に呼ぶ。写真が無ければ 0
     pub fn texture(self: *Avatar) c.GLuint {
+        if (self.clear_pending) {
+            self.clear_pending = false;
+            if (self.tex != 0) c.glDeleteTextures(1, &self.tex);
+            self.tex = 0;
+        }
         if (self.ready) |p| {
             if (self.tex != 0) c.glDeleteTextures(1, &self.tex);
             self.tex = gfx.uploadImage(p, SIZE, SIZE);
@@ -118,7 +130,22 @@ fn exists(p: []const u8) bool {
 }
 
 /// 使う画像のパスを決める(無ければ null)
+// ログイン画面(greeter.zig)では、選んだユーザーの写真(共有の置き場)を使う
+var override_buf: [256]u8 = undefined;
+var override_len: usize = 0;
+
+pub fn setOverride(p: ?[]const u8) void {
+    const s = p orelse {
+        override_len = 0;
+        return;
+    };
+    override_len = @min(s.len, override_buf.len);
+    @memcpy(override_buf[0..override_len], s[0..override_len]);
+}
+
 pub fn resolve(buf: []u8) ?[]const u8 {
+    if (override_len > 0) return std.fmt.bufPrint(buf, "{s}", .{override_buf[0..override_len]}) catch null;
+    if (@import("greeter.zig").enabled()) return null;
     var pb: [512]u8 = undefined;
     if (configPath(&pb)) |cp| {
         if (std.fs.cwd().openFile(cp, .{})) |f| {

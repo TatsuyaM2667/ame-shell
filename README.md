@@ -49,7 +49,12 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
 
 ### そのほか
 - 通知サーバ内蔵(`org.freedesktop.Notifications`。他のデーモンが動いていれば譲る)
-- ロック画面(Super+L、ext-session-lock + PAM)
+- **ロック画面**(Super+L、ext-session-lock + PAM。iOS / iPadOS のロック画面のような作り、`src/lockui.zig`):
+  - 眺める画面: くっきりした壁紙(オーロラ・雨はロック中も動き続ける)の上に日付・特大の時計・電池、
+    再生中の曲(回るレコードと cava の波形、ジャケットをぼかした背景、進み具合、前・再生・次のボタン)、
+    ロック中に来た通知(新しい順に重なり、押すと広がる)、光が流れる「解除するには…」とホームバー
+  - キーかクリックで入力画面へ: 背景がぼけて時計が小さく上へ、写真・名前・ガラスの入力欄。Esc か 12 秒で戻る
+  - 解除すると鍵が開き、全体が少し拡大しながら消えてデスクトップへ
 - WASM ウィジェット(保存すると状態を保ったままホットリロード)
 - `ame-ctl` でシェルを操作(キーバインドやスクリプトから)
 
@@ -77,26 +82,25 @@ Chimera のリポジトリには River 0.3 が無いので、`install.sh` が Ri
    ```
 2. `sh install.sh` を実行する。次のことを順に行います
    - **パッケージ**(`doas apk add`): ビルドに要るもの(clang・llvm-devel・linux-headers・pkgconf・wayland / mesa / libdrm / xkbcommon / freetype / harfbuzz / fontconfig / dbus / linux-pam の -devel)、
-     River 0.5 のビルドに要るもの(wlroots0.20-devel など)、動かすのに要るもの(sddm・foot・mesa-dri・polkit・pipewire・wireplumber・libpulse-progs・playerctl・cava・grim・slurp・wl-clipboard・swaylock・brightnessctl・util-linux-rfkill・networkmanager・bluez・xdg-desktop-portal(-gtk・-wlr)・fonts-noto-sans-cjk-otf・fonts-nerd-jetbrains-mono・fonts-nerd-symbols-only・adwaita / hicolor のアイコンテーマ)。
+     River 0.5 のビルドに要るもの(wlroots0.20-devel など)、動かすのに要るもの(greetd・foot・mesa-dri・polkit・pipewire・wireplumber・libpulse-progs・playerctl・cava・grim・slurp・wl-clipboard・swaylock・brightnessctl・util-linux-rfkill・networkmanager・bluez・thunar・tumbler・xdg-desktop-portal(-gtk・-wlr)・fonts-noto-sans-cjk-otf・fonts-nerd-jetbrains-mono・fonts-nerd-symbols-only・adwaita / hicolor のアイコンテーマ)。
      どれかが入らないとそこで止まります(足りないまま進めて、スクショや波形が動かないことが無いように)
    - Zig 0.13 と Odin、River 0.5 のビルド、ame-shell のビルドとインストール
    - **インストール後の設定**(1 つずつ `[y/N]` で確認。`--yes` で全部、`--no-setup` で何もしない):
-     video・input グループへの追加 / sddm・networkmanager・bluetoothd を次の起動から有効に /
+     video・input グループへの追加 / networkmanager・bluetoothd を次の起動から有効に / ログイン画面を ame-shell(greetd)に /
      wheel グループが NetworkManager を操作できる polkit のルール(`/etc/polkit-1/rules.d/50-networkmanager.rules`。無いと Wi-Fi パネルから接続できません)
    - **音のユーザーサービス**: pipewire・pipewire-pulse・wireplumber が有効か確かめ、確認してから `dinitctl --user enable` する
-3. 最後の確認結果に `WARNING` が無いことを見て、再起動する。SDDM で「Ame Shell」を選ぶ
+3. 最後の確認結果に `WARNING` が無いことを見て、再起動する。ame-shell のログイン画面(ロック画面と同じ見た目)が出ます
 
 確認結果は、TTY(`TERM=linux`)では日本語が豆腐になるので英語で出します(`AME_ASCII=1` でも英語)。断った設定は最後に「あとで root で行うコマンド」として表示します。
 インストールの中身だけを確かめるには `sh session/install-session.sh --dry-run`(何も書き込みません)。
 
-**SDDM のために入った KDE Plasma を消す**: Chimera の sddm は、既定のテーマ(plasma-desktop が提供)とコンポジタ(kwin)のために KDE Plasma 一式を引き込みます。
-`install.sh` は `sddm-theme-none`・`sddm-default-weston` を指定して入れるので新しく入れる分には入りませんが、既に入っている場合は次で消せます(800 以上のパッケージ、約 2.5GB。Dolphin・Konsole・Okular・Kate なども消えます):
+**SDDM と、そのために入った KDE Plasma を消す**: ログイン画面は ame-shell(greetd)なので SDDM は要りません。Chimera の sddm は、既定のテーマ(plasma-desktop)とコンポジタ(kwin)のために KDE Plasma 一式(800 以上・約 2.5GB)を引き込んでいます。
+ログイン画面を ame-shell にした後(`sh install.sh` の確認、または `doas sh scripts/greeter-setup.sh`)なら、次で消せます(Dolphin・Konsole・Okular・Kate なども消えます。ファイルマネージャは thunar):
 ```sh
-# ame-shell が使うもの(KDE と一緒に入っていたもの)は残すよう明示する。! は「入れない」の指定
-doas apk add sddm-theme-none sddm-default-weston ffmpeg mpv-libs libpulse-progs xwayland upower power-profiles-daemon \
-    '!plasma-desktop' '!sddm-default-kwin'
+# ame-shell が使うもの(KDE と一緒に入っていたもの)は残すよう明示する。'!sddm' は「sddm を入れない」の指定
+doas apk add greetd greetd-dinit thunar tumbler ffmpeg mpv-libs libpulse-progs xwayland upower power-profiles-daemon '!sddm'
 ```
-消す前に `apk add --simulate …`(同じ引数)で消えるものを確かめられます。KDE をまた入れるときは `doas apk del '!plasma-desktop' '!sddm-default-kwin'` で指定を外してください。
+消す前に `apk add --simulate …`(同じ引数)で消えるものを確かめられます。SDDM をまた入れるときは `doas apk del '!sddm'` で指定を外してください。
 
 ### Arch Linux
 `sh install.sh` が Arch(と EndeavourOS / Manjaro など Arch 系)を見つけると `scripts/install-arch.sh` を使います。River 0.5・Odin・wlroots 0.20 も公式リポジトリにあるので、pacman で入れて(AUR は使いません)、sddm・NetworkManager・bluetooth を有効にし(ほかのログイン画面が有効ならそのまま)、ame-shell をビルドしてインストールします。Zig だけは 0.13 が必要なので公式の配布物を `~/.cache` に取ってきます。
@@ -112,8 +116,15 @@ Bluetooth のイヤホンの音には `pipewire-audio`、バーのアイコン�
   FreeBSD はインストーラが I2C(ig4・iichid・hmt)と PS/2(psm の Synaptics / Elantech)のドライバを設定します。後からは `doas sh scripts/freebsd-touchpad.sh`(再起動後に有効)、状態の確認は `sh scripts/freebsd-touchpad.sh --check`。
 - **Bluetooth(FreeBSD)**: インストーラと ame-update が、内蔵アダプタのファームウェア(Realtek: rtlbt-firmware / Intel: iwmbt-firmware)・ng_ubt・hcsecd / sdpd / bthidd を設定します。後からは `doas sh scripts/freebsd-bluetooth.sh`、確認は `--check`。機器のペアリングは今のところ端末で `doas bluetooth-config scan`(マウス・キーボード)。
 - **無線のブロック解除**: Linux ではセッションの開始時に `rfkill unblock all`(と `bluetoothctl power on`)。ログイン直後は `/dev/rfkill` の権限がまだ付いていないことがあるので、裏で数秒おきに試します。Bluetooth の電源を設定パネル・サイドバーから入れるときも、先にブロックを外します。
-- **ログイン画面(SDDM)**: Super+L のロック画面と同じ見た目の ame-shell のテーマ(`data/sddm/ame`)。大きさ・位置・色はロック画面(`src/lock.zig`)と同じ数値です。
-  - **背景・写真・アクセント色は ame-shell が書き出す**: インストーラがユーザーごとの置き場 `/var/lib/ame-shell/sddm/<ユーザー>`(FreeBSD は `/var/db/…`)を作り、ame-shell が起動したとき・壁紙を変えたとき・ロックしたときに、ぼかした壁紙(ロックしたときはロック画面の背景そのもの)・ユーザーの写真・アクセント色をそこへ書きます。root は要らず、次のログイン画面から反映されます。この置き場は誰でも読めます(ぼかした壁紙と写真が入るため)。
+- **ログイン画面**: ame-shell 自身が描く(greetd + `ame-greeter`、`src/greeter.zig`)。**ロック画面と同じ見た目と動き**で、SDDM は要りません。
+  - greetd が greeter 用のユーザー(Chimera: `_greetd`)で River 0.5 + ame-shell をログイン画面のモードで起動し、パスワードが合うと greetd がセッション(既定は「Ame Shell」)を始めます
+  - 写真の左右の ‹ › でユーザー、左下でセッションを切り替え、右下に再起動・電源オフ。最後にログインした人が最初に出ます
+  - 背景と写真は、ユーザーごとの置き場 `/var/lib/ame-shell/greeter/<ユーザー>`(FreeBSD は `/var/db/…`)から。ame-shell が起動したとき・壁紙を変えたとき・ロックしたときに、壁紙(画像なら絵、オーロラ・雨なら種類だけ)・ぼかした背景・写真・アクセント色をそこへ書きます(root は要りません。この置き場は誰でも読めます)
+  - 入れ方: `sh install.sh`(インストール後の設定で確認)、または `doas sh scripts/greeter-setup.sh`(`--dry-run` で内容だけ表示)。`/etc/greetd/config.toml` を書き換え(元は `.ame-bak`)、次の起動から sddm の代わりに greetd を使います
+  - ログイン画面が出ないときは TTY(Ctrl+Alt+F2)でログインして `doas sh scripts/greeter-setup.sh --undo`(SDDM に戻す)。ログは `/var/lib/greetd/ame-greeter.log`
+  - 試す: `AME_GREETER=1 AME_GREETER_FAKE=1`(パスワード `ame` で成功したことにする)でネストした River の中に出せます
+- **SDDM を使う場合**(FreeBSD など): ロック画面と同じ見た目の SDDM のテーマ(`data/sddm/ame`)も用意しています。
+  - **背景・写真・アクセント色は ame-shell が書き出す**: インストーラがユーザーごとの置き場 `/var/lib/ame-shell/greeter/<ユーザー>`(FreeBSD は `/var/db/…`)を作り、ame-shell が起動したとき・壁紙を変えたとき・ロックしたときに、ぼかした壁紙(ロックしたときはロック画面の背景そのもの)・ユーザーの写真・アクセント色をそこへ書きます。root は要らず、次のログイン画面から反映されます。この置き場は誰でも読めます(ぼかした壁紙と写真が入るため)。
   - まだ書き出していないときは、壁紙の画像(動画なら 1 コマ目)をぼかしたもの、オーロラ・雨ならオーロラ風の背景。
   - **SDDM の設定を上書き**: `/etc/sddm.conf.d/zz-ame.conf`(既定と他の conf.d より後に読まれる)でテーマを ame に。`/etc/sddm.conf` にテーマなどの指定があれば、元を `.ame-bak` に残してその行を無効にします。
   - **軽いコンポジタ**: Chimera の既定ではログイン画面が kwin_wayland の上で動き重いので、weston があれば `weston --shell=kiosk` に替えます(キーボード配列は `~/.config/ame-shell/xkb-layout` → X11 の設定 → `localectl` の順に渡す)。
