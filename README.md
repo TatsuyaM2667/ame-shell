@@ -103,7 +103,14 @@ Bluetooth のイヤホンの音には `pipewire-audio`、バーのアイコン�
   FreeBSD はインストーラが I2C(ig4・iichid・hmt)と PS/2(psm の Synaptics / Elantech)のドライバを設定します。後からは `doas sh scripts/freebsd-touchpad.sh`(再起動後に有効)、状態の確認は `sh scripts/freebsd-touchpad.sh --check`。
 - **Bluetooth(FreeBSD)**: インストーラと ame-update が、内蔵アダプタのファームウェア(Realtek: rtlbt-firmware / Intel: iwmbt-firmware)・ng_ubt・hcsecd / sdpd / bthidd を設定します。後からは `doas sh scripts/freebsd-bluetooth.sh`、確認は `--check`。機器のペアリングは今のところ端末で `doas bluetooth-config scan`(マウス・キーボード)。
 - **無線のブロック解除**: Linux ではセッションの開始時に `rfkill unblock all`(と `bluetoothctl power on`)。ログイン直後は `/dev/rfkill` の権限がまだ付いていないことがあるので、裏で数秒おきに試します。Bluetooth の電源を設定パネル・サイドバーから入れるときも、先にブロックを外します。
-- **ログイン画面(SDDM)**: ロック画面と同じ見た目の ame-shell のテーマ(`data/sddm/ame`。背景はその人の ame-shell の壁紙をぼかしたもの、動画なら 1 コマ目)。FreeBSD はインストーラと ame-update が入れ、壁紙を変えたら ame-update で背景も更新。手動では `doas sh scripts/sddm-theme.sh`。SDDM のテーマは QML でしか書けないため、ここだけ QML を使っています。
+- **ログイン画面(SDDM)**: Super+L のロック画面と同じ見た目の ame-shell のテーマ(`data/sddm/ame`)。大きさ・位置・色はロック画面(`src/lock.zig`)と同じ数値です。
+  - **背景・写真・アクセント色は ame-shell が書き出す**: インストーラがユーザーごとの置き場 `/var/lib/ame-shell/sddm/<ユーザー>`(FreeBSD は `/var/db/…`)を作り、ame-shell が起動したとき・壁紙を変えたとき・ロックしたときに、ぼかした壁紙(ロックしたときはロック画面の背景そのもの)・ユーザーの写真・アクセント色をそこへ書きます。root は要らず、次のログイン画面から反映されます。この置き場は誰でも読めます(ぼかした壁紙と写真が入るため)。
+  - まだ書き出していないときは、壁紙の画像(動画なら 1 コマ目)をぼかしたもの、オーロラ・雨ならオーロラ風の背景。
+  - **SDDM の設定を上書き**: `/etc/sddm.conf.d/zz-ame.conf`(既定と他の conf.d より後に読まれる)でテーマを ame に。`/etc/sddm.conf` にテーマなどの指定があれば、元を `.ame-bak` に残してその行を無効にします。
+  - **軽いコンポジタ**: Chimera の既定ではログイン画面が kwin_wayland の上で動き重いので、weston があれば `weston --shell=kiosk` に替えます(キーボード配列は `~/.config/ame-shell/xkb-layout` → X11 の設定 → `localectl` の順に渡す)。
+  - 入れ方: `sh install.sh`(インストール後の設定で確認)、または `doas sh scripts/sddm-theme.sh`(`--dry-run` で内容だけ表示、`--no-compositor` でコンポジタは変えない)。FreeBSD はインストーラと ame-update が入れます。元に戻すのは `sh install.sh --uninstall`。
+  - ログイン画面が出なくなったときは、TTY(Ctrl+Alt+F2)でログインして `doas rm /etc/sddm.conf.d/zz-ame.conf` で元の設定に戻ります。
+  - SDDM のテーマは QML でしか書けないため、ここだけ QML を使っています。
 
 ### アップデート(ame-update)
 

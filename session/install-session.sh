@@ -100,7 +100,7 @@ if [ "$UNINSTALL" = 1 ]; then
     done < "$MANIFEST"
     run rm -f "$MANIFEST"
     # 自分で作った空ディレクトリだけ片付ける(他のファイルがあれば残る)
-    for d in "$DESTDIR$PREFIX/share/icons/ame/cursors" "$DESTDIR$PREFIX/share/icons/ame" "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell/xdg/foot" "$DESTDIR$PREFIX/share/ame-shell/xdg/fastfetch" "$DESTDIR$PREFIX/share/ame-shell/xdg/xdg-desktop-portal" "$DESTDIR$PREFIX/share/ame-shell/examples" "$DESTDIR$PREFIX/share/ame-shell/xdg" "$DESTDIR$PREFIX/share/ame-shell" "$DESTDIR$PREFIX/opt/river-0.5/bin" "$DESTDIR$PREFIX/opt/river-0.5"; do
+    for d in "$DESTDIR$PREFIX/share/icons/ame/cursors" "$DESTDIR$PREFIX/share/icons/ame" "$DESTDIR$PREFIX/share/ame-shell/widgets" "$DESTDIR$PREFIX/share/ame-shell/xdg/foot" "$DESTDIR$PREFIX/share/ame-shell/xdg/fastfetch" "$DESTDIR$PREFIX/share/ame-shell/xdg/xdg-desktop-portal" "$DESTDIR$PREFIX/share/ame-shell/examples" "$DESTDIR$PREFIX/share/ame-shell/xdg" "$DESTDIR$PREFIX/share/ame-shell" "$DESTDIR/usr/share/sddm/themes/ame" "$DESTDIR/usr/local/share/sddm/themes/ame" "$DESTDIR$PREFIX/opt/river-0.5/bin" "$DESTDIR$PREFIX/opt/river-0.5"; do
         [ -d "$d" ] && run rmdir "$d" 2>/dev/null
     done
     say "完了しました。"
@@ -410,6 +410,22 @@ RULES
             rm -f "$tmp"
         else
             later "$(m "polkit のルール" "polkit rule"): $RULE"
+        fi
+    fi
+    # 4. ログイン画面(SDDM)をロック画面と同じ見た目にし、SDDM の設定を上書きする(scripts/sddm-theme.sh)。
+    #    テーマ ame・ame-shell が背景や写真を書き出す置き場・weston のキオスク(kwin_wayland より軽い)
+    if command -v sddm >/dev/null 2>&1 && [ -f "$ROOT/scripts/sddm-theme.sh" ]; then
+        SDDM_CONF=/etc/sddm.conf.d/zz-ame.conf
+        if grep -qx "$SDDM_CONF" "$MANIFEST" 2>/dev/null ||
+            ask "ログイン画面(SDDM)をロック画面と同じ見た目にし、SDDM の設定を上書きしますか?(テーマ ame、コンポジタ weston)" \
+                "Make the SDDM login screen look like the lock screen and override the SDDM settings? (theme ame, weston compositor)"; then
+            if [ "$DRY" = 1 ]; then
+                sh "$ROOT/scripts/sddm-theme.sh" --user "$U" --dry-run
+            else
+                sh "$ROOT/scripts/sddm-theme.sh" --user "$U" --manifest "$TMP_MANIFEST" && ok "SDDM: テーマ ame" "SDDM: theme ame"
+            fi
+        else
+            later "sh $ROOT/scripts/sddm-theme.sh --user $U"
         fi
     fi
 fi
