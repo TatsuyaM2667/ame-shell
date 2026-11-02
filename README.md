@@ -20,7 +20,8 @@ Chimera Linux(musl + dinit)向け。SDDM から選べるセッションつき。
 
 - **上: ダッシュボード** — 4 つのタブ
   - ダッシュボード: 天気・機種/CPU/GPU 名・ユーザーの写真(クリックで選べる)・カレンダー・メディア
-  - メディア: 回るレコードと、それを包む液体のスペクトラム(録音して ame-shell の中で FFT)、トーンアーム(再生中は針が盤面の溝に乗り、曲の進みに合わせて内側へ)、曲名・アーティスト・**アルバム名**、**同期歌詞**(LRCLIB から自動取得。今の行だけが 1 行ずつポンと出る。上・下をクリックで前・次の行へ)
+  - メディア: 回るレコードと、それを包む液体のスペクトラム(録音して ame-shell の中で FFT)、トーンアーム(再生中は針が盤面の溝に乗り、曲の進みに合わせて内側へ)、曲名・アーティスト・**アルバム名**、**同期歌詞**(今の行だけが 1 行ずつポンと出る。上・下をクリックで前・次の行へ、ホイールで前後の行を見る)
+    - 歌詞の取り寄せ先: プレーヤー自身の歌詞ファイル → キャッシュ → music-tui の歌詞サーバ → LRCLIB → NetEase → 酷狗(Kugou)→ 曲名だけで LRCLIB。YouTube などの「【MV】アーティスト「曲名」」「〜 - Topic」といった書き方は、検索の前にアーティストと曲名へ整えます
     - プレーヤーが歌詞を持っている場合は `$XDG_RUNTIME_DIR/lyrics/<MPRIS のプレーヤー名>.lrc`(`[ti:]` `[ar:]` `[al:]` つきの LRC)に置くと、LRCLIB より優先して使います。曲が変わったら書き換えるか消してください
   - パフォーマンス: CPU / GPU / メモリ / ストレージの円グラフ(CPU・GPU は温度つき)
   - ワークスペース: 1〜9 と、それぞれで**開いているアプリのアイコンと名前**
@@ -36,6 +37,7 @@ River 0.5 は「描画は River、配置はウィンドウマネージャ」と�
 - **開く**: 中心から広がる / **移動・並べ替え**: なめらかに動く / **ワークスペース切替**: 横にスライド / **閉じる**: 縮んでから閉じる(すべてスプリング)
 - 動いているときだけ毎フレーム更新し、止まっていれば River との通信も 0
 - ame-shell を再起動しても窓のワークスペースは保たれる
+- **浮いた窓は紙のようにたわむ**: つかんで動かすと、つかんだ所だけがカーソルに付いて行き、遠い所ほど遅れて付いてくる(窓の絵を ext-image-copy-capture で撮り、16×12 の網目で描く)。離すとすーっと元の形に戻る
 
 River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ランチャーなど)はそのまま使えます。
 
@@ -49,12 +51,15 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
 
 ### そのほか
 - 通知サーバ内蔵(`org.freedesktop.Notifications`。他のデーモンが動いていれば譲る)
+  - 電池の残量が少ないとき、充電器の抜き差し(満充電まであと何分・何時ごろ)、USB 機器・USB メモリ・SD カードの抜き差し(名前・容量・ラベル)も通知
+- **録画**(ユーティリティの録画ボタン): wf-recorder で `~/Videos` に保存。**PC で鳴っている音も一緒に**録る(PipeWire は既定の出力、PulseAudio は `<出力>.monitor`)
+- **スクリーンショット**: grim / slurp / wl-copy を使わず ame-shell が自分で撮る(ext-image-copy-capture、PNG は自前のエンコーダ、クリップボードは ext-data-control)
 - **ロック画面**(Super+L、ext-session-lock + PAM。iOS / iPadOS のロック画面のような作り、`src/lockui.zig`):
   - 眺める画面: くっきりした壁紙(オーロラ・雨はロック中も動き続ける)の上に日付・特大の時計・電池、
-    再生中の曲(回るレコードと液体のスペクトラム、ジャケットをぼかした背景、進み具合、前・再生・次のボタン)、
+    再生中の曲(右下の小さなカード: 回るレコードと液体のビジュアライザー、進み具合、前・再生・次のボタン。歌詞はダッシュボードと同じ見せ方で上に浮かぶ)、
     ロック中に来た通知(新しい順に重なり、押すと広がる)、光が流れる「解除するには…」とホームバー
   - キーかクリックで入力画面へ: 背景がぼけて時計が小さく上へ、写真・名前・ガラスの入力欄。Esc か 12 秒で戻る
-  - 解除すると鍵が開き、全体が少し拡大しながら消えてデスクトップへ
+  - 解除すると**水の波紋**が中心から広がり、波が通り過ぎた所からデスクトップが透けて見える(ロック画面の最後の絵を写したオーバーレイを出してからロックを外す)
 - WASM ウィジェット(保存すると状態を保ったままホットリロード)
 - `ame-ctl` でシェルを操作(キーバインドやスクリプトから)
 
@@ -115,6 +120,7 @@ Bluetooth のイヤホンの音には `pipewire-audio`、バーのアイコン�
   - 端末の中のシェルは zsh(ログインシェルは変えません)。自分の `~/.zshrc` が無ければ ame-shell の設定(`data/zsh/.zshrc`): 2 行のプロンプト(場所・git のブランチと状態・かかった時間・終了コード・時刻)、矢印で選べる補完、↑↓ で入力中の文字から始まる履歴、灰色の候補(zsh-autosuggestions)、色分け(zsh-syntax-highlighting)、fzf(Ctrl+R)・zoxide(`z`)・eza(アイコン付きの `ls`)。足したい設定は `~/.config/ame-shell/zshrc.local` に
   - 開くと最初に `fastfetch` を表示します(`AME_FASTFETCH=0` で無効)
   FreeBSD では、インストーラと ame-update が `~/.config/foot/foot.ini` と `~/.config/fastfetch/config.jsonc`(いつもの大きいロゴ)をこの設定で上書きします(元のファイルは `*.ame-bak`)。
+- **日本語入力(fcitx5 + Mozc)**: Chimera には Mozc のパッケージが無く、FreeBSD も quarterly に無いことがあるので、`sh install.sh --mozc` でソースからビルドして入れます(10〜20 分。`scripts/build-mozc.sh`)。Arch は pacman で入ります
 - カーソルは未設定なら 24px(Adwaita)。
 - **タッチパッド**: タップでクリック(設定 `shell { tap-to-click on|off }`、River 0.5 のセッション。変更はログインし直すと反映)。
   FreeBSD はインストーラが I2C(ig4・iichid・hmt)と PS/2(psm の Synaptics / Elantech)のドライバを設定します。後からは `doas sh scripts/freebsd-touchpad.sh`(再起動後に有効)、状態の確認は `sh scripts/freebsd-touchpad.sh --check`。
@@ -161,8 +167,10 @@ Zig 0.13 と Odin のソースからのビルド(FreeBSD 向けの配布物が�
 FreeBSD での違い:
 - FreeBSD の `river` パッケージは 0.4 以降なので、ame-shell がウィンドウマネージャを兼ねるセッション(ウィンドウアニメーションつき)だけになります
 - 電池・CPU・メモリ・温度は sysctl、音量は PipeWire が無ければ `mixer(8)`、明るさは `backlight(8)`、機種名は SMBIOS(kenv)から
-- ロックは setuid で入る `swaylock` を使います(FreeBSD の pam_unix は root でないとパスワードを照合できないため)
-- Wi-Fi / Bluetooth の設定パネルは NetworkManager / BlueZ が無いので使えません(パネルにその旨を表示)
+- ロック画面(Super+L)は Linux と同じ ame-shell のもの。FreeBSD の pam_unix は root でないとパスワードを照合できないので、照合だけを小さな setuid の補助 `ame-auth`(`/usr/local/libexec/ame-shell/ame-auth`、PAM のサービスは `/usr/local/etc/pam.d/ame-shell`)に任せます。インストーラ(root で `sh install.sh`)が入れます。`ame-auth` が無いときは setuid の `swaylock` を使います
+- 音は PulseAudio(セッションの開始時に動いていなければ起動)。充電の残り時間は `acpiconf -i 0`、USB メモリ・SD カードの通知は devd から
+- Wi-Fi のパネルは wpa_supplicant(`wpa_cli`)、Bluetooth は netgraph + hcsecd。Bluetooth の機器の追加は root の `bluetooth-config` なので端末で行います(BlueZ が無いため、Linux のようなパネルからのペアリングはできません)
+- ログイン画面は SDDM(greetd が FreeBSD の quarterly に無いため。テーマはロック画面と同じ見た目)
 
 ### 手動でビルドする
 
@@ -172,7 +180,7 @@ FreeBSD での違い:
 音を拾えない(PipeWire / PulseAudio が無い)ときはメディアの波形の場所に理由を表示します。cava・playerctl・grim・slurp・wl-clipboard・nmcli・bluetoothctl は使いません(すべて ame-shell の中で行います)。もう要らないパッケージや KDE の古い設定は `sh scripts/cleanup-old.sh` で消せます。
 
 ```sh
-zig build -Doptimize=ReleaseFast     # zig-out/bin/{ame-shell,ame-ctl}, zig-out/share/ame-shell/
+zig build -Doptimize=ReleaseFast     # zig-out/bin/{ame-shell,ame-ctl,ame-auth}, zig-out/share/ame-shell/
 zig build test
 sh session/install-session.sh        # インストールだけ(--user / --dry-run / --destdir DIR も可)
 # Linux から FreeBSD 向けに試しビルド: zig build -Dtarget=x86_64-freebsd --sysroot <FreeBSD の root> --libc <libc.txt>
@@ -202,7 +210,7 @@ PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5
 ### Bluetooth イヤホン(AirPods など)が繋がらないとき
 `br-connection-refused` で繋がらない・すぐ切れる場合は、`doas sh session/bt-airpods-fix.sh` で BlueZ を従来の Bluetooth(BR/EDR)接続に切り替えてから、ペアリングし直してください(`--undo` で元に戻せます)。
 
-設定パネルからのペアリングは、ブロック解除(rfkill)→ 電源 → ペアリング可 → エージェント(`NoInputNoOutput`)つきのペアリング → 信頼 → 接続 → 音の出力先の切り替え、の順に行います(`data/bt-connect.sh`)。認証に失敗したら一度ペアリングを消してやり直します。
+設定パネルからのペアリングは、ブロック解除(rfkill)→ 電源 → ペアリング可 → エージェント(`NoInputNoOutput`)つきのペアリング → 信頼 → 接続 → 音の出力先の切り替え、の順に行います(BlueZ を D-Bus で直接。bluetoothctl は使いません。`src/platform/netdbus.zig`)。認証に失敗したら一度ペアリングを消してやり直します。
 つながったのに音が出ないときは、パネルに理由が出ます(`pactl` が無い、PipeWire が動いていない、Bluetooth の音声のプラグインが無い: Arch は `pipewire-audio`)。
 
 音が電話のようにガサガサになるのは、アプリがマイクを開いた瞬間に通話用(HFP、モノラル 16kHz)に切り替わるためです。設定パネルから接続すると、この自動切り替えを止めます(`wpctl settings --save bluetooth.autoswitch-to-headset-profile false`)。通話でイヤホンのマイクを使うときは、音量のポップアウトで入力をイヤホンに切り替えてください。
@@ -217,7 +225,7 @@ PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5
 | Super+Escape | セッション(ロック・ログアウト・再起動・電源オフ。危険な操作は 2 回押し)|
 | Super+L | ロック |
 | Super+Shift+W | 壁紙ピッカー |
-| Super+E | ファイルマネージャ(thunar)|
+| Super+E | ファイルマネージャ(Thunar。ame-shell のセッションでは端末と同じ半透明のテーマ AmeGlass で開く。`AME_FILES_THEME=0` でいつものテーマ)|
 | Super+Q / Super+F / Super+Space | 閉じる / 全画面 / フロート |
 | Super+J・K / Super+Shift+J・K | フォーカス / 入れ替え |
 | Super+Ctrl+H・L | 左右の比率 |
@@ -225,7 +233,7 @@ PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5
 | Super+Ctrl+1〜9 | ワークスペースの表示を足す |
 | Super+P / Super+Shift+P | スクラッチパッド |
 | Super+ドラッグ(左 / 右)/ Super+中クリック | 移動 / 大きさ変更 / フロート |
-| タイトルバーをドラッグ | 窓をタイルから外して浮かせる(ひと回り小さくなる)。浮いた窓は、つかんで動かすと紙のようにたわみ、離すと揺れて戻る(AME_WOBBLE=0 で無効)。浮いた窓は縁をドラッグで大きさを変更。縁(窓のすぐ外側)かタイトルバーのダブルクリック・画面の上の端へドラッグ・Super+Space でタイルに戻す |
+| タイトルバーをドラッグ | 窓をタイルから外して浮かせる(ひと回り小さくなる)。浮いた窓は、つかんで動かすと紙のようにたわみ、離すとすーっと元の形に戻る(AME_WOBBLE=0 で無効)。浮いた窓は縁をドラッグで大きさを変更。縁(窓のすぐ外側)かタイトルバーのダブルクリック・画面の上の端へドラッグ・Super+Space でタイルに戻す |
 | Print / Shift+Print / Super+Print | 範囲 / 全画面のスクリーンショット(~/Pictures/Screenshots + クリップボード)/ 全画面をクリップボードだけ。ame-shell が自前で撮る(止めた画面の上でドラッグ、Enter で全体、Esc でやめる)。ext-image-copy-capture の無い River 0.3 などでは grim・slurp・wl-copy を使う |
 | 音量・明るさ・メディアキー | OSD つき |
 | Super+Shift+R | ame-shell を読み込み直す(更新を入れた後に。窓はそのまま)|
@@ -293,6 +301,7 @@ ame-ctl wallpaper aurora|rain|<画像・GIF・動画のパス>
 ame-ctl accent '#ff88aa'|reset           ame-ctl notify <テキスト>
 ame-ctl workspace <1-9>                  ame-ctl window close|fullscreen|float|focus-next|…(River 0.5)
 ame-ctl screenshot region|full|clip      ame-ctl avatar pick
+ame-ctl media play-pause|next|previous    ame-ctl net wifi|saved|radio|ssid|bt|bt-devices
 ame-ctl lock | reload | widgets reload | stats | restart | quit
 ```
 
@@ -307,6 +316,7 @@ ame-ctl lock | reload | widgets reload | stats | restart | quit
 - ユーザーの写真を選ぶ画面は xdg-desktop-portal の実装(xdg-desktop-portal-gtk)が出すので、見た目は GTK のもの。
 - River 0.3 では、ワークスペースごとのアプリ名は推測(River 0.3 は窓とタグの対応を外に出さない)。
 - ランチャーの日本語入力(IME)とトレイは未対応。
+- FreeBSD: Bluetooth の機器の追加は端末(`doas bluetooth-config scan`)。ログイン画面は SDDM。
 - 動画壁紙は再生中に CPU 約 5%(720p)・メモリ +130MB 程度を使う。
 - 詳細は `docs/blockers.md`、計測値は `docs/perf.md`。
 
