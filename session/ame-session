@@ -164,6 +164,15 @@ if [ "${AME_SESSION_NESTED:-0}" != "1" ] && command -v rfkill >/dev/null 2>&1; t
     ) &
 fi
 
+# ---- 音(FreeBSD): PulseAudio を起こす ----
+# Linux は PipeWire(dinit / systemd のユーザーサービス)が動いているが、FreeBSD は何も起こさない。
+# メディアの波形(録音)・アプリごとの音量・Bluetooth の音は PulseAudio を使うので、ここで起こす(既に動いていれば何もしない)
+if [ "$(uname -s)" = FreeBSD ] && [ "${AME_SESSION_NESTED:-0}" != "1" ] && command -v pulseaudio >/dev/null 2>&1; then
+    if ! pulseaudio --check >/dev/null 2>&1; then
+        pulseaudio --start --exit-idle-time=-1 >/dev/null 2>&1 && log "pulseaudio: started" || log "pulseaudio: 起動できませんでした"
+    fi
+fi
+
 # 以前の版が残した「セーフモードで起動する」印は使わなくなったので消す
 rm -f "$STATE_DIR/crashloop" "$STATE_DIR/quick-fails"
 

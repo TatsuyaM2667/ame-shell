@@ -65,6 +65,8 @@ pub const Lock = struct {
     greeter: bool = false,
     pam: ?Pam = null,
     service: [:0]const u8 = "ame-shell",
+    /// FreeBSD: パスワード照合の補助(root の setuid の ame-auth)
+    auth_helper: ?[:0]const u8 = null,
     pw: [256]u8 = undefined,
     pw_len: usize = 0,
     // 認証の子プロセス
@@ -129,6 +131,13 @@ pub const Lock = struct {
     fn preflight(self: *Lock) ?[]const u8 {
         if (!self.app.cfg.lock_enabled) return "ロックは設定で無効になっています";
         if (self.app.lock_mgr == null) return "コンポジタが ext-session-lock-v1 に未対応のためロックできません";
+        // FreeBSD: pam_unix は root でないと照合できないので、setuid の ame-auth に照合してもらう
+        if (@import("builtin").os.tag == .freebsd) {
+            self.auth_helper = findAuthHelper() orelse return "ame-auth(照合の補助)が入っていません(sh install.sh で入れ直してください)";
+            if (!exists("/usr/local/etc/pam.d/ame-shell") and !exists("/etc/pam.d/ame-shell"))
+                return "PAM サービス ame-shell が未インストールです(sh install.sh で入れ直してください)";
+            return null;
+        }
         if (self.pam == null) {
             const h = c.dlopen("libpam.so.0", c.RTLD_NOW) orelse c.dlopen("libpam.so", c.RTLD_NOW) orelse return "libpam が見つからないためロックできません";
             const s = c.dlsym(h, "pam_start") orelse return "libpam が不完全です";
@@ -158,7 +167,8 @@ pub const Lock = struct {
         if (self.locked) return "ok (already locked)";
         // FreeBSD の pam_unix は root でないとパスワードを照合できない(Linux の unix_chkpwd に当たる補助が無い)。
         // FreeBSD の swaylock パッケージは setuid で入るので、ロックはそれに任せる
-        if (@import("builtin").os.tag == .freebsd) {
+        // ame-auth(root の setuid の照合の補助)が入っていれば、Linux と同じ ame-shell のロック画面を使う
+        if (@import("builtin").os.tag == .freebsd and findAuthHelper() == null) {
             if (!@import("platform/sys.zig").hasCommand("swaylock")) {
                 const why = "FreeBSD ではロックに swaylock が必要です(pkg install swaylock)";
                 self.app.osd.info(why);
@@ -323,7 +333,7 @@ pub const Lock = struct {
             // 試験用: 入れ子の試験セッション(AME_SESSION_NESTED=1)で AME_LOCK_FAKE=1 のときだけ、パスワード "ame" で解除できる
             const fake = std.posix.getenv("AME_LOCK_FAKE") != null and
                 std.mem.eql(u8, std.posix.getenv("AME_SESSION_NESTED") orelse "", "1");
-            const ok = if (fake) std.mem.eql(u8, self.pw[0..self.pw_len], "ame") else self.pamCheck();
+            const ok = if (fake) std.mem.eql(u8, self.pw[0..self.pw_len], "ame") else if (self.auth_helper) |hp| self.helperCheck(hp) else self.pamCheck();
             const b: u8 = if (ok) 1 else 0;
             _ = c.write(fds[1], &b, 1);
             c._exit(0);
@@ -336,6 +346,32 @@ pub const Lock = struct {
         self.setMsg("確認しています…");
         self.app.loop.add(fds[0], c.EPOLLIN | c.EPOLLHUP, self, onAuthDone) catch {};
         self.scheduleAll();
+    }
+
+    /// FreeBSD: setuid の ame-auth にパスワードを標準入力で渡して照合してもらう(認証の子プロセスの中で呼ぶ)
+    fn helperCheck(self: *Lock, helper: [:0]const u8) bool {
+        // ame-shell は SIGCHLD を無視している。待てるように既定に戻す(この子プロセスの中だけ)
+        @import("platform/sys.zig").childDefaults();
+        var p: [2]c_int = undefined;
+        if (c.pipe(&p) != 0) return false;
+        const pid = c.fork();
+        if (pid < 0) return false;
+        if (pid == 0) {
+            _ = c.dup2(p[0], 0);
+            _ = c.close(p[0]);
+            _ = c.close(p[1]);
+            const argv = [_:null]?[*:0]const u8{ helper.ptr, null };
+            const envp = [_:null]?[*:0]const u8{null};
+            _ = c.execve(helper.ptr, @ptrCast(&argv), @ptrCast(&envp));
+            c._exit(2);
+        }
+        _ = c.close(p[0]);
+        _ = c.write(p[1], &self.pw, self.pw_len);
+        _ = c.close(p[1]);
+        @memset(&self.pw, 0);
+        var status: c_int = 0;
+        if (c.waitpid(pid, &status, 0) != pid) return false;
+        return c.WIFEXITED(status) and c.WEXITSTATUS(status) == 0;
     }
 
     fn pamCheck(self: *Lock) bool {
@@ -555,6 +591,15 @@ pub const Lock = struct {
         return animating or self.busy;
     }
 };
+
+/// FreeBSD: root が持ち主で setuid の ame-auth を探す(install-session.sh が libexec に入れる)
+fn findAuthHelper() ?[:0]const u8 {
+    for ([_][:0]const u8{ "/usr/local/libexec/ame-shell/ame-auth", "/usr/libexec/ame-shell/ame-auth" }) |p| {
+        const st = std.posix.fstatat(std.posix.AT.FDCWD, p, 0) catch continue;
+        if (st.mode & std.posix.S.ISUID != 0 and st.uid == 0) return p;
+    }
+    return null;
+}
 
 /// 今のユーザー名(無ければ空)
 pub fn currentUserName(buf: []u8) []const u8 {

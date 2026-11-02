@@ -350,6 +350,28 @@ if [ "$USER_MODE" = 0 ] && [ "$OS" != FreeBSD ]; then
     fi
 fi
 
+# FreeBSD のロック画面: pam_unix は root でないと照合できないので、照合の補助 ame-auth を root の setuid で入れる
+# (照合するのは呼び出した人のパスワードだけ。swaylock が setuid で入るのと同じ考え。src/auth_helper.zig)
+if [ "$USER_MODE" = 0 ] && [ "$OS" = FreeBSD ]; then
+    install_file "$OUT/bin/ame-auth" "$PREFIX/libexec/ame-shell/ame-auth" 4755
+    run chown root:wheel "$DESTDIR$PREFIX/libexec/ame-shell/ame-auth" || true
+    # 持ち主を変えると setuid が外れることがあるので、もう一度付ける
+    run chmod 4755 "$DESTDIR$PREFIX/libexec/ame-shell/ame-auth"
+    tmp=$(mktemp "${TMPDIR:-/tmp}/ame-pam.XXXXXX") || exit 1
+    {
+        echo "# ame-shell のロック画面用(install-session.sh が作成。ame-auth が使う)"
+        if [ -f /usr/local/etc/pam.d/swaylock ]; then
+            echo "# /usr/local/etc/pam.d/swaylock と同じ内容"
+            grep -v '^#' /usr/local/etc/pam.d/swaylock | grep -v '^[[:space:]]*$'
+        else
+            echo "auth include system"
+            echo "account include system"
+        fi
+    } > "$tmp"
+    install_file "$tmp" "/usr/local/etc/pam.d/ame-shell" 644
+    rm -f "$tmp"
+fi
+
 # ---------------------------------------------------------------------------
 # 表示の言語: Linux のコンソール(TTY)は日本語を表示できず豆腐になるので、英語で出す
 # (doas は LANG を引き継がないので TERM で判断する。AME_ASCII=1 でも英語)

@@ -168,6 +168,22 @@ pub fn build(b: *std.Build) void {
     }
     b.installArtifact(ctl);
 
+    // --- ロック画面のパスワード照合の補助(FreeBSD で root の setuid として入れる。src/auth_helper.zig) ---
+    const auth = b.addExecutable(.{
+        .name = "ame-auth",
+        .root_source_file = b.path("src/auth_helper.zig"),
+        .target = target,
+        .optimize = optimize,
+        .strip = strip,
+    });
+    auth.linkLibC();
+    if (bsd and sr.len > 0) {
+        auth.addSystemIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{sr}) });
+        auth.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/lib", .{sr}) });
+        auth.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{sr}) });
+    }
+    b.installArtifact(auth);
+
     // --- WASM ウィジェット(Zig → wasm32-freestanding) ---
     // アニメーションコアは同じ Odin ソースを wasm32 にもビルドしてウィジェットへリンクする。
     const odin_wasm = b.addSystemCommand(&.{ "odin", "build" });

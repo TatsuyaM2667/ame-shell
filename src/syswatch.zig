@@ -43,6 +43,8 @@ pub const SysWatch = struct {
     pend: [6]Pending = [_]Pending{.{}} ** 6,
     n_pend: usize = 0,
     pend_timer: loop.Timer,
+    /// FreeBSD: 直前にディスク(USB メモリ・SD カード)が現れた時刻。USB の「接続しました」を重ねて出さないため
+    bsd_disk_ms: u64 = 0,
     /// 接続中の USB 機器の名前(抜いたときに名前を出すため。キーは sysfs の DEVPATH / FreeBSD の ugenX.Y)
     usb: [24]UsbDev = [_]UsbDev{.{}} ** 24,
 
@@ -546,6 +548,16 @@ pub const SysWatch = struct {
         self.n_pend = 0;
         for (self.pend[0..n]) |*p| {
             const devpath = p.devpath[0..p.len];
+            // FreeBSD の USB 機器: すぐ後にディスクが現れていればストレージ(ディスクの方で知らせる)
+            if (builtin.os.tag == .freebsd and std.mem.startsWith(u8, devpath, "bsd:")) {
+                if (loop.nowMs() -| self.bsd_disk_ms < 5000) continue;
+                const ugen = devpath[4..];
+                var nb: [128]u8 = undefined;
+                const name = usbconfigName(ugen, &nb) orelse "USB 機器";
+                self.usbRemember(ugen, name);
+                self.app.notifs.post("USB", "USB 機器を接続しました", name, 0);
+                continue;
+            }
             if (p.blk_len > 0) {
                 self.notifyBlock(p.blk[0..p.blk_len], devpath);
                 continue;
@@ -561,7 +573,69 @@ pub const SysWatch = struct {
     }
 
     /// 「USB メモリを接続しました / KIOXIA TransMemory · 32 GB · 「BACKUP」」
+    /// FreeBSD: ディスク(da0 / mmcsd0 など)が現れた。diskinfo の容量・説明と、glabel の名前で知らせる
+    fn notifyBlockBsd(self: *SysWatch, name: []const u8) void {
+        var zb: [48]u8 = undefined;
+        const dev = std.fmt.bufPrintZ(&zb, "/dev/{s}", .{name}) catch return;
+        var out: [2048]u8 = undefined;
+        // diskinfo -v: "# mediasize in bytes" と "# Disk descr." の行
+        const info = sys.run(&.{ "diskinfo", "-v", dev.ptr }, &out) orelse return;
+        var size: u64 = 0;
+        var descr: []const u8 = "";
+        var it = std.mem.splitScalar(u8, info, '\n');
+        while (it.next()) |line| {
+            const l = std.mem.trim(u8, line, " \t");
+            const hash = std.mem.indexOf(u8, l, "#") orelse continue;
+            const val = std.mem.trim(u8, l[0..hash], " \t");
+            const what = l[hash..];
+            if (std.mem.indexOf(u8, what, "mediasize in bytes") != null) {
+                var n: usize = 0;
+                while (n < val.len and std.ascii.isDigit(val[n])) n += 1;
+                size = std.fmt.parseInt(u64, val[0..n], 10) catch 0;
+            } else if (std.mem.indexOf(u8, what, "Disk descr.") != null) descr = val;
+        }
+        if (size == 0) return; // メディアの入っていないカードリーダー
+        var db: [96]u8 = undefined;
+        const disp_src = if (descr.len > 0) descr else name;
+        const disp_len = @min(disp_src.len, db.len);
+        @memcpy(db[0..disp_len], disp_src[0..disp_len]);
+        const disp = db[0..disp_len];
+        // ボリュームの名前: glabel status -s の「msdosfs/BACKUP  N/A  da0s1」
+        var lb: [160]u8 = undefined;
+        var ll: usize = 0;
+        var gb: [4096]u8 = undefined;
+        if (sys.run(&.{ "glabel", "status", "-s" }, &gb)) |gs| {
+            var gi = std.mem.splitScalar(u8, gs, '\n');
+            while (gi.next()) |line| {
+                var f = std.mem.tokenizeAny(u8, line, " \t");
+                const label = f.next() orelse continue;
+                _ = f.next();
+                const prov = f.next() orelse continue;
+                if (!std.mem.startsWith(u8, prov, name)) continue;
+                // gpt/・gptid/・diskid/ は機械的な名前なので出さない
+                if (std.mem.startsWith(u8, label, "gptid/") or std.mem.startsWith(u8, label, "diskid/")) continue;
+                const slash = std.mem.lastIndexOfScalar(u8, label, '/');
+                const short = if (slash) |s| label[s + 1 ..] else label;
+                if (ll > 0) ll += (std.fmt.bufPrint(lb[ll..], "・", .{}) catch "").len;
+                const k = @min(short.len, lb.len - ll);
+                @memcpy(lb[ll..][0..k], short[0..k]);
+                ll += k;
+            }
+        }
+        const gbs = @as(f64, @floatFromInt(size)) / 1e9;
+        var szb: [24]u8 = undefined;
+        const size_s = (if (gbs >= 1000) std.fmt.bufPrint(&szb, "{d:.1} TB", .{gbs / 1000}) else if (gbs >= 10) std.fmt.bufPrint(&szb, "{d:.0} GB", .{gbs}) else std.fmt.bufPrint(&szb, "{d:.1} GB", .{gbs})) catch "";
+        var bb: [256]u8 = undefined;
+        const body = (if (ll > 0) std.fmt.bufPrint(&bb, "{s} · {s} · 「{s}」", .{ disp, size_s, lb[0..ll] }) else std.fmt.bufPrint(&bb, "{s} · {s}", .{ disp, size_s })) catch disp;
+        const sd = std.mem.startsWith(u8, name, "mmcsd") or std.mem.startsWith(u8, name, "sdda");
+        const summary: []const u8 = if (sd) "SD カードを挿しました" else if (gbs < 300) "USB メモリを接続しました" else "外付けのストレージを接続しました";
+        var kb: [40]u8 = undefined;
+        if (std.fmt.bufPrint(&kb, "blk:{s}", .{name})) |key| self.usbRemember(key, disp) else |_| {}
+        self.app.notifs.post("ストレージ", summary, body, 0);
+    }
+
     fn notifyBlock(self: *SysWatch, name: []const u8, devpath: []const u8) void {
+        if (builtin.os.tag == .freebsd) return self.notifyBlockBsd(name);
         var pz: [128]u8 = undefined;
         var rb: [64]u8 = undefined;
         const is_usb = std.mem.indexOf(u8, devpath, "/usb") != null;
@@ -691,6 +765,20 @@ pub const SysWatch = struct {
                 if (std.mem.eql(u8, sub, "ACAD") or std.mem.eql(u8, sub, "CMBAT")) self.mark(.power);
             } else if (std.mem.eql(u8, system, "IFNET")) {
                 self.mark(.net);
+            } else if (std.mem.eql(u8, system, "DEVFS") and self.app.cfg.notify_usb) {
+                // ディスクの出入り(cdev=da0 / mmcsd0 など。パーティション da0s1・da0p1 は見ない)
+                const typ = devdField(msg, "type") orelse "";
+                const cdev = devdField(msg, "cdev") orelse continue;
+                if (!isBsdDisk(cdev)) continue;
+                if (std.mem.eql(u8, typ, "CREATE")) {
+                    self.bsd_disk_ms = loop.nowMs();
+                    self.pushPending(cdev, cdev, 2000);
+                } else if (std.mem.eql(u8, typ, "DESTROY")) {
+                    var kb: [40]u8 = undefined;
+                    const key = std.fmt.bufPrint(&kb, "blk:{s}", .{cdev}) catch continue;
+                    const disp = self.usbForget(key) orelse continue;
+                    self.app.notifs.post("ストレージ", if (std.mem.startsWith(u8, cdev, "mmcsd") or std.mem.startsWith(u8, cdev, "sdda")) "SD カードを取り外しました" else "ストレージを取り外しました", disp, 0);
+                }
             } else if (std.mem.eql(u8, system, "USB") and self.app.cfg.notify_usb) {
                 const sub = devdField(msg, "subsystem") orelse "";
                 if (!std.mem.eql(u8, sub, "DEVICE")) continue;
@@ -698,10 +786,11 @@ pub const SysWatch = struct {
                 const ugen = devdField(msg, "ugen") orelse continue;
                 if (std.mem.eql(u8, typ, "ATTACH")) {
                     if (std.mem.eql(u8, devdField(msg, "devclass") orelse "", "0x09")) continue; // ハブ
-                    var nb: [128]u8 = undefined;
-                    const name = usbconfigName(ugen, &nb) orelse (std.fmt.bufPrint(&nb, "USB 機器({s}:{s})", .{ devdField(msg, "vendor") orelse "?", devdField(msg, "product") orelse "?" }) catch "USB 機器");
-                    self.usbRemember(ugen, name);
-                    self.app.notifs.post("USB", "USB 機器を接続しました", name, 0);
+                    // ストレージなら、すぐ後にディスクとして(容量・名前つきで)知らせるので、少し待ってから決める
+                    var kb: [48]u8 = undefined;
+                    const key = std.fmt.bufPrint(&kb, "bsd:{s}", .{ugen}) catch continue;
+                    self.pushPending(key, "", 2500);
+                    continue;
                 } else if (std.mem.eql(u8, typ, "DETACH")) {
                     const name = self.usbForget(ugen) orelse continue;
                     self.app.notifs.post("USB", "USB 機器を取り外しました", name, 0);
@@ -731,3 +820,15 @@ pub const SysWatch = struct {
         return std.fmt.bufPrint(nb, "{s}", .{name}) catch null;
     }
 };
+
+/// FreeBSD のディスクの装置名か(da0・mmcsd0・sdda0・nda0。パーティションの da0s1・da0p1 などは違う)
+fn isBsdDisk(cdev: []const u8) bool {
+    for ([_][]const u8{ "da", "mmcsd", "sdda", "nda", "cd" }) |p| {
+        if (!std.mem.startsWith(u8, cdev, p)) continue;
+        const rest = cdev[p.len..];
+        if (rest.len == 0) return false;
+        for (rest) |ch| if (!std.ascii.isDigit(ch)) return false;
+        return true;
+    }
+    return false;
+}

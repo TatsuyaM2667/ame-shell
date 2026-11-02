@@ -89,7 +89,9 @@ pub const Battery = struct {
 pub fn battery() Battery {
     if (is_bsd) {
         const x = bsd.battery();
-        return .{ .present = x.present, .percent = x.percent, .charging = x.charging, .on_ac = x.on_ac, .full = x.on_ac and !x.charging and x.percent >= 100, .minutes = if (x.on_ac) null else x.minutes };
+        // 充電中は FreeBSD の sysctl に満充電までの時間が無いので、acpiconf の容量と充電の速さから求める
+        const mins: ?u32 = if (!x.on_ac) x.minutes else if (x.charging) bsd.chargeMinutes(run) else null;
+        return .{ .present = x.present, .percent = x.percent, .charging = x.charging, .on_ac = x.on_ac, .full = x.on_ac and !x.charging and x.percent >= 100, .minutes = mins };
     }
     var b = Battery{};
     const dir = c.opendir("/sys/class/power_supply") orelse return b;

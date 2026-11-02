@@ -159,3 +159,29 @@ pub fn backlight(run: anytype) ?f32 {
     const v = std.fmt.parseFloat(f32, std.mem.trim(u8, s, " \n")) catch return null;
     return v / 100;
 }
+
+/// 充電中の満充電までの時間(分)。acpiconf -i 0 の「Last full capacity」「Remaining capacity(%)」「Present rate」から。
+/// 分からなければ null
+pub fn chargeMinutes(run: anytype) ?u32 {
+    var b: [2048]u8 = undefined;
+    const s = run(&.{ "acpiconf", "-i", "0" }, &b) orelse return null;
+    var full: f64 = 0;
+    var pct: f64 = -1;
+    var rate: f64 = 0;
+    var it = std.mem.splitScalar(u8, s, '\n');
+    while (it.next()) |line| {
+        const colon = std.mem.indexOfScalar(u8, line, ':') orelse continue;
+        const key = std.mem.trim(u8, line[0..colon], " \t");
+        const val = std.mem.trim(u8, line[colon + 1 ..], " \t");
+        // 先頭の数だけ読む("52000 mWh" / "76%" / "24000 mW")
+        var n: usize = 0;
+        while (n < val.len and std.ascii.isDigit(val[n])) n += 1;
+        const num = std.fmt.parseFloat(f64, val[0..n]) catch continue;
+        if (std.mem.eql(u8, key, "Last full capacity")) full = num else if (std.mem.eql(u8, key, "Remaining capacity")) pct = num else if (std.mem.eql(u8, key, "Present rate")) rate = num;
+    }
+    if (full <= 0 or pct < 0 or rate <= 0) return null;
+    const left = full * (1 - std.math.clamp(pct, 0, 100) / 100);
+    const m = left / rate * 60;
+    if (m < 1 or m > 48 * 60) return null;
+    return @intFromFloat(@round(m));
+}
