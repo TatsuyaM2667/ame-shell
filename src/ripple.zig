@@ -149,3 +149,14 @@ pub fn capture(pw: c_int, ph: c_int) c.GLuint {
     c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_WRAP_T, c.GL_CLAMP_TO_EDGE);
     return tex;
 }
+
+/// 出力が抜かれた(app.zig): その出力の波紋だけ片付ける
+pub fn outputRemoved(app: *App, o: *Output) void {
+    for (&st.views) |*v| if (v.*) |vv| if (vv.snap.out == o) {
+        app.gpu.makeCurrent(vv.surf.egl_surf);
+        var tex = vv.snap.tex;
+        c.glDeleteTextures(1, &tex);
+        vv.surf.destroy();
+        v.* = null;
+    };
+}

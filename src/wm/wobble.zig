@@ -545,3 +545,10 @@ pub fn reap(app: *App) void {
     st.win = null;
     st.finished = false;
 }
+
+/// 出力が抜かれた(app.zig): その出力でたわませているならやめる
+pub fn outputRemoved(o: *Output) void {
+    if (st.out != o) return;
+    st.out = null;
+    abort();
+}

@@ -231,6 +231,19 @@ pub const Lock = struct {
         return true;
     }
 
+    /// 出力が抜かれた(app.zig): その出力のロック面を片付ける(ロックそのものは続ける)
+    pub fn outputRemoved(self: *Lock, o: *Output) void {
+        for (&self.views) |*v| if (v.*) |vv| if (vv.out == o) {
+            if (vv.snap != 0) {
+                self.app.gpu.makeCurrent(vv.surf.egl_surf);
+                var tex = vv.snap;
+                c.glDeleteTextures(1, &tex);
+            }
+            vv.surf.destroy();
+            v.* = null;
+        };
+    }
+
     pub fn scheduleAll(self: *Lock) void {
         for (self.views) |v| if (v) |vv| vv.surf.schedule();
     }

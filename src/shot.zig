@@ -746,3 +746,15 @@ fn takeExternal(app: *App, kind: Kind, delay_ms: u32) void {
     sys.spawnDetached(cmd.ptr);
 }
 
+
+/// 出力が抜かれた(app.zig): その出力で撮っている/選んでいるならやめる
+pub fn outputRemoved(app: *App, o: *Output) void {
+    const s = g orelse return;
+    if (s.out != o) return;
+    s.out = null;
+    if (s.surf != null) {
+        cancel(s);
+        s.show.snap(0); // 抜けた出力にはもうフレームが来ないので、待たずに片付ける
+        app.reap_pending = true;
+    }
+}

@@ -1017,6 +1017,13 @@ pub const Wm = struct {
     // ame-shell 側へ状態を渡す(バーのタグ・タイトル)
     // ---------------------------------------------------------------------
 
+    /// ame-shell 側の出力が抜かれた(app.zig): 指したままにしない(次の publish で結び直す)
+    pub fn outputRemoved(self: *Wm, ao: *appmod.Output) void {
+        for (self.outputs.items) |o| if (o.ame == ao) {
+            o.ame = null;
+        };
+    }
+
     fn publish(self: *Wm) void {
         const app = self.app;
         for (self.outputs.items) |o| {

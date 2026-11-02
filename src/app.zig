@@ -847,6 +847,11 @@ fn onGlobalRemove(data: ?*anyopaque, _: ?*c.struct_wl_registry, name: u32) callc
         app.osd.outputRemoved(o);
         app.notifs.outputRemoved(o);
         app.wallpick.outputRemoved(o);
+        app.lock.outputRemoved(o);
+        @import("shot.zig").outputRemoved(app, o);
+        @import("ripple.zig").outputRemoved(app, o);
+        @import("wm/wobble.zig").outputRemoved(o);
+        if (app.wm) |w| w.outputRemoved(o);
         c.wl_output_release(o.wl);
         _ = app.outputs.orderedRemove(i);
         app.alloc.destroy(o);
