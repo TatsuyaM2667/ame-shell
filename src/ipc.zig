@@ -139,11 +139,11 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
             const x: f32 = @floatFromInt(i);
             v.* = std.math.clamp(0.95 * @exp(-x / 9.0) + 0.25 * @abs(@sin(x * 0.7 + seed)) + 0.15 * @abs(@sin(x * 2.3 + seed * 1.7)), 0, 1);
         }
-        app.lock.cava.values = vals;
-        app.lock.cava.fake = true;
+        app.lock.spectrum.values = vals;
+        app.lock.spectrum.fake = true;
         if (app.activeFrame()) |f| {
-            f.cava.values = vals;
-            f.cava.fake = true;
+            f.spectrum.values = vals;
+            f.spectrum.fake = true;
         }
         app.lock.scheduleAll();
     } else if (eq(u8, cmd, "debug-battery")) {

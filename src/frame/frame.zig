@@ -125,7 +125,7 @@ pub const Frame = struct {
     tick_timer: loop.Timer,
     perf: data.Perf = .{},
     weather: data.Weather,
-    cava: data.Cava,
+    spectrum: data.Spectrum,
     inhibitor: ?*c.struct_zwp_idle_inhibitor_v1 = null,
     hw: data.HwInfo = .{},
     launchfx: LaunchFx = .{},
@@ -140,12 +140,12 @@ pub const Frame = struct {
             .osd_timer = try loop.Timer.init(),
             .tick_timer = try loop.Timer.init(),
             .weather = .{ .app = app },
-            .cava = .{ .app = app },
+            .spectrum = .{ .app = app },
         };
         self.weather.ctx = self;
         self.weather.on_update = redrawCb;
-        self.cava.ctx = self;
-        self.cava.on_frame = redrawCb;
+        self.spectrum.ctx = self;
+        self.spectrum.on_frame = redrawCb;
         try app.loop.add(self.osd_timer.fd, c.EPOLLIN, self, onOsdTimer);
         try app.loop.add(self.tick_timer.fd, c.EPOLLIN, self, onTick);
         const all = c.ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | c.ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
@@ -175,7 +175,7 @@ pub const Frame = struct {
     }
 
     pub fn destroy(self: *Frame) void {
-        self.cava.stop();
+        self.spectrum.stop();
         self.app.loop.remove(self.osd_timer.fd);
         self.app.loop.remove(self.tick_timer.fd);
         _ = c.close(self.osd_timer.fd);
@@ -835,7 +835,7 @@ pub const Frame = struct {
             if (dash.draw(self, cv, dt)) animating = true;
             cv.restore();
             cv.setClip(0, 0, 0, 0);
-        } else if (self.cava.running()) self.cava.stop();
+        } else if (self.spectrum.running()) self.spectrum.stop();
         if (self.launch.visible() and self.launch.vis[3] > 1) {
             cv.save();
             cv.setClip(self.launch.vis[0], self.launch.vis[1], self.launch.vis[2], self.launch.vis[3]);

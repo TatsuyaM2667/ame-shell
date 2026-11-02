@@ -17,7 +17,7 @@ ame-shell は、この違いを `src/platform/` という場所に閉じ込め�
 // OS 依存のデータ取得(sysfs / procfs / 外部コマンド)。
 //
 // init(dinit/systemd)には依存せず、カーネルのインターフェースと、どの
-// ディストリにもある小さなコマンド(wpctl, brightnessctl, nmcli)だけを使う。
+// ディストリにもある小さなコマンド(wpctl, brightnessctl)だけを使う(Wi-Fi・Bluetooth は netdbus.zig で D-Bus)。
 // コマンドが無い環境ではその機能だけ「不明」として扱い、シェルは動き続ける。
 ```
 
@@ -35,7 +35,7 @@ ame-shell は、この違いを `src/platform/` という場所に閉じ込め�
 | 機種名 | DMI(`/sys/class/dmi/id`) | `kenv smbios.system.product` |
 | 明るさ | brightnessctl | `backlight` コマンド |
 | 音量 | wpctl | wpctl(PipeWire があれば)、無ければ `mixer` |
-| ネットワーク | nmcli | `ifconfig` |
+| ネットワーク | NetworkManager(D-Bus を直接)| `ifconfig` |
 | 電源操作 | `loginctl reboot / poweroff / suspend` | ConsoleKit2 の D-Bus(`dbus-send --system`) |
 | epoll・timerfd・inotify | カーネル | libepoll-shim・libinotify(kqueue の上に同じ API を作るライブラリ) |
 

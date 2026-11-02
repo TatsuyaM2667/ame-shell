@@ -144,10 +144,10 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, dt: f32) bool {
     };
     cv.restore();
     if (r) animating = true;
-    // メディアタブを見ている間だけ cava を動かす
-    const want_cava = v.tab == 1 and f.dash.open and app.media.status == .playing;
-    if (want_cava and !f.cava.running()) f.cava.start();
-    if (!want_cava and f.cava.running()) f.cava.stop();
+    // メディアタブを見ている間だけ、音を拾ってスペクトラムを計算する
+    const want_spec = v.tab == 1 and f.dash.open and app.media.status == .playing;
+    if (want_spec and !f.spectrum.running()) f.spectrum.start();
+    if (!want_spec and f.spectrum.running()) f.spectrum.stop();
     // 再生中は進捗を滑らかに見せるため描き続ける(ダッシュボードが開いている間だけ)
     if (f.dash.open and app.media.status == .playing and (v.tab == 1 or v.tab == 0)) animating = true;
     return animating;
@@ -337,7 +337,7 @@ fn drawMediaSmall(f: *Frame, cv: *gfx.Canvas, x: f32, y: f32, w: f32, h: f32) bo
 }
 
 // ---------------------------------------------------------------------------
-// タブ 1: メディア(cava のスペクトラムをジャケットの周りに放射状に)
+// タブ 1: メディア(レコードの周りに液体のスペクトラム)
 // ---------------------------------------------------------------------------
 
 fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
@@ -379,12 +379,12 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         animating = true;
     }
     // スペクトラム: レコードの外周を包む液体(音で膨らみ、ゆっくり揺れて回る。gfx.zig の liquid_fs)
-    // cava が無い・起動できない・音を拾えないときは、静かに揺れるだけにして理由をレコードの下に書く
-    const cava_problem = if (playing) f.cava.problem() else null;
+    // 音を拾えない(PipeWire / PulseAudio が無い)ときは、静かに揺れるだけにして理由をレコードの下に書く
+    const spec_problem = if (playing) f.spectrum.problem() else null;
     const zeros = [_]f32{0} ** data.BARS;
-    const vals: []const f32 = if (f.cava.running() and cava_problem == null) &f.cava.values else &zeros;
+    const vals: []const f32 = if (f.spectrum.running() and spec_problem == null) &f.spectrum.values else &zeros;
     cv.liquid(cx, cy, R + 4, 54, vals, acc, acc.lighten(0.3), v.vinyl_angle / std.math.tau * 0.25);
-    if (cava_problem) |msg| {
+    if (spec_problem) |msg| {
         _ = cv.text(cx, cy + R + 34, 12, sub.alpha(0.85), msg, .{ .alignment = .center });
     }
     // 盤: 縁の光る輪 → 溝(曲間のすき間で区切られた帯)→ 無音の溝(デッドワックス)→ ラベル

@@ -4,7 +4,7 @@
 種類 | プロセス間のメッセージバス
 バス | セッションバス(ユーザーごと)、システムバス(機械全体)
 ライブラリ | libdbus、GDBus(GLib)、sd-bus(systemd)
-ame-shell | 通知のサーバ、電源操作(FreeBSD の ConsoleKit2)、MPRIS(playerctl 経由)
+ame-shell | 通知のサーバ、電源操作(FreeBSD の ConsoleKit2)、MPRIS(D-Bus を直接)
 
 **D-Bus** は、デスクトップのアプリ同士が、名前でメッセージを送り合うための仕組みです。
 

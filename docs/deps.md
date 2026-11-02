@@ -13,7 +13,8 @@
 | フォント: Noto Sans CJK JP, JetBrainsMono Nerd Font | 推奨 | あり |
 | libpam(実行時に dlopen) | ロック画面 | あり(ヘッダは不要) |
 | wpctl / pactl(音量) | 任意 | あり |
-| playerctl(メディア) / curl(アート取得) | 任意 | あり |
+| 再生中の曲(MPRIS を D-Bus で直接。playerctl は使わない)/ curl(アート・歌詞の取得) | 任意 | あり |
+| libpulse-simple(スペクトラムの録音。dlopen。cava は使わない) | 任意 | あり |
 | brightnessctl(明るさ) | 任意 | あり |
 | NetworkManager / BlueZ(D-Bus で直接。nmcli / bluetoothctl は使わない) | 任意 | あり |
 | foot / rivertile | セッション | あり |

@@ -20,7 +20,7 @@ Chimera Linux(musl + dinit)向け。SDDM から選べるセッションつき。
 
 - **上: ダッシュボード** — 4 つのタブ
   - ダッシュボード: 天気・機種/CPU/GPU 名・ユーザーの写真(クリックで選べる)・カレンダー・メディア
-  - メディア: 回るレコードと cava のスペクトラム、トーンアーム(再生中は針が盤面の溝に乗り、曲の進みに合わせて内側へ)、曲名・アーティスト・**アルバム名**、**同期歌詞**(LRCLIB から自動取得。今の行だけが 1 行ずつポンと出る。上・下をクリックで前・次の行へ)
+  - メディア: 回るレコードと、それを包む液体のスペクトラム(録音して ame-shell の中で FFT)、トーンアーム(再生中は針が盤面の溝に乗り、曲の進みに合わせて内側へ)、曲名・アーティスト・**アルバム名**、**同期歌詞**(LRCLIB から自動取得。今の行だけが 1 行ずつポンと出る。上・下をクリックで前・次の行へ)
     - プレーヤーが歌詞を持っている場合は `$XDG_RUNTIME_DIR/lyrics/<MPRIS のプレーヤー名>.lrc`(`[ti:]` `[ar:]` `[al:]` つきの LRC)に置くと、LRCLIB より優先して使います。曲が変わったら書き換えるか消してください
   - パフォーマンス: CPU / GPU / メモリ / ストレージの円グラフ(CPU・GPU は温度つき)
   - ワークスペース: 1〜9 と、それぞれで**開いているアプリのアイコンと名前**
@@ -51,7 +51,7 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
 - 通知サーバ内蔵(`org.freedesktop.Notifications`。他のデーモンが動いていれば譲る)
 - **ロック画面**(Super+L、ext-session-lock + PAM。iOS / iPadOS のロック画面のような作り、`src/lockui.zig`):
   - 眺める画面: くっきりした壁紙(オーロラ・雨はロック中も動き続ける)の上に日付・特大の時計・電池、
-    再生中の曲(回るレコードと cava の波形、ジャケットをぼかした背景、進み具合、前・再生・次のボタン)、
+    再生中の曲(回るレコードと液体のスペクトラム、ジャケットをぼかした背景、進み具合、前・再生・次のボタン)、
     ロック中に来た通知(新しい順に重なり、押すと広がる)、光が流れる「解除するには…」とホームバー
   - キーかクリックで入力画面へ: 背景がぼけて時計が小さく上へ、写真・名前・ガラスの入力欄。Esc か 12 秒で戻る
   - 解除すると鍵が開き、全体が少し拡大しながら消えてデスクトップへ
@@ -169,7 +169,7 @@ FreeBSD での違い:
 必要: Zig 0.13、Odin、wayland-scanner、wayland / EGL / GLESv2 / xkbcommon / freetype / harfbuzz / fontconfig / dbus の開発ファイル(FreeBSD は加えて libepoll-shim・libinotify)。
 実行時に使うもの: `wpctl` / `pactl`(PipeWire)・NetworkManager と BlueZ(コマンドは使わず D-Bus で直接)・`rfkill`・`curl`・`xdg-desktop-portal` と `-gtk`(ユーザーの写真を選ぶ画面)・`libmpv`(動画壁紙、任意)・`ffmpeg`(動画のサムネイル、任意)・`wf-recorder`(録画、`~/Videos` に保存、任意)。
 フォント: 日本語(Noto Sans CJK)と Nerd Font のアイコン(JetBrainsMono Nerd Font か Symbols Nerd Font)。無いと起動時にログ(`session.log`)へ入れるパッケージ名を出します。
-スクショのコマンドが無いときは通知で、cava が無い・音を拾えないときはメディアの波形の場所に理由を表示します。
+音を拾えない(PipeWire / PulseAudio が無い)ときはメディアの波形の場所に理由を表示します。cava・playerctl・grim・slurp・wl-clipboard・nmcli・bluetoothctl は使いません(すべて ame-shell の中で行います)。もう要らないパッケージや KDE の古い設定は `sh scripts/cleanup-old.sh` で消せます。
 
 ```sh
 zig build -Doptimize=ReleaseFast     # zig-out/bin/{ame-shell,ame-ctl}, zig-out/share/ame-shell/

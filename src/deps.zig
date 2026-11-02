@@ -1,4 +1,4 @@
-// 外部コマンドが足りないときの案内(スクショの grim / slurp / wl-copy、波形の cava など)。
+// 外部コマンドが足りないときの案内(River 0.3 などでのスクショの grim / slurp / wl-copy など)。
 // 使う直前に PATH を調べ、無ければ「何を入れればよいか」を通知とログで知らせる。
 const std = @import("std");
 const builtin = @import("builtin");

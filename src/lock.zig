@@ -101,13 +101,13 @@ pub const Lock = struct {
     lk_scroll: Spring = Spring.init(0, 0.45, 0.9),
     lyr_idx: i32 = -1,
     hits: lockui.Hits = .{},
-    cava: framedata.Cava,
+    spectrum: framedata.Spectrum,
 
     pub fn create(app: *App) !*Lock {
         const self = try app.alloc.create(Lock);
-        self.* = .{ .app = app, .cava = .{ .app = app } };
-        self.cava.ctx = self;
-        self.cava.on_frame = struct {
+        self.* = .{ .app = app, .spectrum = .{ .app = app } };
+        self.spectrum.ctx = self;
+        self.spectrum.on_frame = struct {
             fn f(ctx: *anyopaque) void {
                 const l: *Lock = @ptrCast(@alignCast(ctx));
                 l.scheduleAll();
@@ -207,7 +207,7 @@ pub const Lock = struct {
         self.play_s.snap(if (self.app.media.status == .playing) 1 else 0);
         self.first_notif_id = self.app.notifs.next_id;
         for (&self.cards) |*cd| cd.* = .{};
-        self.updateCava();
+        self.updateSpectrum();
         self.unlock_s.snap(0);
         for (self.app.outputs.items, 0..) |o, i| {
             if (i >= MAX_OUT) break;
@@ -229,12 +229,12 @@ pub const Lock = struct {
         if (!self.locked) return;
         // 入力画面のまま 12 秒触らなければ、眺める画面にもどる
         if (self.auth_mode and self.pw_len == 0 and !self.busy and @import("platform/loop.zig").nowMs() -| self.last_input_ms > 12_000) self.setAuth(false);
-        self.updateCava();
+        self.updateSpectrum();
         self.scheduleAll();
     }
 
     fn finish(self: *Lock, unlock: bool) void {
-        self.cava.stop();
+        self.spectrum.stop();
         for (&self.views) |*v| {
             if (v.*) |vv| vv.surf.destroy();
             v.* = null;
@@ -462,15 +462,15 @@ pub const Lock = struct {
         self.auth_mode = on;
         self.auth.set(if (on) 1 else 0);
         if (on) self.last_input_ms = @import("platform/loop.zig").nowMs();
-        self.updateCava();
+        self.updateSpectrum();
         self.scheduleAll();
     }
 
-    /// 眺める画面で曲が流れている間だけ cava を動かす
-    fn updateCava(self: *Lock) void {
+    /// 眺める画面で曲が流れている間だけ、音を拾ってスペクトラムを計算する
+    fn updateSpectrum(self: *Lock) void {
         const want = self.locked and !self.auth_mode and !self.unlocking and self.app.media.status == .playing;
-        if (want and !self.cava.running()) self.cava.start();
-        if (!want and self.cava.running()) self.cava.stop();
+        if (want and !self.spectrum.running()) self.spectrum.start();
+        if (!want and self.spectrum.running()) self.spectrum.stop();
     }
 
     /// 通知が来た(notify.zig から)。ロック画面のカードを出す

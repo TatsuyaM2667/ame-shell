@@ -22,11 +22,11 @@ ame-shell のコードは、次の 6 つの原則で一貫しています。各�
 
 | 原則 | 中身 | 現れるところ |
 |---|---|---|
-| **待つ、調べない** | 状態の変化は「起こされる」ことで知る。定期的に起きて調べる(ポーリング)ことはしない | 1 つの epoll に全部の fd を入れる / タイマーは「次に変わる時刻」だけ / `playerctl --follow`・`pactl subscribe`・inotify |
+| **待つ、調べない** | 状態の変化は「起こされる」ことで知る。定期的に起きて調べる(ポーリング)ことはしない | 1 つの epoll に全部の fd を入れる / タイマーは「次に変わる時刻」だけ / MPRIS・NetworkManager・BlueZ の D-Bus の信号・`pactl subscribe`・inotify |
 | **動いている間だけ描く** | 描画は Wayland のフレームコールバックに合わせ、ばねが止まったら次を頼まない | `surface.zig` の `schedule` と `render` / WM の 8ms タイマーもアニメーション中だけ |
 | **1 つにまとめる** | 1 プロセス・1 EGL コンテキスト・1 種類の四角形・1 つのばね | グリフアトラスとぼけた壁紙を全部品で共有 / 描画は 1 回の命令 |
 | **重い仕事は描画の外へ** | 画像のデコード・外部コマンド・認証は、スレッドか子プロセスで行い、終わったら pipe で知らせる | アイコン・アバター・pactl・PAM・curl・nmcli |
-| **無ければ、その機能だけ止める** | 依存するライブラリやコマンドが無くても、シェル全体は動き続ける | libmpv・libpam は dlopen / cava・nmcli・bluetoothctl・wpctl は見つからなければ「不明」 |
+| **無ければ、その機能だけ止める** | 依存するライブラリやコマンドが無くても、シェル全体は動き続ける | libmpv・libpam・libpulse-simple は dlopen / NetworkManager・BlueZ・wpctl は見つからなければ「不明」 |
 | **OS の違いは端に閉じ込める** | Linux と FreeBSD の違いは `src/platform/` と `build.zig` だけで吸収する | `bsd.zig`(sysctl)/ `loop.zig` の timerfd / ioctl の型 |
 
 ## ファイルの地図 {#map}
@@ -68,8 +68,8 @@ ame-shell のコードは、次の 6 つの原則で一貫しています。各�
                        │ ipc.zig        Unix ソケット ◀── ame-ctl                                       │
                        │ platform/      loop.zig(epoll + timerfd) / sys.zig / bsd.zig / supertap.zig   │
                        └────────────────────────────────────────────────────────────────────────────────┘
-       子プロセス(pipe で結果だけ受け取る): playerctl --follow / pactl subscribe / curl / nmcli /
-       bluetoothctl / cava / ffmpeg / PAM の認証 / ワーカースレッド: アイコン・アバター・サムネイル・pactl
+       子プロセス(pipe で結果だけ受け取る): pactl subscribe / curl /
+       ffmpeg / PAM の認証 / ワーカースレッド: アイコン・アバター・サムネイル・pactl・録音・PNG・Wi-Fi / Bluetooth の D-Bus
 ```
 
 ## 1 フレームの流れ {#frame}

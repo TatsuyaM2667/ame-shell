@@ -1,7 +1,7 @@
 // ロック画面の見た目(iOS / iPadOS のロック画面のような構成)。状態と認証は lock.zig、ここは描くだけ。
 //
 //  眺める画面(auth = 0)        : くっきりした壁紙・日付・特大の時計・電池、再生中の曲(回るレコードと
-//                                 cava の波形・操作ボタン)、ロック中に来た通知のスタック、
+//                                 液体のスペクトラム・操作ボタン)、ロック中に来た通知のスタック、
 //                                 下に光が流れる「解除するには…」とホームバー
 //  入力画面(auth = 1)          : 背景がぼけて暗くなり、時計は小さく上へ。写真・名前・ガラスの入力欄
 //  解除(unlock_s 0 → 1)        : 全体が少し拡大しながら消え、背景のぼかしも消えてデスクトップへ
@@ -292,7 +292,7 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
             cv.save();
             cv.opacity(ps);
             const zeros = [_]f32{0} ** data.BARS;
-            const vals: []const f32 = if (self.cava.running()) &self.cava.values else &zeros;
+            const vals: []const f32 = if (self.spectrum.running()) &self.spectrum.values else &zeros;
             cv.liquid(dcx, dcy, R + 1.5 * k, 16 * k, vals, acc, acc.lighten(0.3), self.vinyl / std.math.tau * 0.25);
             cv.restore();
         }

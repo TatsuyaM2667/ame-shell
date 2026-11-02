@@ -8,44 +8,25 @@
 歌詞は、時刻付きの歌詞([[lrc]])をインターネットから取ってきて、再生位置に合わせて今の行を出します。動画の壁紙は、動画を GPU で直接描く仕組み([[libmpv]]、[[va-api]])で再生しています。
 :::
 
-## 再生中の曲: `playerctl --follow` を常駐させる {#mpris}
+## 再生中の曲: D-Bus の MPRIS を直接聞く {#mpris}
 
 ```zig
-// src/media.zig
-// メディア(MPRIS): `playerctl --follow` を常駐させ、出力行が来たときだけ状態を更新する
-// (ポーリングしない)。アルバムアートは file:// ならそのまま、http(s) なら curl で
-// キャッシュへ取得(完了を pipe の EOF で知る)。読み込んだ画像から Odin で主色を抽出し、
-// テーマのアクセント色をその色へ滑らかに遷移させる。
-const fd = sys.spawnReader(&.{ "playerctl", "--follow", "metadata", "--format", fmt }, &self.pid) orelse { … };
-```
-
-書式(`fmt`)は、タブ区切りで 8 項目です。
-
-```
-{{status}}\t{{playerName}}\t{{artist}}\t{{title}}\t{{mpris:artUrl}}\t{{mpris:length}}\t{{position}}\t{{xesam:album}}
-```
-
-```zig
-fn parseLine(self: *Media, line: []const u8) void {
-    var f = std.mem.splitScalar(u8, line, '\t');
-    const status = f.next() orelse "";
-    …
-    const album = f.next() orelse "";
-    …
-    self.length_s = (std.fmt.parseFloat(f32, len_us) catch 0) / 1e6;
-    // ライブ配信などは長さが無意味な値(数日以上)になるので「不明」扱いにする
-    if (self.length_s > 86400) self.length_s = 0;
-    self.pos_s = (std.fmt.parseFloat(f32, pos_us) catch 0) / 1e6;
-    self.pos_at_ms = loop.nowMs();
-    …
-}
+// src/mpris.zig
+// 起動時に org.mpris.MediaPlayer2.* の一覧を取り、各プレイヤーの状態(GetAll)を読む。
+// 以後は信号だけで追う: PropertiesChanged(曲・再生状態など)、Seeked(再生位置)、
+// NameOwnerChanged(プレイヤーが増えた・消えた)。ポーリングしない
+const rules = [_][*:0]const u8{
+    "type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',path='/org/mpris/MediaPlayer2',arg0='org.mpris.MediaPlayer2.Player'",
+    "type='signal',interface='org.mpris.MediaPlayer2.Player',member='Seeked',path='/org/mpris/MediaPlayer2'",
+    "type='signal',sender='org.freedesktop.DBus',member='NameOwnerChanged',arg0namespace='org.mpris.MediaPlayer2'",
+};
 ```
 
 | 判断 | 理由 |
 |---|---|
-| **D-Bus を直接話さず playerctl を使う** | MPRIS は、プレーヤーの出現・消滅の追跡、複数のプレーヤーからどれを表示するかの選択、プロパティの変化の購読と、やることが多い。playerctl はそれを全部こなし、変化したときに 1 行出すだけ。ame-shell は行を待つだけで済む |
-| **`--follow` で常駐** | 「1 秒ごとに playerctl を起動して聞く」と、何も再生していなくても毎秒プロセスが起動する。`--follow` なら変化があったときだけ行が来る |
-| **タブ区切り** | 曲名やアーティスト名にはスペースや記号が入るが、タブはまず入らない |
+| **外部コマンド(playerctl)を使わない** | 以前は `playerctl --follow` を常駐させて 1 行ずつ読んでいた。D-Bus を直接聞けば、常駐プロセスが 1 つ減り、シーク(Seeked)も届く |
+| **どのプレイヤーを出すか** | 再生中のものを優先し、無ければ最後に変化のあったもの |
+| **操作もメソッド呼び出し** | 再生/一時停止・前・次・位置(SetPosition)・シャッフル・リピート(Properties.Set) |
 | **長さが 1 日を超えたら「不明」** | ライブ配信では、プレーヤーが巨大な長さを返すことがある。そのまま進行バーにすると、バーが全く進まない |
 
 ### 再生位置は「最後に聞いた位置 + 経過時間」 {#position}
@@ -56,15 +37,13 @@ pub fn position(self: *Media) f32 {
     const p = self.pos_s + @as(f32, @floatFromInt(loop.nowMs() - self.pos_at_ms)) / 1000.0;
     return if (self.length_s > 0) @min(p, self.length_s) else p;
 }
-
-/// playerctl --follow は再生位置の変化(シーク)を通知しないので、歌詞を表示している間だけ
-/// 3 秒おきに実際の位置を聞き直してずれを補正する。
-pub fn resync(self: *Media) void { … }
 ```
 
-再生位置を毎フレーム聞くのではなく、**最後に聞いた位置と、その時刻からの経過時間**で計算します。歌詞の同期と進行バーは毎フレームこの値を読みます。
+再生位置を毎フレーム聞くのではなく、**最後に聞いた位置と、その時刻からの経過時間**で計算します。歌詞の同期と進行バーは毎フレームこの値を読みます。シークは Seeked の信号で届くので、その時点の位置に置き直します。
 
-ただし `playerctl --follow` は**シーク(再生位置のジャンプ)を通知しません**。そこで、**歌詞を表示している間だけ** 3 秒おきに実際の位置を聞き直します。歌詞を見ていないときは聞きません。
+### 音のスペクトラム(液体のビジュアライザー) {#spectrum}
+
+cava は使いません。メディアのタブ・ロック画面で曲が流れている間だけ、libpulse-simple(dlopen)で再生中の音(`@DEFAULT_MONITOR@`)を 1/60 秒ずつ録音し、Odin の FFT(`anim/fft.odin`)で 48 帯に分けます。描画は GPU のシェーダ(`liquid_fs`)で、帯の間をなめらかにつないだ液体の膜がレコードの周りで揺れます。
 
 ### アルバムアート {#art}
 
@@ -224,9 +203,9 @@ FreeBSD など、libmpv が無い・再生できない・5 秒たっても最初
 ## 研究者向けの補足 {#research}
 
 :::research 時計の同期と、外部プロセスとの境界
-再生位置の推定は、「最後に観測した位置 p₀ と時刻 t₀」からの外挿 `p(t) = p₀ + (t − t₀)·r`(r = 再生速度 = 1)で、観測の間隔の間のプレーヤーとの時計のずれ(ドリフト)と、通知されないシーク(不連続)を、3 秒ごとの再観測で補正する**区分的な線形の推定**です。歌詞の同期の誤差は、外挿の誤差と、playerctl の出力の遅延の和で抑えられます。
+再生位置の推定は、「最後に観測した位置 p₀ と時刻 t₀」からの外挿 `p(t) = p₀ + (t − t₀)·r`(r = 再生速度 = 1)で、シーク(不連続)は Seeked の信号で置き直す**区分的な線形の推定**です。歌詞の同期の誤差は、外挿の誤差と、D-Bus の信号の遅延の和で抑えられます。
 
-外部のプログラム(playerctl・curl・pactl・ffmpeg)を子プロセスとして使い、結果をパイプの EOF で受ける設計は、ライブラリをリンクする場合に比べて**故障の隔離**(子が落ちても親は落ちない)と**依存の最小化**(HTTP・TLS・D-Bus・コーデックのライブラリをリンクしない)を得る代わりに、プロセスの生成のコスト(数 ms)を払います。どれも人間の操作の頻度(秒単位)でしか起きないので、このコストは無視できます。
+外部のプログラム(curl・pactl・ffmpeg)を子プロセスとして使い、結果をパイプの EOF で受ける設計は、ライブラリをリンクする場合に比べて**故障の隔離**(子が落ちても親は落ちない)と**依存の最小化**(HTTP・TLS・D-Bus・コーデックのライブラリをリンクしない)を得る代わりに、プロセスの生成のコスト(数 ms)を払います。どれも人間の操作の頻度(秒単位)でしか起きないので、このコストは無視できます。
 :::
 
 ## 関連する用語 {#terms}

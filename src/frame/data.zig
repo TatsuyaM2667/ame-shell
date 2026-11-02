@@ -224,7 +224,6 @@ pub const Weather = struct {
 //    動く)で「今鳴っている音」(@DEFAULT_MONITOR@)を別スレッドで受け取る
 //  * 計算: 窓をかけて FFT(anim/fft.odin)、50Hz〜12kHz を対数で 48 の帯域に分け、dB にして自動で音量をそろえる
 //  * 受け取るたびにスレッドが pipe に 1 バイト書き、描画のループ(epoll)で計算する(ポーリングしない)
-// 名前は以前の外部コマンド cava のまま(呼び出し側を変えないため)
 // ---------------------------------------------------------------------------
 
 pub const BARS = 48;
@@ -290,7 +289,7 @@ fn getTables() *const Tables {
     return &tables.?;
 }
 
-pub const Cava = struct {
+pub const Spectrum = struct {
     app: *App,
     /// 受け取りスレッドからの知らせ(読む側の fd。動いていなければ -1)
     fd: c_int = -1,
@@ -323,12 +322,12 @@ pub const Cava = struct {
     const SILENT_MS = 3000;
     const RETRY_MS = 10_000;
 
-    pub fn running(self: *const Cava) bool {
+    pub fn running(self: *const Spectrum) bool {
         return self.fd >= 0 or self.fake;
     }
 
     /// 波形の代わりに出す説明(出せているときは null)
-    pub fn problem(self: *const Cava) ?[]const u8 {
+    pub fn problem(self: *const Spectrum) ?[]const u8 {
         return switch (self.state) {
             .missing => "音を取り込めないため波形を表示できません(libpulse が必要です)",
             .failed => "音を取り込めませんでした(PipeWire / PulseAudio を確認)",
@@ -339,7 +338,7 @@ pub const Cava = struct {
         };
     }
 
-    pub fn start(self: *Cava) void {
+    pub fn start(self: *Spectrum) void {
         if (self.fd >= 0) return;
         const now = loop.nowMs();
         if ((self.state == .missing or self.state == .failed) and now < self.retry_ms) return;
@@ -370,7 +369,7 @@ pub const Cava = struct {
         self.app.loop.add(self.fd, c.EPOLLIN, self, onRead) catch {};
     }
 
-    pub fn stop(self: *Cava) void {
+    pub fn stop(self: *Spectrum) void {
         if (self.fd < 0) return;
         self.stop_flag.store(true, .release);
         // 受け取りは 1/60 秒ごとに戻ってくるので、すぐ終わる
@@ -385,7 +384,7 @@ pub const Cava = struct {
     }
 
     /// 受け取りスレッド: 録音の口を開き、1/60 秒ぶんずつ読んでリングに足す
-    fn capture(self: *Cava) void {
+    fn capture(self: *Spectrum) void {
         const pa = loadPa() orelse return;
         const ss = PaSampleSpec{ .format = 5, .rate = RATE, .channels = 1 }; // PA_SAMPLE_FLOAT32LE・モノラル
         const attr = PaBufferAttr{ .maxlength = std.math.maxInt(u32), .tlength = std.math.maxInt(u32), .prebuf = std.math.maxInt(u32), .minreq = std.math.maxInt(u32), .fragsize = CHUNK * 4 };
@@ -413,7 +412,7 @@ pub const Cava = struct {
     }
 
     fn onRead(ctx: *anyopaque, fd: c_int, _: u32) void {
-        const self: *Cava = @ptrCast(@alignCast(ctx));
+        const self: *Spectrum = @ptrCast(@alignCast(ctx));
         var drain: [64]u8 = undefined;
         var failed = false;
         while (true) {
@@ -436,7 +435,7 @@ pub const Cava = struct {
         if (self.on_frame) |f| f(self.ctx);
     }
 
-    fn compute(self: *Cava) void {
+    fn compute(self: *Spectrum) void {
         const t = getTables();
         var samples: [FFT_N]f32 = undefined;
         self.mutex.lock();

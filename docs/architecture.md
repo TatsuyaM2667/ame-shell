@@ -24,7 +24,8 @@
 | sys timerfd | 20 秒ごと(バッテリー・ネットワーク・明るさ) |
 | wallpaper timerfd | ライブ壁紙の FPS ごと(AC/バッテリーで切替、静止時は停止) |
 | `pactl subscribe` の pipe | 音量が変わったときだけ |
-| `playerctl --follow` の pipe | 曲・再生状態が変わったときだけ |
+| MPRIS(セッションの D-Bus)の fd | 曲・再生状態・シークが変わったときだけ |
+| スペクトラムの録音スレッドの pipe | メディアのタブ・ロック画面で曲が流れている間だけ(1/60 秒ごと) |
 | D-Bus fd | 通知が来たとき |
 | inotify | 設定ファイル / ウィジェット .wasm の保存時 |
 | IPC ソケット | ame-ctl 実行時 |
