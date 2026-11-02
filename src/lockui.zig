@@ -110,7 +110,8 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         self.media_s.set(if (has_media) 1 else 0);
         self.play_s.set(if (playing) 1 else 0);
         self.expand.set(if (self.notif_expanded) 1 else 0);
-        self.lyr_s.set(if (lcur.idx != null) 1 else 0);
+        // 同期歌詞があれば出す(前奏・間奏で今の行が無いときは「♪」)
+        self.lyr_s.set(if (has_media and app.media.lyrics.state == .synced) 1 else 0);
         const new_idx: i32 = if (lcur.idx) |li| @intCast(li) else -1;
         if (new_idx != self.lyr_idx) {
             // 1 行進んだときだけ押し上げる(シークで飛んだときは、その場で並べ直す)
@@ -122,6 +123,9 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         }
         var springs = [_]*Spring{ &self.auth, &self.media_s, &self.play_s, &self.expand, &self.ring, &self.lyr_s, &self.lk_pop, &self.lk_scroll };
         if (anim.stepAll(&springs, dt)) animating = true;
+        // 歌詞を出している間は、ダッシュボードと同じく 3 秒おきに本当の再生位置を聞いてずれを直す
+        // (シークを知らせないプレイヤーがあり、そのままだと違う行を指したままになる)
+        if (has_media and app.media.lyrics.state == .synced) app.media.resyncPosition();
         for (&self.cards) |*cd| if (cd.id != 0 and cd.s.step(dt)) {
             animating = true;
         };
@@ -357,9 +361,10 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
 
         // ---- 歌詞: カードの上に浮かべる。ダッシュボードと同じく、歌い終えた行が 1 行ずつ上へ積み上がり、
         //      今の行は下でポンと弾んで出る(これから歌う行は見せない)----
-        if (self.lyr_s.x > 0.01 and lcur.idx != null) {
+        if (self.lyr_s.x > 0.01 and app.media.lyrics.lines.items.len > 0) {
             const ls = app.media.lyrics.lines.items;
-            const ci = lcur.idx.?;
+            const has_cur = lcur.idx != null;
+            const ci = lcur.idx orelse 0;
             const big: f32 = 21 * k;
             const small: f32 = 15 * k;
             const lgap: f32 = 10 * k;
@@ -374,7 +379,7 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
                     return if (l[i].text.len > 0) l[i].text else "♪";
                 }
             }.get;
-            const cur_s = text_of(ls, ci);
+            const cur_s = if (has_cur) text_of(ls, ci) else "♪";
             const n0: f32 = @floatFromInt(cv.wrapCount(cur_s, big, max_w, 2));
             // 今の行の下端をカードの少し上に
             const cur_bottom = cy0 - 18 * k;
@@ -389,7 +394,7 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
             // 歌い終えた行(新しい順に上へ。古いほど薄く、上の端で消える)
             var bottom = cur_top - lgap;
             var kk: usize = 1;
-            while (kk <= ci and kk <= 4) : (kk += 1) {
+            while (has_cur and kk <= ci and kk <= 4) : (kk += 1) {
                 const str = text_of(ls, ci - kk);
                 const sz = if (kk == 1) small + (big - small) * sc else small;
                 const lh = sz * 1.32;

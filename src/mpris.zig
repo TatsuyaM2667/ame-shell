@@ -47,6 +47,8 @@ const Player = struct {
     trackid: Buf(160) = .{},
     length_s: f32 = 0,
     pos_s: f32 = 0,
+    /// pos_s を知った時刻(再生中はここから経過時間ぶん進める。古い位置を「今」として渡さないため)
+    pos_at_ms: u64 = 0,
     shuffle: bool = false,
     loop_mode: u8 = 0, // 0=なし 1=プレイリスト 2=1 曲
     changed_ms: u64 = 0,
@@ -182,6 +184,7 @@ pub const Mpris = struct {
                 applyMetadata(p, &v);
             } else if (std.mem.eql(u8, key, "Position")) {
                 p.pos_s = @as(f32, @floatFromInt(getInt(&v) orelse 0)) / 1e6;
+                p.pos_at_ms = loop.nowMs();
             } else if (std.mem.eql(u8, key, "Shuffle")) {
                 if (c.dbus_message_iter_get_arg_type(&v) == c.DBUS_TYPE_BOOLEAN) {
                     var b: c.dbus_bool_t = 0;
@@ -292,6 +295,7 @@ pub const Mpris = struct {
             var it: c.DBusMessageIter = undefined;
             if (c.dbus_message_iter_init(msg, &it) == 0) return false;
             p.pos_s = @as(f32, @floatFromInt(getInt(&it) orelse 0)) / 1e6;
+            p.pos_at_ms = loop.nowMs();
             p.changed_ms = loop.nowMs();
             return true;
         }
@@ -300,9 +304,17 @@ pub const Mpris = struct {
             if (c.dbus_message_iter_init(msg, &it) == 0) return false;
             _ = c.dbus_message_iter_next(&it); // インターフェイス名
             const before = p.status;
+            const before_track = std.hash.Wyhash.hash(0, p.title.get()) ^ std.hash.Wyhash.hash(1, p.trackid.get());
             applyProps(p, &it);
             // 再生状態が変わったときは、位置をプレイヤーに聞き直す(一時停止中に進んだ分を外挿しないように)
-            if (before != p.status) self.queryPosition(p);
+            // 曲が変わったときも(前の曲の位置から外挿しないように)
+            const track_changed = before_track != (std.hash.Wyhash.hash(0, p.title.get()) ^ std.hash.Wyhash.hash(1, p.trackid.get()));
+            if (track_changed) {
+                // 位置を答えないプレイヤーもあるので、まず曲の頭にしておく
+                p.pos_s = 0;
+                p.pos_at_ms = loop.nowMs();
+            }
+            if (before != p.status or track_changed) self.queryPosition(p);
             return true;
         }
         return false;
@@ -336,7 +348,12 @@ pub const Mpris = struct {
         }
         self.media.shuffle = p.shuffle;
         self.media.loop_mode = p.loop_mode;
-        self.media.applyState(p.status == .playing, p.shortName(), p.artist.get(), p.title.get(), p.art.get(), p.length_s, p.pos_s, p.album.get());
+        // 再生中は、位置を知った時刻からの経過時間ぶん進めて渡す(音量・アートなど別の値が変わったときに、
+        // 古い位置へ巻き戻って歌詞が前の行を指すのを防ぐ)
+        var pos = p.pos_s;
+        if (p.status == .playing and p.pos_at_ms != 0) pos += @as(f32, @floatFromInt(loop.nowMs() -| p.pos_at_ms)) / 1000.0;
+        if (p.length_s > 0) pos = @min(pos, p.length_s);
+        self.media.applyState(p.status == .playing, p.shortName(), p.artist.get(), p.title.get(), p.art.get(), p.length_s, pos, p.album.get());
     }
 
     fn current(self: *Mpris) ?*Player {
@@ -407,6 +424,7 @@ pub const Mpris = struct {
         var v: c.DBusMessageIter = undefined;
         c.dbus_message_iter_recurse(&it, &v);
         p.pos_s = @as(f32, @floatFromInt(getInt(&v) orelse return)) / 1e6;
+        p.pos_at_ms = loop.nowMs();
     }
 
     /// 今の位置を Media に返す(歌詞の補正用)
