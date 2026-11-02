@@ -176,16 +176,25 @@ fn drawUtil(f: *Frame, cv: *gfx.Canvas, w: f32) bool {
 fn utilPress(f: *Frame, i: usize) void {
     const app = f.app;
     const b = utilButtons(f)[i].b;
-    var out: [128]u8 = undefined;
     switch (b) {
         .wifi => {
-            _ = netdbus.run(&.{ "nmcli", "radio", "wifi", if (app.dashboard.store.wifi_on != 0) "off" else "on" }, &out);
-            app.dashboard.queryRadiosPub();
+            // 待たずに表示だけ先に変える(実際の状態は NetworkManager の信号で syswatch が直す)
+            if (@import("builtin").os.tag == .freebsd)
+                // FreeBSD: wpa_supplicant を切断して自動接続も止める / 再接続
+                sys.spawnDetached(if (app.dashboard.store.wifi_on != 0) "wpa_cli disconnect" else "wpa_cli reconnect")
+            else
+                netdbus.detached(&.{ "nmcli", "radio", "wifi", if (app.dashboard.store.wifi_on != 0) "off" else "on" });
+            app.dashboard.store.wifi_on ^= 1;
         },
         .bt => {
             // 入れるときは rfkill のブロックも外す(外さないと BlueZ は電源を入れられない)。D-Bus で直接(platform/netdbus.zig)
-            _ = netdbus.run(&.{ "ame-bt", "power", if (app.dashboard.store.bt_on != 0) "off" else "on" }, &out);
-            app.dashboard.queryRadiosPub();
+            // 電源を入れるのに 1 秒近くかかることがあるので待たない(実際の状態は BlueZ の信号で syswatch が直す)
+            if (@import("builtin").os.tag == .freebsd) {
+                app.osd.info("FreeBSD の Bluetooth のオン/オフは管理者の操作(service hcsecd など)が必要です");
+                return;
+            }
+            netdbus.detached(&.{ "ame-bt", "power", if (app.dashboard.store.bt_on != 0) "off" else "on" });
+            app.dashboard.store.bt_on ^= 1;
             f.bar.bt_on = app.dashboard.store.bt_on != 0;
         },
         .dnd => app.dashboard.dnd = !app.dashboard.dnd,

@@ -82,7 +82,7 @@ const help =
     \\  screenshot region|full|clip   (範囲 / 全体を ~/Pictures/Screenshots に保存してコピー / 全体をコピーだけ)
     \\  avatar pick           (ユーザーの写真をファイル選択の画面から選ぶ)
     \\  media play-pause|next|previous   (再生中の曲の操作)
-    \\  net wifi|saved|radio|bt|bt-devices   (Wi-Fi・Bluetooth の状態。NetworkManager / BlueZ に D-Bus で聞く)
+    \\  net wifi|saved|radio|ssid|bt|bt-devices   (Wi-Fi・Bluetooth の状態。NetworkManager / BlueZ に D-Bus で聞く)
     \\  lock
     \\  reload                 (設定の再読込)
     \\  widgets reload
@@ -229,6 +229,9 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
     } else if (eq(u8, cmd, "media")) {
         // 再生中の曲の操作(MPRIS を D-Bus で。playerctl は使わない)
         if (eq(u8, arg, "play-pause") or eq(u8, arg, "toggle")) app.media.toggle() else if (eq(u8, arg, "next")) app.media.next() else if (eq(u8, arg, "previous") or eq(u8, arg, "prev")) app.media.prev() else return "error: media play-pause|next|previous";
+    } else if (eq(u8, cmd, "net") and eq(u8, arg, "ssid")) {
+        // つながっている Wi-Fi の名前(バーに出すもの)
+        return @import("platform/netdbus.zig").activeSsid(out) orelse "(つながっていません)";
     } else if (eq(u8, cmd, "net")) {
         // Wi-Fi・Bluetooth の状態(NetworkManager / BlueZ に D-Bus で直接聞く。読み取りだけ)
         const argv: []const []const u8 = if (eq(u8, arg, "wifi"))
@@ -242,7 +245,7 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
         else if (eq(u8, arg, "bt-devices"))
             &.{ "bluetoothctl", "devices" }
         else
-            return "error: net wifi|saved|radio|bt|bt-devices";
+            return "error: net wifi|saved|radio|ssid|bt|bt-devices";
         return @import("platform/netdbus.zig").run(argv, out) orelse "error";
     } else if (eq(u8, cmd, "screenshot")) {
         const k = @import("shot.zig").Kind.parse(if (arg.len > 0) arg else "region") orelse return "error: screenshot region|full|clip";

@@ -804,22 +804,23 @@ fn connectionDown(bus: *Bus, id: []const u8, o: *Out) void {
 
 /// バーに出す SSID(つながっている Wi-Fi のアクセスポイント)
 pub fn activeSsid(buf: []u8) ?[]const u8 {
+    // つながっているアクセスポイントだけを読む(見えている全部を読むと数十回の往復になり、バーの更新のたびに止まる)
     var bus = Bus.open() orelse return null;
     defer bus.close();
-    var o = Out{};
-    listAps(&bus, &o, "ACTIVE,SSID");
-    const s = o.get();
-    if (!std.mem.startsWith(u8, s, "yes:")) return null;
-    const line = s[4 .. std.mem.indexOfScalar(u8, s, '\n') orelse s.len];
-    // ':' の逃がしを戻す
-    var n: usize = 0;
-    var i: usize = 0;
-    while (i < line.len and n < buf.len) : (i += 1) {
-        if (line[i] == '\\' and i + 1 < line.len) i += 1;
-        buf[n] = line[i];
-        n += 1;
+    var devs = Paths{};
+    wifiDevices(&bus, &devs);
+    for (0..devs.n) |d| {
+        var abuf: [128:0]u8 = undefined;
+        const active = bus.getStr(NM, devs.z(d), NM_WIFI, "ActiveAccessPoint", abuf[0..127]) orelse continue;
+        if (active.len < 2) continue; // "/" = つながっていない
+        abuf[active.len] = 0;
+        const ap = readAp(&bus, @ptrCast(&abuf)) orelse continue;
+        const s = ap.ssidStr();
+        const n = @min(s.len, buf.len);
+        @memcpy(buf[0..n], s[0..n]);
+        return buf[0..n];
     }
-    return buf[0..n];
+    return null;
 }
 
 // ---------------------------------------------------------------------------
