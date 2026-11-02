@@ -130,6 +130,10 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
         // 試験用(AME_DEBUG が設定されているときだけ): 「アーティスト|曲名|長さ秒|位置秒」で再生中のふりをする
         if (std.posix.getenv("AME_DEBUG") == null) return "error: AME_DEBUG が必要です";
         app.media.debugFake(rest);
+    } else if (eq(u8, cmd, "debug-wobble")) {
+        // 試験用(AME_DEBUG のときだけ): 浮いた窓のたわみを、カーソル無しで動かす(start / move dx dy / release)
+        if (std.posix.getenv("AME_DEBUG") == null) return "error: AME_DEBUG が必要です";
+        if (app.wm) |w| w.debugWobble(rest);
     } else if (eq(u8, cmd, "debug-spectrum")) {
         // 試験用(AME_DEBUG のときだけ): 音を鳴らさずに、ビジュアライザーへ低音の強いスペクトルを入れる
         if (std.posix.getenv("AME_DEBUG") == null) return "error: AME_DEBUG が必要です";

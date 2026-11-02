@@ -41,6 +41,7 @@ pub usingnamespace @cImport({
     @cInclude("river-libinput-config-v1-client-protocol.h");
     @cInclude("wlr-foreign-toplevel-management-unstable-v1-client-protocol.h");
     @cInclude("ext-image-capture-source-v1-client-protocol.h");
+    @cInclude("ext-foreign-toplevel-list-v1-client-protocol.h");
     @cInclude("ext-image-copy-capture-v1-client-protocol.h");
     @cInclude("ext-data-control-v1-client-protocol.h");
     @cInclude("viewporter-client-protocol.h");

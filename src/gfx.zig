@@ -676,7 +676,7 @@ fn shader(kind: c.GLenum, src: []const u8) !c.GLuint {
     return s;
 }
 
-fn program(vs: []const u8, fs: []const u8) !c.GLuint {
+pub fn program(vs: []const u8, fs: []const u8) !c.GLuint {
     const p = c.glCreateProgram();
     c.glAttachShader(p, try shader(c.GL_VERTEX_SHADER, vs));
     c.glAttachShader(p, try shader(c.GL_FRAGMENT_SHADER, fs));

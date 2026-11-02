@@ -30,12 +30,22 @@ const loop = @import("../platform/loop.zig");
 const sys = @import("../platform/sys.zig");
 const theme = @import("../theme.zig");
 const binds = @import("binds.zig");
+const wobble = @import("wobble.zig");
 
 const BTN_LEFT = 0x110;
 const BTN_RIGHT = 0x111;
 const BTN_MIDDLE = 0x112;
 const ALL_EDGES = c.RIVER_WINDOW_V1_EDGES_TOP | c.RIVER_WINDOW_V1_EDGES_BOTTOM | c.RIVER_WINDOW_V1_EDGES_LEFT | c.RIVER_WINDOW_V1_EDGES_RIGHT;
 const SCRATCH_TAG: u32 = 1 << 20;
+
+/// ame-shell が半透明にしている窓か(Thunar の AmeGlass・ghostty・foot)。たわむ絵で透け具合を戻すため(wobble.zig)
+fn isGlassy(app_id: []const u8) bool {
+    var buf: [96]u8 = undefined;
+    const n = @min(app_id.len, buf.len);
+    const low = std.ascii.lowerString(buf[0..n], app_id[0..n]);
+    for ([_][]const u8{ "thunar", "ghostty", "foot" }) |k| if (std.mem.indexOf(u8, low, k) != null) return true;
+    return false;
+}
 
 /// Discord の窓か(本体・Flatpak の com.discordapp.Discord・vesktop など、app_id に discord / vesktop を含む)
 fn isDiscord(app_id: []const u8) bool {
@@ -268,6 +278,31 @@ pub const Wm = struct {
 
     pub fn push(self: *Wm, a: Action) void {
         self.queue.append(a) catch return;
+        self.requestManage();
+    }
+
+    /// ほかのモジュール(wobble.zig)から: 次の manage / render を回してもらう
+    /// 試験用(ame-ctl debug-wobble): カーソル無しで、フォーカス中の浮いた窓のたわみを動かす
+    ///   "start" … 左上寄りをつかんだことにして始める / "move dx dy" … 目標をずらす / "release" … 離す
+    pub fn debugWobble(self: *Wm, args: []const u8) void {
+        const w = self.focusedWindow() orelse return;
+        if (!w.floating) return;
+        var it = std.mem.tokenizeScalar(u8, args, ' ');
+        const cmd = it.next() orelse return;
+        if (std.mem.eql(u8, cmd, "start")) {
+            const wo = w.out orelse return;
+            const ao = wo.ame orelse return;
+            wobble.begin(w, w.ident[0..w.ident_len], .{ w.tx, w.ty, w.tw, w.th }, .{ w.tx + w.tw * 0.2, w.ty + 15 }, ao, .{ @floatFromInt(wo.x), @floatFromInt(wo.y) }, isGlassy(w.app_id[0..w.app_id_len]));
+        } else if (std.mem.eql(u8, cmd, "move")) {
+            const dx = std.fmt.parseFloat(f32, it.next() orelse "0") catch 0;
+            const dy = std.fmt.parseFloat(f32, it.next() orelse "0") catch 0;
+            wobble.moveTo(w, w.tx + dx, w.ty + dy);
+        } else if (std.mem.eql(u8, cmd, "release")) {
+            wobble.release(w);
+        }
+    }
+
+    pub fn poke(self: *Wm) void {
         self.requestManage();
     }
 
@@ -539,6 +574,7 @@ pub const Wm = struct {
             .op_move, .op_resize => if (s) |ss| {
                 const w = ss.pointer_window orelse return;
                 if (w.fullscreen) return;
+                const was_float = w.floating;
                 if (!w.floating) {
                     w.floating = true;
                     w.float_rect = .{ w.tx, w.ty, w.tw, w.th };
@@ -575,6 +611,10 @@ pub const Wm = struct {
                 ss.focused = w;
                 c.river_seat_v1_op_start_pointer(ss.obj);
                 if (a == .op_resize) c.river_window_v1_inform_resize_start(w.obj);
+                // 浮いた窓をつかんで動かす: 紙・液体のようにたわむ(wobble.zig。窓の絵を撮って網目で描く)
+                if (a == .op_move and was_float) if (w.out) |wo| if (wo.ame) |ao| {
+                    wobble.begin(w, w.ident[0..w.ident_len], .{ w.tx, w.ty, w.tw, w.th }, .{ @floatFromInt(ss.ptr_x), @floatFromInt(ss.ptr_y) }, ao, .{ @floatFromInt(wo.x), @floatFromInt(wo.y) }, isGlassy(w.app_id[0..w.app_id_len]));
+                };
             },
             .set_tags_on => |st| {
                 const oo = st.out orelse o orelse return;
@@ -928,7 +968,10 @@ pub const Wm = struct {
             c.river_node_v1_set_position(node, @intFromFloat(@round(x)), @intFromFloat(@round(y)));
             self.updateGrip(w, w.floating and !w.closing);
             const full = sc >= 0.999 and vw >= fw - 0.5 and vh >= fh - 0.5;
-            if (full) {
+            if (wobble.hides(w)) {
+                // たわむ絵が代わりに描かれている間は、本物を 1 画素に切り抜いて隠す
+                c.river_window_v1_set_clip_box(w.obj, 0, 0, 1, 1);
+            } else if (full) {
                 c.river_window_v1_set_clip_box(w.obj, 0, 0, 0, 0);
             } else {
                 const cx: i32 = @intFromFloat(@round((vw - bw) / 2));
@@ -1228,6 +1271,7 @@ fn wClosed(data: ?*anyopaque, obj: ?*c.struct_river_window_v1) callconv(.C) void
         }
     }
     if (self.grip_hover == w) self.gripLeave();
+    wobble.forget(w);
     dropGrip(w);
     if (std.mem.indexOfScalar(*Window, self.windows.items, w)) |i| _ = self.windows.orderedRemove(i);
     if (w.node) |n| c.river_node_v1_destroy(n);
@@ -1425,10 +1469,15 @@ fn sOpDelta(data: ?*anyopaque, _: ?*c.struct_river_seat_v1, dx: i32, dy: i32) ca
     const w = s.op_window orelse return;
     const fx: f32 = @floatFromInt(dx);
     const fy: f32 = @floatFromInt(dy);
+    // River は manage のたびに同じ値を送り直す。変わっていなければ何もしない
+    // (毎回 manage を頼むと、manage → op_delta → manage … と回り続けて、River がカーソルの動きを処理できなくなる)
+    if (dx == s.op_dx and dy == s.op_dy and (dx != 0 or dy != 0)) return;
     s.op_dx = dx;
     s.op_dy = dy;
     if (s.op == .move) {
         w.float_rect = .{ s.op_start[0] + fx, s.op_start[1] + fy, s.op_start[2], s.op_start[3] };
+        const b: f32 = @floatFromInt(s.wm.border);
+        wobble.moveTo(w, w.float_rect[0] + b, w.float_rect[1] + b);
     } else {
         // つかんだ辺だけを動かす(反対側の辺は動かさない)。小さくしすぎない
         const st = s.op_start;
@@ -1465,6 +1514,10 @@ fn sOpRelease(data: ?*anyopaque, _: ?*c.struct_river_seat_v1) callconv(.C) void 
             w.floating = false;
             s.wm.app.osd.info("タイルに戻しました");
         }
+    };
+    if (s.op == .move) if (s.op_window) |w| {
+        // タイルに戻したときは、たわむ絵をすぐやめる(窓はタイルの位置へ動く)
+        if (w.floating) wobble.release(w) else wobble.forget(w);
     };
     s.op = .none;
     s.op_window = null;

@@ -330,6 +330,7 @@ pub const App = struct {
                 self.wallpick.reap();
                 @import("shot.zig").reap(self);
                 @import("ripple.zig").reap(self);
+                @import("wm/wobble.zig").reap(self);
             }
         }
     }
@@ -796,6 +797,13 @@ fn onGlobal(data: ?*anyopaque, reg: ?*c.struct_wl_registry, name: u32, interface
         app.icc_mgr = @ptrCast(bind(reg, name, &c.ext_image_copy_capture_manager_v1_interface, ver, 1));
     } else if (iface(interface, &c.ext_output_image_capture_source_manager_v1_interface)) {
         app.ics_mgr = @ptrCast(bind(reg, name, &c.ext_output_image_capture_source_manager_v1_interface, ver, 1));
+    } else if (iface(interface, &c.ext_foreign_toplevel_list_v1_interface)) {
+        // 浮いた窓をたわませるために、窓の絵を撮る(wm/wobble.zig)
+        const l: *c.struct_ext_foreign_toplevel_list_v1 = @ptrCast(bind(reg, name, &c.ext_foreign_toplevel_list_v1_interface, ver, 1) orelse return);
+        @import("wm/wobble.zig").bindList(app, l);
+    } else if (iface(interface, &c.ext_foreign_toplevel_image_capture_source_manager_v1_interface)) {
+        const m: *c.struct_ext_foreign_toplevel_image_capture_source_manager_v1 = @ptrCast(bind(reg, name, &c.ext_foreign_toplevel_image_capture_source_manager_v1_interface, ver, 1) orelse return);
+        @import("wm/wobble.zig").bindSourceManager(app, m);
     } else if (iface(interface, &c.wp_viewporter_interface)) {
         app.viewporter = @ptrCast(bind(reg, name, &c.wp_viewporter_interface, ver, 1));
     } else if (iface(interface, &c.wp_single_pixel_buffer_manager_v1_interface)) {
