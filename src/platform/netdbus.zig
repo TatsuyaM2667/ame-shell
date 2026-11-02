@@ -18,6 +18,7 @@
 //   bluetoothctl disconnect|power …                      → "" / "Failed: …"
 //   ame-bt power on|off                                  → "ok" / "Failed: …"(on は rfkill のブロックも外す)
 //   ame-bt scan <秒>                                     → "ok"(見つかった機器は BlueZ の信号で syswatch が拾う)
+//   ame-bt remove <MAC>                                  → "Device has been removed" / "Failed: …"(登録を消す)
 //   ame-bt connect|pair <MAC> <bt-connect.sh>            → "Connection successful" / "Failed: …"
 //                                                          (音の出力先の切り替えは bt-connect.sh --audio で pactl)
 const std = @import("std");
@@ -1018,6 +1019,18 @@ fn ameBt(bus: *Bus, a: *Args, o: *Out) void {
         const secs = std.fmt.parseInt(u32, a.get(2), 10) catch 10;
         discover(bus, st, secs);
         o.add("ok\n");
+        return;
+    }
+    if (a.is(1, "remove")) {
+        // 登録(ペアリング)を消す。つながっていれば BlueZ が切ってから消す
+        if (!st.has_adapter) return o.add("Failed: Bluetooth のアダプタがありません\n");
+        const d = findDev(st, a.get(2)) orelse return o.add("Failed: Device not available\n");
+        const m = Bus.call(BLUEZ, &st.adapter, ADAPTER, "RemoveDevice") orelse return o.add("Failed: D-Bus のメッセージを作れません\n");
+        var p: [*c]const u8 = &d.path;
+        _ = c.dbus_message_append_args(m, c.DBUS_TYPE_OBJECT_PATH, &p, c.DBUS_TYPE_INVALID);
+        const r = bus.send(m, 10_000) orelse return btErr(bus, o, "remove");
+        c.dbus_message_unref(r);
+        o.add("Device has been removed\n");
         return;
     }
     const pair = a.is(1, "pair");

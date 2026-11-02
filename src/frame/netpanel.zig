@@ -108,8 +108,19 @@ pub const State = struct {
     scroll: f32 = 0,
     appear: [MAX_ITEMS]Spring = [_]Spring{Spring.init(0, 0.3, 0.75)} ** MAX_ITEMS,
     edit_h: Spring = Spring.init(0, 0.3, 0.85),
+    /// Bluetooth の登録の削除は 2 回押し: 1 回目で構えた行(-1 = なし)と時刻。4 秒で解除
+    rm_armed: i32 = -1,
+    rm_ms: u64 = 0,
     frame: ?*Frame = null,
 };
+
+/// 登録の削除ボタン(ペア済みの行の、接続ボタンの左)
+const RM_X: f32 = 126; // 右端からの距離
+const RM_W: f32 = 34;
+
+fn rmArmed(st: *const State, i: usize) bool {
+    return st.rm_armed == @as(i32, @intCast(i)) and loop.nowMs() -| st.rm_ms < 4000;
+}
 
 // ---------------------------------------------------------------------------
 // ジョブ(nmcli / bluetoothctl)
@@ -304,7 +315,7 @@ fn finish(st: *State, j: Job, out: []const u8) void {
                 else if (has(out, "profile-unavailable"))
                     "音声の受け口が準備できていません(PipeWire を確認)"
                 else if (has(out, "AuthenticationFailed") or has(out, "AuthenticationRejected"))
-                    "認証に失敗しました。ペアリングを削除(bluetoothctl remove)してやり直してください"
+                    "認証に失敗しました。ごみ箱のボタンで登録を削除して、ペアリングし直してください"
                 else
                     line;
                 setStatus(st, std.fmt.bufPrint(&msg, "失敗: {s}", .{pretty}) catch "失敗", true);
@@ -771,6 +782,13 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32, dt: f32) bool {
     st.edit_h.set(if (st.editing != null) 1 else 0);
     var sp = [_]*Spring{ &st.tab_s, &st.sw[0], &st.sw[1], &st.edit_h };
     if (anim.stepAll(&sp, dt)) animating = true;
+    // 登録の削除を構えている間は描き直し続け、4 秒で解く(赤いまま残らないように)
+    if (st.rm_armed >= 0) {
+        if (loop.nowMs() -| st.rm_ms < 4000) animating = true else {
+            st.rm_armed = -1;
+            st.status_len = 0;
+        }
+    }
 
     // ---- タブ ----
     const tw = (w - 36) / 2;
@@ -846,11 +864,19 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32, dt: f32) bool {
             const d = &st.devs[i];
             const col = if (d.connected) acc.lighten(0.3) else txt;
             _ = cv.text(36, y + 32, 18, col, if (d.connected) "\u{F00B1}" else "\u{F00AF}", .{ .alignment = .center });
-            _ = cv.text(58, y + 23, 14, col, d.name(), .{ .bold = d.connected, .max_w = w - 190 });
-            _ = cv.text(58, y + 41, 11.5, if (d.connected) acc else sub, if (d.connected) "接続中" else if (d.paired) "ペア済み" else "未ペア", .{});
+            const can_rm = d.paired and !is_bsd;
+            _ = cv.text(58, y + 23, 14, col, d.name(), .{ .bold = d.connected, .max_w = w - (if (can_rm) @as(f32, 196) else 190) });
+            const armed = can_rm and rmArmed(st, i);
+            _ = cv.text(58, y + 41, 11.5, if (armed) theme.danger(app).lighten(0.2) else if (d.connected) acc else sub, if (armed) "もう一度押すと登録を削除" else if (d.connected) "接続中" else if (d.paired) "ペア済み" else "未ペア", .{});
             const btn = if (d.connected) "切断" else if (d.paired) "接続" else "ペア";
             cv.rect(w - 86, y + 12, 62, 26, 13, (if (d.connected) theme.danger(app) else acc).alpha(0.18 + 0.2 * hv));
             _ = cv.text(w - 55, y + 30, 12.5, txt, btn, .{ .alignment = .center });
+            if (can_rm) {
+                // 登録の削除(ごみ箱)。構えている間は赤く塗る
+                const dg = theme.danger(app);
+                cv.rect(w - RM_X, y + 12, RM_W, 26, 13, if (armed) dg.alpha(0.85) else dg.alpha(0.10 + 0.12 * hv));
+                _ = cv.text(w - RM_X + RM_W / 2, y + 30, 14, if (armed) Color.hex(0xffffff) else txt, "\u{F0A7A}", .{ .alignment = .center });
+            }
         }
         cv.restore();
         y += rh;
@@ -972,6 +998,20 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
     } else {
         const d = &st.devs[i];
         const mac: []const u8 = &d.mac;
+        if (d.paired and lx >= w - RM_X - 4 and lx < w - RM_X + RM_W + 4) {
+            // 登録の削除: 1 回目は構えるだけ、4 秒以内にもう 1 回で消す
+            if (!rmArmed(st, i)) {
+                st.rm_armed = @intCast(i);
+                st.rm_ms = loop.nowMs();
+                setStatus(st, std.fmt.bufPrint(&msg, "もう一度押すと {s} の登録を削除します", .{d.name()}) catch "もう一度押すと削除します", false);
+                return true;
+            }
+            st.rm_armed = -1;
+            setStatus(st, "登録を削除しています…", false);
+            push(st, makeJob(.bt_action, &.{ "ame-bt", "remove", mac }, std.fmt.bufPrint(&msg, "{s} の登録を削除しました", .{d.name()}) catch "登録を削除しました"));
+            return true;
+        }
+        st.rm_armed = -1;
         if (d.connected) {
             setStatus(st, "切断しています…", false);
             push(st, makeJob(.bt_action, &.{ "bluetoothctl", "disconnect", mac }, std.fmt.bufPrint(&msg, "{s} を切断しました", .{d.name()}) catch "切断しました"));
