@@ -202,6 +202,9 @@ pub const Wm = struct {
     /// カーソルが乗っている、浮いた窓の縁のつまみと、その辺
     grip_hover: ?*Window = null,
     grip_edges: u32 = 0,
+    /// 縁のダブルクリック(タイトルバーの無い窓でもタイルに戻せるように)
+    grip_last_ms: u64 = 0,
+    grip_last_win: ?*Window = null,
     mgr: *c.struct_river_window_manager_v1,
     xkb: ?*c.struct_river_xkb_bindings_v1 = null,
     lsh: ?*c.struct_river_layer_shell_v1 = null,
@@ -547,7 +550,9 @@ pub const Wm = struct {
                         const py: f32 = @floatFromInt(ss.ptr_y);
                         const fx = std.math.clamp((px - w.tx) / w.tw, 0, 1);
                         const fy = std.math.clamp((py - w.ty) / w.th, 0, 1);
-                        if (ss.ptr_x != 0 or ss.ptr_y != 0) w.float_rect = .{ px - fx * nw, py - fy * nh, nw, nh };
+                        // カーソルが窓の上にあるときだけ、つかんだ所に合わせる(位置が古ければ窓の中央を基準に縮める)
+                        const inside = (ss.ptr_x != 0 or ss.ptr_y != 0) and px >= w.tx and px <= w.tx + w.tw and py >= w.ty and py <= w.ty + w.th;
+                        w.float_rect = if (inside) .{ px - fx * nw, py - fy * nh, nw, nh } else .{ w.tx + (w.tw - nw) / 2, w.ty + (w.th - nh) / 4, nw, nh };
                     }
                     self.floatHint();
                 }
@@ -687,6 +692,16 @@ pub const Wm = struct {
     /// つまみを押した: その辺で大きさを変える
     pub fn gripPress(self: *Wm) void {
         const w = self.grip_hover orelse return;
+        // 縁をダブルクリック: タイルに戻す
+        const now = loop.nowMs();
+        if (self.grip_last_win == w and now -| self.grip_last_ms < 450) {
+            self.grip_last_win = null;
+            self.gripLeave();
+            self.toggleFloat(w);
+            return;
+        }
+        self.grip_last_ms = now;
+        self.grip_last_win = w;
         if (self.grip_edges == 0) return;
         for (self.seats.items) |s| {
             s.pointer_window = w;
@@ -702,7 +717,7 @@ pub const Wm = struct {
             // 今の位置・大きさのまま浮かせる(少し小さくして中央寄りに)
             w.float_rect = .{ w.tx + w.tw * 0.08, w.ty + w.th * 0.08, w.tw * 0.84, w.th * 0.84 };
             self.floatHint();
-        }
+        } else self.app.osd.info("タイルに戻しました");
         self.requestManage();
     }
 
@@ -710,7 +725,7 @@ pub const Wm = struct {
     fn floatHint(self: *Wm) void {
         if (self.float_hints >= 3) return;
         self.float_hints += 1;
-        self.app.osd.info("縁をドラッグで大きさを変更 ・ 上の端へドラッグでタイルに戻す");
+        self.app.osd.info("縁をドラッグで大きさを変更 ・ 縁をダブルクリック / Super+Space でタイルに戻す");
     }
 
     /// ワークスペース(タグ)の切替。出ていく窓は横へスライドして消え、入ってくる窓は反対側から入る
@@ -1443,7 +1458,13 @@ fn sOpRelease(data: ?*anyopaque, _: ?*c.struct_river_seat_v1) callconv(.C) void 
     // 浮いた窓を画面の上の端まで持っていって離した: タイルに戻す
     if (s.op == .move) if (s.op_window) |w| if (w.out) |o| {
         const top = if (o.area) |ar| ar[1] else o.y;
-        if (s.op_py + s.op_dy <= top + 4) w.floating = false;
+        // カーソルが上の端に着いた、または窓の上の辺が使える範囲より上へ出た(カーソルの位置が届いていなくても分かるように)
+        const ptr_top = s.op_py + s.op_dy <= top + 4 and (s.op_px != 0 or s.op_py != 0);
+        const win_top = w.float_rect[1] < @as(f32, @floatFromInt(top)) - 6;
+        if (ptr_top or win_top) {
+            w.floating = false;
+            s.wm.app.osd.info("タイルに戻しました");
+        }
     };
     s.op = .none;
     s.op_window = null;
