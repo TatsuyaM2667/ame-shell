@@ -521,10 +521,6 @@ chk zsh zsh "端末のシェル" "terminal shell"
 chk dbus-run-session dbus "D-Bus" "D-Bus"
 
 
-# スクショは ame-shell が自前で撮る。grim / slurp / wl-copy は ext-image-copy-capture の無い River(0.3 など)での代わり
-[ "$OS" = FreeBSD ] && chk grim grim "スクショ" "screenshots"
-[ "$OS" = FreeBSD ] && chk slurp slurp "範囲のスクショ" "region screenshots"
-[ "$OS" = FreeBSD ] && chk wl-copy wl-clipboard "スクショのコピー" "copy screenshots"
 [ "$OS" != FreeBSD ] && chk pactl libpulse-progs "音量・Bluetooth の音" "volume / Bluetooth audio"
 [ "$OS" != FreeBSD ] && chk rfkill util-linux-rfkill "Wi-Fi・Bluetooth のブロック解除" "unblock Wi-Fi / Bluetooth"
 if [ "$NEW_RIVER" = 1 ]; then

@@ -186,3 +186,15 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - オリジナルのカーソルのテーマ "ame": tools/cursorgen.zig が SVG(32×32 の座標)を同梱の nanosvg でラスタライズし、ぼかした影を付けて Xcursor の形式を直接書く(xcursorgen・ImageMagick は不要。FreeBSD でも同じ)。紺のグラデーションの本体 + 白い細い縁(全部の形を白い太線で描いてから本体を塗るので重ねても継ぎ目なし)+ 柔らかい影、回る輪・目印はアクセントの青、禁止は赤。24 種類 × 24/32/48/64/96px、待ち・処理中は 24 コマで回る。古い名前・ハッシュの名前(Qt / X11)は約 100 個のシンボリックリンク。zig build が zig-out/share/icons/ame に書き、install-session.sh がリンクのまま入れる(install_link)。
 - River 0.5 は XCURSOR_THEME を読まないので、内蔵 WM が seat ごとに river_seat_v1.set_xcursor_theme(版 2 から)で伝える。ame-session は ame のテーマがあれば XCURSOR_THEME=ame と XCURSOR_PATH(/usr/local/share/icons を含む)を設定(XCURSOR_THEME を自分で決めていればそのまま)。
 - 確認: 確認用の一覧画像(暗い背景・明るい背景)、入れ子の River 0.5 で grim -c でカーソルが ame になること、--destdir の疑似インストールでリンクのまま入ること(約 4.6MB)。
+
+## 2026-11-02 FreeBSD・Arch でも同じように動くように整える・使わなくなったものの片付け
+- FreeBSD の River(pkg は 0.4.8)を調べた: river-window-management は v5(ame-shell は min(広告, 6) で結ぶ。v6 だけの要求は使っていない)、
+  ext-image-copy-capture・ext-data-control・viewporter・single-pixel-buffer もある → スクショ・クリップボード・浮いた窓の縁のつまみがそのまま使える。
+  FreeBSD の必須パッケージからも grim / slurp / wl-clipboard を外した。
+- 試しビルド: FreeBSD 14.5 の base.txz と pkg(wayland・mesa-libs・libglvnd・libxkbcommon・freetype2・harfbuzz・fontconfig・dbus・libepoll-shim・libinotify と依存)の sysroot で
+  x86_64-freebsd 向けに ame-shell / ame-ctl のビルド・リンクが通る。`syscall` 命令は 0、memfd_create / pipe2 / timerfd は FreeBSD の libc のもの。
+  (cursorgen はビルドする機械で動かす道具なので、--libc で FreeBSD の libc を渡す試しビルドでは作れない。FreeBSD の実機では問題ない)
+- scripts/check-freebsd-pkgs.sh: FreeBSD 14 / 15 × quarterly / latest で必須のパッケージはすべてある。Mozc(ja-fcitx5-mozc)は quarterly に無い → --mozc でソースから。
+- scripts/cleanup-old.sh(install.sh / install-arch.sh / install-freebsd.sh の --cleanup): cava・playerctl・grim・slurp・(聞いてから)wl-clipboard・Dolphin など KDE のアプリと、
+  ~/.config・~/.local/share に残った KDE / Dolphin の設定を、入っているものだけ確認してから消す。
+- 内部の名前 Cava → Spectrum。README・docs・site の cava / playerctl / nmcli の記述を今の作りに。

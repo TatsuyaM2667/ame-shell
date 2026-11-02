@@ -18,6 +18,7 @@
 #   --no-gpu        GPU ドライバを触らない(VM や、自分で設定済みのとき)
 #   --no-ja         日本語入力(fcitx5 + mozc)を入れない(日本語フォントは入れる)
 #   --mozc          fcitx5 用の Mozc をソースからビルドして入れる(リポジトリに無いとき。10〜20 分)
+#   --cleanup       使わなくなったパッケージ(cava・playerctl など)と KDE の古い設定を、確認してから消す
 #   --no-super-tap  Super 単独でランチャーを開く機能のための入力デバイスの権限を設定しない
 #   --debug         デバッグ情報つき・安全検査ありでビルドする(クラッシュ時のバックトレースに関数名が出る)
 #   --yes           確認せずに進める
@@ -29,6 +30,7 @@ JOBS=""
 DO_GPU=1
 DO_JA=1
 DO_MOZC=0
+DO_CLEANUP=0
 DO_TAP=1
 BUILD_OPTS="-Doptimize=ReleaseFast"
 ASSUME_YES=0
@@ -39,6 +41,7 @@ while [ $# -gt 0 ]; do
         --no-gpu) DO_GPU=0; shift ;;
         --no-ja) DO_JA=0; shift ;;
         --mozc) DO_MOZC=1; shift ;;
+        --cleanup) DO_CLEANUP=1; shift ;;
         --no-super-tap) DO_TAP=0; shift ;;
         --debug) BUILD_OPTS="-Doptimize=ReleaseSafe -Dstrip=false"; shift ;;
         --yes|-y) ASSUME_YES=1; shift ;;
@@ -100,7 +103,7 @@ REQUIRED="
  mesa-libs mesa-dri libglvnd libxkbcommon xkeyboard-config freetype2 harfbuzz fontconfig dbus
  libepoll-shim libinotify
  river sddm xorg-minimal seatd foot curl
- swaylock grim slurp wl-clipboard hicolor-icon-theme adwaita-icon-theme pulseaudio
+ swaylock hicolor-icon-theme adwaita-icon-theme pulseaudio
 "
 # あれば使う: 無ければ飛ばす(その機能だけ使えない)。"a|b" は「a が無ければ b」
 OPTIONAL="
@@ -304,6 +307,12 @@ if [ "$DO_JA" = 1 ]; then
         chown -R "$TARGET_USER" "$UHOME/.config/ame-shell"
         info "$envf を作成(日本語入力。例: $REPO/data/examples/environment)"
     fi
+fi
+
+if [ "$DO_CLEANUP" = 1 ]; then
+    # パッケージは root で消し、設定はその人のホームの中を見る
+    if [ "$ASSUME_YES" = 1 ]; then cu="--yes"; else cu=""; fi
+    HOME="$UHOME" XDG_CONFIG_HOME="" XDG_DATA_HOME="" sh "$REPO/scripts/cleanup-old.sh" $cu
 fi
 
 cat <<EOF

@@ -8,6 +8,7 @@
 # オプション: --no-deps(パッケージを入れない)/ --no-river(River が無くても作らない)/ --no-ghostty(ghostty を作らない)/ --yes(確認しない)
 #           --debug(デバッグ情報つき・安全検査ありでビルド。クラッシュのバックトレースに関数名が出る)
 #           --mozc(日本語入力 Mozc をソースからビルド。Chimera・FreeBSD はパッケージで入らないため。10〜20 分)
+#           --cleanup(使わなくなったパッケージ(cava・playerctl など)と KDE / Dolphin の古い設定を、確認してから消す)
 # FreeBSD では scripts/install-freebsd.sh、Arch 系では scripts/install-arch.sh(どちらも完全自動)に任せる。
 #
 # Linux で行うこと:
@@ -28,6 +29,7 @@ NO_DEPS=0
 NO_RIVER=0
 NO_GHOSTTY=0
 MOZC=0
+CLEANUP=0
 ASSUME_YES=0
 BUILD_OPTS="-Doptimize=ReleaseFast"
 FWD=""
@@ -39,9 +41,10 @@ for a in "$@"; do
         --no-river) NO_RIVER=1 ;;
         --no-ghostty) NO_GHOSTTY=1 ;;
         --mozc) MOZC=1; FWD="$FWD --mozc" ;;
+        --cleanup) CLEANUP=1; FWD="$FWD --cleanup" ;;
         --yes|-y) ASSUME_YES=1; FWD="$FWD --yes" ;;
         --debug) BUILD_OPTS="-Doptimize=ReleaseSafe -Dstrip=false"; FWD="$FWD --debug" ;;
-        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
         *) echo "unknown option: $a" >&2; exit 2 ;;
     esac
 done
@@ -436,4 +439,12 @@ fi
 # musl の Chimera では実行できず(No such file or directory)、何も起きない。サンドボックスの中で動かす
 if command -v flatpak >/dev/null 2>&1 && flatpak info --user dev.zed.Zed >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl; then
     flatpak override --user --env=ZED_FLATPAK_NO_ESCAPE=1 dev.zed.Zed && info "Zed(Flatpak): サンドボックスの中で動かす設定にしました(ZED_FLATPAK_NO_ESCAPE=1)"
+fi
+
+# ---------------------------------------------------------------------------
+# 使わなくなったもの(cava・playerctl・grim・slurp・Dolphin など KDE のアプリと、その古い設定)
+if [ "$CLEANUP" = 1 ]; then
+    if [ "$ASSUME_YES" = 1 ]; then sh "$REPO/scripts/cleanup-old.sh" --yes; else sh "$REPO/scripts/cleanup-old.sh"; fi
+else
+    info "使わなくなったパッケージ・古い設定は sh install.sh --cleanup(または sh scripts/cleanup-old.sh)で消せます"
 fi
