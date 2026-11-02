@@ -9,4 +9,6 @@ pub const items = .{
     .{ "blog/2026-10-28-freebsd", "FreeBSD 移植記: 番号 286 の SIGSYS から、タッチパッドまで", "2026-10-28", @embedFile("2026-10-28-freebsd.md") },
     .{ "blog/2026-10-28-music", "音楽のダッシュボード: 逆向きのトーンアームと、反転する Play", "2026-10-28", @embedFile("2026-10-28-music.md") },
     .{ "blog/2026-10-28-site", "このサイトを WebAssembly で作った", "2026-10-28", @embedFile("2026-10-28-site.md") },
+    .{ "blog/2026-11-02-own", "cava も playerctl も nmcli も grim もやめた", "2026-11-02", @embedFile("2026-11-02-own.md") },
+    .{ "blog/2026-11-02-ripple", "ロック画面の波紋と、紙のようにたわむ窓", "2026-11-02", @embedFile("2026-11-02-ripple.md") },
 };

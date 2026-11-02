@@ -113,7 +113,7 @@ FreeBSD も evdev(`/dev/input/event*`)を持っていますが、**ioctl の番�
 | 起動直後に SIGSYS | `std.os.linux.timerfd_settime`(Linux のシステムコール番号 286) | Linux 以外は libc の `timerfd_settime`。逆アセンブルで検査 |
 | ディスクの容量を読めない | musl の `struct statvfs` は translate-c で不透明型になる。さらにメンバーの並びが Linux(bsize, frsize, blocks, bfree, bavail …)と FreeBSD(bavail, bfree, blocks, … frsize …)で違う | 64 bit の整数の並びとして読み、OS ごとに「何番目が何か」を表にする(`frame/data.zig`) |
 | Super のタップが効かない | ioctl の番号の作り方・引数の型の違い | 上の `eviocgbitKey` と `@typeInfo` |
-| ロックできない | FreeBSD の pam_unix は root でないと照合できない | setuid の swaylock に任せる([ロック](#/tech-notify-lock)) |
+| ロックできない | FreeBSD の pam_unix は root でないと照合できない | 照合だけを setuid の小さな補助 `ame-auth` に任せる([ロック](#/tech-notify-lock)) |
 | 動画の壁紙が出ない | libmpv が無い・動かない環境 | ffmpeg で再生する経路([動画](#/tech-media#ffmpeg)) |
 | タッチパッドが動かない | I2C HID のドライバ(ig4・iichid・hmt)が既定で読み込まれない | インストーラで kld_list に追加(GPIO 割り込みは未対応なので自動でポーリング) |
 
