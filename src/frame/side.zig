@@ -499,8 +499,10 @@ fn toggleRecord(f: *Frame) void {
     _ = c.mkdir(dirz.ptr, 0o755);
     const path = std.fmt.bufPrint(&f.sidev.rec_path, "{s}/rec_{s}.mp4", .{ dirz, stamp[0..n] }) catch return;
     f.sidev.rec_len = path.len;
-    var cmd: [700]u8 = undefined;
-    const cmdz = std.fmt.bufPrintZ(&cmd, "exec wf-recorder -f '{s}' >/dev/null 2>&1", .{path}) catch return;
+    // 音も録る: 既定の出力(スピーカー)で鳴っている音。PipeWire ではスピーカーの名前をそのまま、
+    // PulseAudio(FreeBSD)では <名前>.monitor を録る。pactl が無ければ既定の入力(-a)
+    var cmd: [900]u8 = undefined;
+    const cmdz = std.fmt.bufPrintZ(&cmd, "s=$(pactl get-default-sink 2>/dev/null); if [ -z \"$s\" ]; then set -- -a; elif pactl info 2>/dev/null | grep -q PipeWire; then set -- \"--audio=$s\"; else set -- --audio-backend=pulse \"--audio=$s.monitor\"; fi; exec wf-recorder \"$@\" -f '{s}' >/dev/null 2>&1", .{path}) catch return;
     sys.spawnDetached(cmdz.ptr);
     f.sidev.recording = true;
     f.app.notifs.post("ame-shell", "録画を開始しました(もう一度押すと停止)", path, 0);
