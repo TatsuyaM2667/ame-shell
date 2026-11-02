@@ -4,8 +4,8 @@
 //   1. ドラッグを始めたら、その窓の中身を 1 枚の絵として写す
 //      (ext-foreign-toplevel-list の窓と river_window_v1 は同じ identifier を持つ →
 //       ext_foreign_toplevel_image_capture_source で、その窓だけを ext-image-copy-capture で撮る)
-//   2. 全面のオーバーレイに、その絵を 12×9 の網目にして描く。つかんだ所はカーソルにぴったり付いて行き、
-//      遠い所ほど柔らかいばねで遅れて付いてくる → 動かすと紙のようにたわみ、止めると液体のように揺れて戻る
+//   2. 全面のオーバーレイに、その絵を 16×12 の網目にして描く。つかんだ所はカーソルにぴったり付いて行き、
+//      遠い所ほど柔らかいばね(臨界減衰)ですーっと遅れて付いてくる。隣の点との長さを保つので、伸びずに紙のように曲がる
 //   3. 本物の窓は、オーバーレイが描けている間だけ 1 画素に切り抜いて隠す(wm.zig の render)。
 //      離して揺れが収まったら、オーバーレイを片付けて本物を見せる(その間に窓は新しい位置へ移っている)
 // 撮影できない(古い River など)ときは何もしない(普通に動く)。
@@ -22,8 +22,8 @@ const Surface = surface.Surface;
 const log = std.log.scoped(.wobble);
 const ca = std.heap.c_allocator;
 
-const GX = 12;
-const GY = 9;
+const GX = 16;
+const GY = 12;
 const N = GX * GY;
 
 const FMT_ARGB8888: u32 = 0;
@@ -166,7 +166,7 @@ pub fn begin(win: *const anyopaque, ident: []const u8, rect: [4]f32, ptr: [2]f32
         const d = @sqrt((r[0] - st.grab[0]) * (r[0] - st.grab[0]) + (r[1] - st.grab[1]) * (r[1] - st.grab[1]));
         const t = std.math.clamp(d / (diag * 0.9), 0, 1);
         const e = t * t * (3 - 2 * t);
-        st.nodes[gy * GX + gx] = .{ .p = .{ rect[0] + r[0], rect[1] + r[1] }, .v = .{ 0, 0 }, .k = 1600 * (1 - e) + 110 * e };
+        st.nodes[gy * GX + gx] = .{ .p = .{ rect[0] + r[0], rect[1] + r[1] }, .v = .{ 0, 0 }, .k = 900 * (1 - e) + 38 * e };
     };
     st.format = null;
     st.buf_w = 0;
@@ -346,25 +346,54 @@ const frame_listener = c.struct_ext_image_copy_capture_frame_v1_listener{
 // ばねと描画
 // ---------------------------------------------------------------------------
 
-/// 1 コマ進める。揺れが収まったら true
+/// 1 コマ進める。収まったら true
+/// 紙らしさ: (1) ばねは臨界減衰(揺れずに、すーっと追いつく)。つかんだ所から遠いほど柔らかく、長く遅れる
+///          (2) 隣り合う点の間の長さを保つ(伸びずに、曲がる)。(3) つかんだ点はカーソルにぴったり
 fn step(dt_in: f32) bool {
     const dt = @min(dt_in, 1.0 / 20.0);
     var t: f32 = 0;
     const sub: f32 = 1.0 / 240.0;
+    const gi = grabIndex();
     while (t < dt) : (t += sub) {
         const h = @min(sub, dt - t);
+        var prev: [N][2]f32 = undefined;
         for (0..GY) |gy| for (0..GX) |gx| {
-            const nd = &st.nodes[gy * GX + gx];
+            const i = gy * GX + gx;
+            const nd = &st.nodes[i];
+            prev[i] = nd.p;
             const r = rest(gx, gy);
             const tx = st.target[0] + r[0];
             const ty = st.target[1] + r[1];
-            // 減衰比 0.55: 少し行き過ぎて揺れる(液体のように)
-            const damp = 2 * 0.55 * @sqrt(nd.k);
+            const damp = 2 * 1.0 * @sqrt(nd.k);
             nd.v[0] += (nd.k * (tx - nd.p[0]) - damp * nd.v[0]) * h;
             nd.v[1] += (nd.k * (ty - nd.p[1]) - damp * nd.v[1]) * h;
             nd.p[0] += nd.v[0] * h;
             nd.p[1] += nd.v[1] * h;
         };
+        // つかんだ点はカーソルに固定
+        {
+            const r = rest(gi % GX, gi / GX);
+            st.nodes[gi].p = .{ st.target[0] + r[0], st.target[1] + r[1] };
+            st.nodes[gi].v = .{ 0, 0 };
+        }
+        // 伸びない紙: 隣の点との長さを元に戻す(つかんだ点は動かさない)
+        var iter: u32 = 0;
+        while (iter < 3) : (iter += 1) {
+            for (0..GY) |gy| for (0..GX) |gx| {
+                const i = gy * GX + gx;
+                if (gx + 1 < GX) keepLength(i, i + 1, st.rest_w / (GX - 1), gi);
+                if (gy + 1 < GY) keepLength(i, i + GX, st.rest_h / (GY - 1), gi);
+            };
+        }
+        // 長さを直した分を速さに反映(位置だけ動かすと、次の手順で跳ね返る)
+        for (0..N) |i| {
+            if (i == gi) continue;
+            const nd = &st.nodes[i];
+            const moved_x = nd.p[0] - prev[i][0];
+            const moved_y = nd.p[1] - prev[i][1];
+            nd.v[0] = nd.v[0] * 0.5 + (moved_x / h) * 0.5;
+            nd.v[1] = nd.v[1] * 0.5 + (moved_y / h) * 0.5;
+        }
     }
     var settled = true;
     for (0..GY) |gy| for (0..GX) |gx| {
@@ -373,6 +402,32 @@ fn step(dt_in: f32) bool {
         if (@abs(nd.p[0] - st.target[0] - r[0]) > 0.4 or @abs(nd.p[1] - st.target[1] - r[1]) > 0.4 or @abs(nd.v[0]) + @abs(nd.v[1]) > 6) settled = false;
     };
     return settled;
+}
+
+/// つかんだ所にいちばん近い網目の点
+fn grabIndex() usize {
+    const gx: usize = @intFromFloat(@round(std.math.clamp(st.grab[0] / @max(st.rest_w, 1), 0, 1) * (GX - 1)));
+    const gy: usize = @intFromFloat(@round(std.math.clamp(st.grab[1] / @max(st.rest_h, 1), 0, 1) * (GY - 1)));
+    return gy * GX + gx;
+}
+
+/// 2 点の間の長さを len に近づける(長すぎるときだけ縮める。縮むのは許す = 紙はたわめる)
+fn keepLength(i: usize, j: usize, len: f32, pinned: usize) void {
+    const a = &st.nodes[i];
+    const b = &st.nodes[j];
+    const dx = b.p[0] - a.p[0];
+    const dy = b.p[1] - a.p[1];
+    const d = @sqrt(dx * dx + dy * dy);
+    if (d <= len or d < 0.001) return;
+    const diff = (d - len) / d;
+    const wa: f32 = if (i == pinned) 0 else 1;
+    const wb: f32 = if (j == pinned) 0 else 1;
+    const ws = wa + wb;
+    if (ws == 0) return;
+    a.p[0] += dx * diff * (wa / ws);
+    a.p[1] += dy * diff * (wa / ws);
+    b.p[0] -= dx * diff * (wb / ws);
+    b.p[1] -= dy * diff * (wb / ws);
 }
 
 const mesh_vs =
