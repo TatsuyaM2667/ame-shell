@@ -234,9 +234,8 @@ pub fn resync(self: *Media) void {
     if (loop.nowMs() -| self.last_resync_ms < 3000) return;
     self.last_resync_ms = loop.nowMs();
     const m = self.mpris orelse return;
-    const p = m.position() orelse return;
-    self.pos_s = p;
-    self.pos_at_ms = loop.nowMs();
+    // 返事は待たない(届いたら Mpris が pos_s を直す)
+    m.requestPosition();
 }
 
 /// 再生位置を sec 秒へ(歌詞の行をクリックしたとき)。表示はすぐに新しい位置から進める

@@ -70,6 +70,9 @@ pub const Mpris = struct {
     fd: c_int = -1,
     players: [MAX]Player = [_]Player{.{}} ** MAX,
     cur: ?usize = null,
+    /// 返事を待っている位置の問い合わせ(queryPosition)
+    pos_serial: u32 = 0,
+    pos_player: ?*Player = null,
 
     pub fn create(app: *App, media: *Media) ?*Mpris {
         const self = app.alloc.create(Mpris) catch return null;
@@ -261,7 +264,12 @@ pub const Mpris = struct {
         var changed = false;
         while (c.dbus_connection_pop_message(conn)) |msg| {
             defer c.dbus_message_unref(msg);
-            if (c.dbus_message_get_type(msg) != c.DBUS_MESSAGE_TYPE_SIGNAL) continue;
+            const t = c.dbus_message_get_type(msg);
+            if ((t == c.DBUS_MESSAGE_TYPE_METHOD_RETURN or t == c.DBUS_MESSAGE_TYPE_ERROR) and self.pos_serial != 0 and c.dbus_message_get_reply_serial(msg) == self.pos_serial) {
+                self.onPositionReply(msg);
+                continue;
+            }
+            if (t != c.DBUS_MESSAGE_TYPE_SIGNAL) continue;
             if (self.handleSignal(msg)) changed = true;
         }
         if (changed) self.choose();
@@ -406,7 +414,9 @@ pub const Mpris = struct {
         c.dbus_connection_flush(conn);
     }
 
-    /// 今の再生位置を聞く(歌詞のずれの補正・再生状態が変わったとき)。秒を返す
+    /// 今の再生位置を聞く(歌詞のずれの補正・再生状態や曲が変わったとき)。返事は待たない:
+    /// 返事は onDbus の中で受け取り(reply_serial で見分ける)、その時点の位置として使う。
+    /// (待つと、プレイヤーが忙しいときに描画が最大で数百 ms 止まる。ロック画面の描画からも呼ぶため)
     pub fn queryPosition(self: *Mpris, p_opt: ?*Player) void {
         const conn = self.conn orelse return;
         const p = p_opt orelse (self.current() orelse return);
@@ -417,21 +427,36 @@ pub const Mpris = struct {
         var ip: [*c]const u8 = IFACE_PLAYER;
         var pp: [*c]const u8 = "Position";
         _ = c.dbus_message_append_args(msg, c.DBUS_TYPE_STRING, &ip, c.DBUS_TYPE_STRING, &pp, c.DBUS_TYPE_INVALID);
-        const reply = c.dbus_connection_send_with_reply_and_block(conn, msg, 300, null) orelse return;
-        defer c.dbus_message_unref(reply);
+        var serial: u32 = 0;
+        if (c.dbus_connection_send(conn, msg, &serial) == 0) return;
+        c.dbus_connection_flush(conn);
+        self.pos_serial = serial;
+        self.pos_player = p;
+    }
+
+    /// queryPosition の返事(onDbus から)
+    fn onPositionReply(self: *Mpris, reply: *c.DBusMessage) void {
+        const p = self.pos_player orelse return;
+        self.pos_serial = 0;
+        self.pos_player = null;
+        if (c.dbus_message_get_type(reply) != c.DBUS_MESSAGE_TYPE_METHOD_RETURN) return;
         var it: c.DBusMessageIter = undefined;
-        if (c.dbus_message_iter_init(reply, &it) == 0) return;
+        if (c.dbus_message_iter_init(reply, &it) == 0 or c.dbus_message_iter_get_arg_type(&it) != c.DBUS_TYPE_VARIANT) return;
         var v: c.DBusMessageIter = undefined;
         c.dbus_message_iter_recurse(&it, &v);
         p.pos_s = @as(f32, @floatFromInt(getInt(&v) orelse return)) / 1e6;
         p.pos_at_ms = loop.nowMs();
+        // 表示中のプレイヤーなら、その場で位置を直す(曲の情報などは変わらないので applyState まではしない)
+        if (self.current() == p) {
+            self.media.pos_s = p.pos_s;
+            self.media.pos_at_ms = p.pos_at_ms;
+        }
     }
 
-    /// 今の位置を Media に返す(歌詞の補正用)
-    pub fn position(self: *Mpris) ?f32 {
-        const p = self.current() orelse return null;
-        self.queryPosition(p);
-        return p.pos_s;
+    /// 歌詞のずれの補正(Media.resync から): 表示中のプレイヤーに位置を聞く
+    pub fn requestPosition(self: *Mpris) void {
+        if (self.pos_serial != 0) return; // 前の問い合わせの返事を待っている
+        self.queryPosition(null);
     }
 
     fn setProp(self: *Mpris, prop: [*:0]const u8, sig: [*:0]const u8, value: *const anyopaque, dtype: c_int) void {
