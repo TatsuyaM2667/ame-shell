@@ -67,15 +67,15 @@ pub const SysWatch = struct {
 
     fn openUevent(self: *SysWatch) void {
         const linux = std.os.linux;
-        const fd = c.socket(linux.AF.NETLINK, c.SOCK_DGRAM | c.SOCK_CLOEXEC | c.SOCK_NONBLOCK, linux.NETLINK.KOBJECT_UEVENT);
-        if (fd < 0) return;
+        // socket / bind は std.posix で(glibc の transparent union の sockaddr を避ける)
+        const fd = std.posix.socket(linux.AF.NETLINK, std.posix.SOCK.DGRAM | std.posix.SOCK.CLOEXEC | std.posix.SOCK.NONBLOCK, linux.NETLINK.KOBJECT_UEVENT) catch return;
         var sa = std.mem.zeroes(linux.sockaddr.nl);
         sa.family = linux.AF.NETLINK;
         sa.groups = 1; // カーネルからの uevent
-        if (c.bind(fd, @ptrCast(&sa), @sizeOf(linux.sockaddr.nl)) != 0) {
-            _ = c.close(fd);
+        std.posix.bind(fd, @ptrCast(&sa), @sizeOf(linux.sockaddr.nl)) catch {
+            std.posix.close(fd);
             return;
-        }
+        };
         self.uevent_fd = fd;
         self.app.loop.add(fd, c.EPOLLIN, self, onUevent) catch {};
     }
@@ -658,17 +658,14 @@ pub const SysWatch = struct {
     // ---------------- FreeBSD: devd ----------------
 
     fn openDevd(self: *SysWatch) void {
-        const fd = c.socket(c.AF_UNIX, c.SOCK_SEQPACKET | c.SOCK_CLOEXEC | c.SOCK_NONBLOCK, 0);
-        if (fd < 0) return;
-        var addr = std.mem.zeroes(c.struct_sockaddr_un);
-        addr.sun_family = c.AF_UNIX;
-        const path = "/var/run/devd.seqpacket.pipe";
-        @memcpy(addr.sun_path[0..path.len], path);
-        if (c.connect(fd, @ptrCast(&addr), @sizeOf(c.struct_sockaddr_un)) != 0) {
+        // socket / connect は std.posix で(sockaddr の型を C に合わせない)
+        const addr = @import("ipc_path.zig").unixAddr("/var/run/devd.seqpacket.pipe") orelse return;
+        const fd = std.posix.socket(std.posix.AF.UNIX, std.posix.SOCK.SEQPACKET | std.posix.SOCK.CLOEXEC | std.posix.SOCK.NONBLOCK, 0) catch return;
+        std.posix.connect(fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.un)) catch {
             std.log.info("syswatch: devd に接続できません(電源・USB の変化は 20 秒ごとに調べます)", .{});
-            _ = c.close(fd);
+            std.posix.close(fd);
             return;
-        }
+        };
         self.devd_fd = fd;
         self.app.loop.add(fd, c.EPOLLIN, self, onDevd) catch {};
     }

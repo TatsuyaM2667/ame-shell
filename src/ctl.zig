@@ -34,16 +34,17 @@ pub fn main() !u8 {
         std.debug.print("ame-ctl: XDG_RUNTIME_DIR が未設定です\n", .{});
         return 2;
     };
-    const fd = c.socket(c.AF_UNIX, c.SOCK_STREAM, 0);
-    if (fd < 0) return 2;
+    const addr = ipc_path.unixAddr(path) orelse {
+        std.debug.print("ame-ctl: ソケットのパスが長すぎます ({s})\n", .{path});
+        return 2;
+    };
+    // socket / connect は std.posix で(glibc の transparent union の sockaddr を避ける。ipc_path.zig)
+    const fd = std.posix.socket(std.posix.AF.UNIX, std.posix.SOCK.STREAM | std.posix.SOCK.CLOEXEC, 0) catch return 2;
     defer _ = c.close(fd);
-    var addr = std.mem.zeroes(c.struct_sockaddr_un);
-    addr.sun_family = c.AF_UNIX;
-    @memcpy(addr.sun_path[0..path.len], path);
-    if (c.connect(fd, @ptrCast(&addr), @sizeOf(c.struct_sockaddr_un)) != 0) {
+    std.posix.connect(fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.un)) catch {
         std.debug.print("ame-ctl: ame-shell に接続できません ({s})\n", .{path});
         return 1;
-    }
+    };
     _ = c.write(fd, &line_buf, len);
     _ = c.shutdown(fd, c.SHUT_WR);
     var out: [4096]u8 = undefined;
