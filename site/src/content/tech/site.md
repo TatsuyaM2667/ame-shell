@@ -132,11 +132,11 @@ A.ame_spring_step(base, dt);
 
 ```sh
 zig build site          # zig-out/site に index.html・style.css・app.js・site.wasm・anim.wasm・media/
-sh site/deploy.sh       # Cloudflare Pages に公開(npx wrangler pages deploy)
+sh site/deploy.sh       # Cloudflare Pages に公開(curl で Cloudflare の API を直接)
 ```
 
 - **ビルドは `zig build` だけ**。サイト用の Node のツール(バンドラなど)は使いません。
-- 公開には Cloudflare の `wrangler` を使います(公開のコマンドとしてだけ使い、サイト自体は Node に依存しません)。
+- 公開は `site/deploy.sh` が **curl だけ**で行います(wrangler・Node は使いません)。wrangler の「直接アップロード」と同じ手順で、アップロード用のトークンをもらい、まだ置かれていないファイルだけを送り、パスとハッシュの対応表(manifest)でデプロイを作ります。API トークン(権限: Cloudflare Pages の Edit)とアカウント ID は環境変数か `~/.config/ame-shell/cloudflare` から読みます。
 - 動画は、試験用の入れ子の River 0.5 で、D-Bus とホームを分けて録画しました(本物の再生中の曲や、著作権のある壁紙が映らないように、壁紙は ffmpeg で生成)。
 - 表示は Chromium のヘッドレスで、デスクトップの幅とスマホの幅のスクリーンショットを撮って確かめています。
 

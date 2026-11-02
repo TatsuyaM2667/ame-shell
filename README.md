@@ -326,7 +326,7 @@ ame-ctl lock | reload | widgets reload | stats | restart | quit
 
 ```sh
 zig build site                 # zig-out/site に作る
-sh site/deploy.sh              # Cloudflare Pages に公開(初回は npx wrangler login)
+sh site/deploy.sh              # Cloudflare Pages に公開(curl だけ。CLOUDFLARE_API_TOKEN と CLOUDFLARE_ACCOUNT_ID が要る。--dry-run で送るものだけ表示)
 ```
 
 ## ドキュメント
