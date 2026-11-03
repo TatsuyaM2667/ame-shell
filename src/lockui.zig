@@ -33,6 +33,7 @@ const I_NEXT = "\u{F04AD}";
 const I_BELL = "\u{F009A}";
 const I_BOLT = "\u{F140B}";
 const I_MUSIC = "\u{F075A}";
+const I_FACE = "\u{F0C7B}";
 const I_VOL_HI = "\u{F057E}";
 const I_VOL_MID = "\u{F0580}";
 const I_VOL_LO = "\u{F057F}";
@@ -619,6 +620,26 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         const hint = if (a > 0.5) "Esc でもどる" else if (self.greeter) "キーを押すかクリックしてログイン" else "キーを押すかクリックしてロックを解除";
         const hy = H - 46 + (1 - e) * 16;
         shimmer(cv, W / 2, hy, 14, hint, self.time_s, e);
+        // 顔認証の様子(face/unlock.zig): 確かめている間は顔のアイコンがゆっくり明滅する
+        if (!self.greeter) {
+            const fa = @import("face/unlock.zig");
+            const fm = fa.message();
+            if (fm.len > 0) {
+                const ph = fa.phase();
+                const busy = ph == .loading or ph == .scanning;
+                const pulse: f32 = if (busy) 0.55 + 0.45 * @abs(@sin(self.time_s * 2.4)) else 1;
+                const col = switch (ph) {
+                    .matched => acc.lighten(0.3),
+                    .failed => theme.danger(app).lighten(0.3),
+                    else => white,
+                };
+                const fy2 = hy - 34;
+                const tw = cv.measure(fm, 13, false);
+                _ = cv.text(W / 2 - tw / 2 - 12, fy2 + 1, 17, col.alpha(e * pulse), I_FACE, .{ .alignment = .center });
+                _ = cv.text(W / 2 + 6, fy2, 13, col.alpha(0.9 * e), fm, .{ .alignment = .center });
+                if (busy) animating = true;
+            }
+        }
         cv.rect(W / 2 - 67, H - 16, 134, 5, 2.5, white.alpha(0.75 * e));
         if (self.greeter) greeterBar(self, cv, W, H, e);
     }

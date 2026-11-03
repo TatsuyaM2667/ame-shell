@@ -47,6 +47,10 @@ pub const Config = struct {
     hand_camera: Str = .{},
     /// 指の軌跡に波を立てる
     hand_trail: bool = true,
+    /// 顔認証でロックを外す(face/unlock.zig)。登録した顔があるときだけ使う。カメラ(空 = 赤外線カメラを自動で)・一致とみなす近さ
+    face_enabled: bool = true,
+    face_camera: Str = .{},
+    face_threshold: f32 = 0.5,
     /// 天気の場所(空 = IP アドレスから推定)。例: "Sapporo"、"Osaka"
     weather_location: Str = .{},
     // bar
@@ -298,6 +302,14 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             cfg.hand_trail = boolean(val) orelse true;
         } else if (eq(u8, key, "camera")) {
             cfg.hand_camera.set(val);
+        } else ok = false;
+    } else if (eq(u8, sec, "face")) {
+        if (eq(u8, key, "enabled")) {
+            cfg.face_enabled = boolean(val) orelse true;
+        } else if (eq(u8, key, "camera")) {
+            cfg.face_camera.set(val);
+        } else if (eq(u8, key, "threshold")) {
+            if (num(val)) |n| cfg.face_threshold = std.math.clamp(n, 0.3, 0.95) else ok = false;
         } else ok = false;
     } else if (eq(u8, sec, "bar")) {
         if (eq(u8, key, "height")) {

@@ -11,6 +11,8 @@ test {
     _ = @import("hand/tflite.zig");
     _ = @import("hand/track.zig");
     _ = @import("hand/gesture.zig");
+    _ = @import("face/face.zig");
+    _ = @import("face/onnx.zig");
 }
 
 test "spring converges and is velocity-continuous" {

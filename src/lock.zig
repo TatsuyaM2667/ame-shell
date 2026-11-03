@@ -25,6 +25,7 @@ const Surface = surface.Surface;
 const bar = @import("bar.zig");
 const lockui = @import("lockui.zig");
 const framedata = @import("frame/data.zig");
+const faceauth = @import("face/unlock.zig");
 
 // ---- PAM(ヘッダが無くても動くよう ABI を自前で定義し、dlopen で解決する) ----
 const PAM_SUCCESS = 0;
@@ -237,6 +238,8 @@ pub const Lock = struct {
         // ランチャー等は閉じておく(ロック解除後に開いたままにならないように)
         self.app.launcher.close();
         self.app.dashboard.close();
+        // 顔を登録してあれば、すぐに顔で確かめ始める(パスワードもそのまま使える)
+        if (!self.greeter) faceauth.tryUnlock(self.app);
         return true;
     }
 
@@ -266,6 +269,7 @@ pub const Lock = struct {
     }
 
     fn finish(self: *Lock, unlock: bool) void {
+        faceauth.stop();
         self.spectrum.stop();
         for (&self.views) |*v| {
             if (v.*) |vv| vv.surf.destroy();
@@ -407,6 +411,16 @@ pub const Lock = struct {
         if (r == PAM_SUCCESS) r = pam.acct(h, 0);
         _ = pam.end(h, r);
         return r == PAM_SUCCESS;
+    }
+
+    /// 顔認証で本人と分かった(face/unlock.zig): パスワードが通ったときと同じようにロックを外す
+    pub fn faceUnlocked(self: *Lock) void {
+        if (!self.locked or self.unlocking or self.greeter or self.busy) return;
+        self.setMsg("ようこそ");
+        self.unlocking = true;
+        self.ripple_req = true;
+        self.ripple_started = false;
+        self.scheduleAll();
     }
 
     fn onAuthDone(ctx: *anyopaque, fd: c_int, _: u32) void {
@@ -627,6 +641,8 @@ pub const Lock = struct {
 
     fn setAuth(self: *Lock, on: bool) void {
         self.auth_mode = on;
+        // 入力画面を開いた(触った): 顔認証が終わっていれば、もう一度試す
+        if (on and !self.greeter and self.locked and !self.unlocking) faceauth.tryUnlock(self.app);
         self.auth.set(if (on) 1 else 0);
         if (on) self.last_input_ms = @import("platform/loop.zig").nowMs();
         self.updateSpectrum();

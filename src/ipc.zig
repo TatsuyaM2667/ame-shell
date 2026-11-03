@@ -84,6 +84,7 @@ const help =
     \\  media play-pause|next|previous   (再生中の曲の操作)
     \\  net wifi|saved|radio|ssid|bt|bt-devices   (Wi-Fi・Bluetooth の状態。NetworkManager / BlueZ に D-Bus で聞く)
     \\  hand on|off|toggle|status   (ハンド操作: カメラで手の動きを見てカーソル・窓を操作する)
+    \\  face enroll|clear|status     (顔認証: 顔を登録・消す。登録するとロック画面で顔を見てロックを外す)
     \\  lock
     \\  reload                 (設定の再読込)
     \\  widgets reload
@@ -260,6 +261,13 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
         const hand = @import("hand/hand.zig");
         if (eq(u8, arg, "on")) hand.enable(app) else if (eq(u8, arg, "off")) hand.disable() else if (eq(u8, arg, "toggle") or arg.len == 0) hand.toggle(app) else if (!eq(u8, arg, "status")) return "error: hand on|off|toggle|status";
         return if (hand.enabled()) "on" else "off";
+    } else if (eq(u8, cmd, "face")) {
+        // 顔認証(ロック画面で顔を見てロックを外す)の登録・削除・状態
+        const fa = @import("face/unlock.zig");
+        if (eq(u8, arg, "enroll")) return fa.enroll(app);
+        if (eq(u8, arg, "clear")) return fa.clear();
+        if (eq(u8, arg, "status") or arg.len == 0) return fa.status(out);
+        return "error: face enroll|clear|status";
     } else if (eq(u8, cmd, "lock")) {
         return app.lock.lock();
     } else if (eq(u8, cmd, "reload")) {
