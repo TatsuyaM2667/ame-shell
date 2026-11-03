@@ -33,6 +33,11 @@ const I_NEXT = "\u{F04AD}";
 const I_BELL = "\u{F009A}";
 const I_BOLT = "\u{F140B}";
 const I_MUSIC = "\u{F075A}";
+const I_VOL_HI = "\u{F057E}";
+const I_VOL_MID = "\u{F0580}";
+const I_VOL_LO = "\u{F057F}";
+const I_VOL_OFF = "\u{F0581}";
+const I_VOL_MUTE = "\u{F075F}";
 
 fn clamp01(x: f32) f32 {
     return std.math.clamp(x, 0, 1);
@@ -58,6 +63,11 @@ pub const Hits = struct {
     play: [4]f32 = .{ 0, 0, 0, 0 },
     next: [4]f32 = .{ 0, 0, 0, 0 },
     stack: [4]f32 = .{ 0, 0, 0, 0 },
+    // 曲のカード: カード全体(ホイールで音量)・音量のバー・スピーカー(消音)・再生位置のバー
+    card: [4]f32 = .{ 0, 0, 0, 0 },
+    vol: [4]f32 = .{ 0, 0, 0, 0 },
+    mute: [4]f32 = .{ 0, 0, 0, 0 },
+    seek: [4]f32 = .{ 0, 0, 0, 0 },
     // ログイン画面だけ: ユーザーの切り替え・セッション・再起動・電源オフ
     uprev: [4]f32 = .{ 0, 0, 0, 0 },
     unext: [4]f32 = .{ 0, 0, 0, 0 },
@@ -266,7 +276,9 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         const pw: f32 = if (corner) @min(400 * k, side_w) else @min(400 * k, W - 40);
         const art: f32 = 84 * k;
         const pad: f32 = 16 * k;
-        const ch: f32 = art + pad * 2;
+        // 下に音量の行
+        const vrow: f32 = 30 * k;
+        const ch: f32 = art + pad * 2 + vrow;
         const rad: f32 = 24 * k;
         const px0 = if (corner) W - margin - pw else W / 2 - pw / 2;
         const cy_base = if (corner) H - 64 * k - ch else y_next;
@@ -330,13 +342,24 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         const show_a = if (m.lyrics.qArtist().len > 0) m.lyrics.qArtist() else m.artist[0..m.artist_len];
         _ = cv.text(tx, ay + 18 * k, 16 * k, white.alpha(0.97), show_t, .{ .bold = true, .max_w = tw });
         _ = cv.text(tx, ay + 37 * k, 12.5 * k, white.alpha(0.72), show_a, .{ .max_w = tw });
+        self.hits.card = .{ px0, cy0, pw, ch };
         if (m.length_s > 0) {
             const pos = m.position();
-            const f = clamp01(pos / m.length_s);
+            // 再生位置のバー: クリック・ドラッグで移動(ドラッグ中はつまみの位置を見せる)
+            const seeking = self.drag == 2;
+            const f = if (seeking) self.drag_v else clamp01(pos / m.length_s);
             const py = ay + 49 * k;
-            const bh = 3.5 * k;
+            const bh: f32 = @as(f32, if (seeking) 5.5 else 3.5) * k;
             cv.rect(tx, py, tw, bh, bh / 2, white.alpha(0.18));
             cv.rect(tx, py, tw * f, bh, bh / 2, white.alpha(0.9));
+            if (seeking) {
+                cv.rect(tx + tw * f - 6 * k, py + bh / 2 - 6 * k, 12 * k, 12 * k, 6 * k, white);
+                var tb: [16]u8 = undefined;
+                const sec: u32 = @intFromFloat(f * m.length_s);
+                const ts = std.fmt.bufPrint(&tb, "{d}:{d:0>2}", .{ sec / 60, sec % 60 }) catch "";
+                _ = cv.text(tx + tw, py - 4 * k, 11 * k, white.alpha(0.85), ts, .{ .alignment = .right });
+            }
+            self.hits.seek = .{ tx, py - 2 * k, tw, bh + 4 * k };
         }
         const by = ay + art - 4 * k;
         const bmid = tx + tw / 2;
@@ -357,6 +380,30 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         _ = cv.text(bmid, by + 2 * k, 27 * k, white, I_PLAY, .{ .alignment = .center });
         cv.restore();
         _ = cv.text(bmid + gap, by, 20 * k, white.alpha(0.9), I_NEXT, .{ .alignment = .center });
+
+        // 音量: スピーカー(押すと消音)・バー(クリック・ドラッグ)・数字。カードの上でホイールを回しても変わる
+        {
+            const vol = app.sys.volume;
+            const lvl = if (self.drag == 1) self.drag_v else if (vol.known) clamp01(vol.level) else 0;
+            const muted = vol.muted and self.drag != 1;
+            const vy = cy0 + pad + art + vrow * 0.5 + 2 * k;
+            const icon: []const u8 = if (!vol.known) I_VOL_OFF else if (muted) I_VOL_MUTE else if (lvl > 0.6) I_VOL_HI else if (lvl > 0.25) I_VOL_MID else I_VOL_LO;
+            const ix = ax + 10 * k;
+            _ = cv.text(ix, vy + 6.5 * k, 18 * k, white.alpha(if (muted) 0.55 else 0.9), icon, .{ .alignment = .center });
+            self.hits.mute = .{ ix - 13 * k, vy - 13 * k, 26 * k, 26 * k };
+            const bx = ax + 30 * k;
+            const bw = px0 + pw - pad - 44 * k - bx;
+            const bh: f32 = @as(f32, if (self.drag == 1) 6 else 4.5) * k;
+            cv.rect(bx, vy - bh / 2, bw, bh, bh / 2, white.alpha(0.18));
+            cv.rect(bx, vy - bh / 2, bw * lvl, bh, bh / 2, (if (muted) white.alpha(0.35) else white.alpha(0.9)));
+            const kr: f32 = @as(f32, if (self.drag == 1) 8 else 6) * k;
+            cv.shadow(bx + bw * lvl - kr, vy - kr + 1, kr * 2, kr * 2, kr, 6, black.alpha(0.35));
+            cv.rect(bx + bw * lvl - kr, vy - kr, kr * 2, kr * 2, kr, white);
+            self.hits.vol = .{ bx, vy - 8 * k, bw, 16 * k };
+            var pb: [8]u8 = undefined;
+            const pct = std.fmt.bufPrint(&pb, "{d}", .{@as(u32, @intFromFloat(@round(lvl * 100)))}) catch "";
+            _ = cv.text(px0 + pw - pad, vy + 4.5 * k, 12.5 * k, white.alpha(0.75), if (muted) "消音" else pct, .{ .alignment = .right });
+        }
         cv.restore();
 
         // ---- 歌詞: カードの上に浮かべる。ダッシュボードと同じく、歌い終えた行が 1 行ずつ上へ積み上がり、

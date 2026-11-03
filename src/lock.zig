@@ -103,6 +103,12 @@ pub const Lock = struct {
     lk_scroll: Spring = Spring.init(0, 0.45, 0.9),
     lyr_idx: i32 = -1,
     hits: lockui.Hits = .{},
+    /// 曲のカードの音量・再生位置のつまみをドラッグ中(0 = なし / 1 = 音量 / 2 = 再生位置)
+    drag: u8 = 0,
+    /// ドラッグ中に見せる値(0〜1)。音量は wpctl を呼ぶ回数を減らすため、少し動いたときだけ反映する
+    drag_v: f32 = 0,
+    vol_sent: f32 = -1,
+    vol_sent_ms: u64 = 0,
     spectrum: framedata.Spectrum,
 
     pub fn create(app: *App) !*Lock {
@@ -212,6 +218,9 @@ pub const Lock = struct {
         self.auth.snap(0);
         self.auth_mode = false;
         self.notif_expanded = false;
+        self.drag = 0;
+        // 曲のカードに出す音量を今の値にしておく
+        self.app.sys.volume = @import("platform/sys.zig").volume();
         self.expand.snap(0);
         self.media_s.snap(0);
         self.play_s.snap(if (self.app.media.status == .playing) 1 else 0);
@@ -438,6 +447,8 @@ pub const Lock = struct {
         const self: *Lock = @ptrCast(@alignCast(ctx));
         if (self.busy or self.unlocking) return;
         self.last_input_ms = @import("platform/loop.zig").nowMs();
+        // 音量・曲送りのキーはどちらの画面でも、入力画面へ切り替えずにそのまま効かせる
+        if (!self.greeter and self.mediaKey(ev.sym)) return;
         // 眺める画面: どのキーでも入力画面へ(文字ならそのまま 1 文字目として入れる)
         if (!self.auth_mode) {
             if (ev.sym == c.XKB_KEY_Escape) return;
@@ -472,7 +483,9 @@ pub const Lock = struct {
 
     fn pointer(ctx: *anyopaque, _: *Surface, ev: surface.PointerEvent) void {
         const self: *Lock = @ptrCast(@alignCast(ctx));
-        if (ev.kind != .press or self.busy or self.unlocking) return;
+        if (self.busy or self.unlocking) return;
+        if (!self.auth_mode and !self.greeter and self.mediaPointer(ev)) return;
+        if (ev.kind != .press) return;
         self.last_input_ms = @import("platform/loop.zig").nowMs();
         // ログイン画面のボタン(どちらの画面でも)
         if (self.greeter) {
@@ -505,6 +518,111 @@ pub const Lock = struct {
             }
         } else if (ev.button == 0x111 and self.pw_len == 0) self.setAuth(false); // 右クリックでもどる
         self.scheduleAll();
+    }
+
+    /// 曲のカードの操作: 音量(つまみのドラッグ・クリック・カードの上でホイール)、スピーカーのアイコンで消音、
+    /// 再生位置のバーをクリック・ドラッグで移動。扱ったら true
+    fn mediaPointer(self: *Lock, ev: surface.PointerEvent) bool {
+        const sys = @import("platform/sys.zig");
+        const now = @import("platform/loop.zig").nowMs();
+        const h = &self.hits;
+        switch (ev.kind) {
+            .press => {
+                if (ev.button != 0x110) return false;
+                if (inRectPad(h.vol, ev.x, ev.y, 8)) {
+                    self.drag = 1;
+                } else if (inRectPad(h.seek, ev.x, ev.y, 7) and self.app.media.length_s > 0) {
+                    self.drag = 2;
+                } else if (inRectPad(h.mute, ev.x, ev.y, 4)) {
+                    sys.toggleMute();
+                    self.app.sys.volume = sys.volume();
+                    self.last_input_ms = now;
+                    self.scheduleAll();
+                    return true;
+                } else return false;
+                self.last_input_ms = now;
+                self.dragTo(ev.x, now, false);
+                return true;
+            },
+            .motion => {
+                if (self.drag == 0) return false;
+                self.dragTo(ev.x, now, false);
+                return true;
+            },
+            .release, .leave => {
+                if (self.drag == 0) return false;
+                self.dragTo(ev.x, now, true);
+                self.drag = 0;
+                self.scheduleAll();
+                return true;
+            },
+            .scroll => {
+                if (!inRectPad(h.card, ev.x, ev.y, 0) or ev.scroll == 0) return false;
+                // タッチパッドは細かい値が続けて来るので、wpctl は 60ms に 1 回まで
+                if (now -% self.vol_sent_ms < 60) return true;
+                self.vol_sent_ms = now;
+                // 下へ回すと小さく(wl_pointer の値は下が正)
+                sys.setVolumeDelta(if (ev.scroll > 0) -5 else 5);
+                self.app.sys.volume = sys.volume();
+                self.last_input_ms = now;
+                self.scheduleAll();
+                return true;
+            },
+            else => return false,
+        }
+    }
+
+    fn dragTo(self: *Lock, x: f32, now: u64, final: bool) void {
+        const sys = @import("platform/sys.zig");
+        const r = if (self.drag == 1) self.hits.vol else self.hits.seek;
+        if (r[2] <= 0) return;
+        const v = std.math.clamp((x - r[0]) / r[2], 0, 1);
+        self.drag_v = v;
+        if (self.drag == 1) {
+            // wpctl を呼ぶのは 1% 以上動いて 40ms たったとき(と、離したとき)だけ
+            if (final or (@abs(v - self.vol_sent) >= 0.01 and now -% self.vol_sent_ms >= 40)) {
+                sys.setVolume(v);
+                if (self.app.sys.volume.muted and v > 0) sys.toggleMute();
+                self.vol_sent = v;
+                self.vol_sent_ms = now;
+                self.app.sys.volume.level = v;
+                self.app.sys.volume.muted = false;
+                self.app.sys.volume.known = true;
+            }
+        } else if (final) {
+            @import("media.zig").seekTo(self.app.media, v * self.app.media.length_s);
+        }
+        self.scheduleAll();
+    }
+
+    fn inRectPad(r: [4]f32, x: f32, y: f32, pad: f32) bool {
+        return r[2] > 0 and x >= r[0] - pad and x <= r[0] + r[2] + pad and y >= r[1] - pad and y <= r[1] + r[3] + pad;
+    }
+
+    /// 眺める画面でのメディアキー(River の割り当てが届かないとき用)。扱ったら true
+    fn mediaKey(self: *Lock, sym: u32) bool {
+        const sys = @import("platform/sys.zig");
+        switch (sym) {
+            c.XKB_KEY_XF86AudioRaiseVolume => sys.setVolumeDelta(5),
+            c.XKB_KEY_XF86AudioLowerVolume => sys.setVolumeDelta(-5),
+            c.XKB_KEY_XF86AudioMute => sys.toggleMute(),
+            c.XKB_KEY_XF86AudioPlay, c.XKB_KEY_XF86AudioPause => {
+                self.app.media.toggle();
+                return true;
+            },
+            c.XKB_KEY_XF86AudioNext => {
+                self.app.media.next();
+                return true;
+            },
+            c.XKB_KEY_XF86AudioPrev => {
+                self.app.media.prev();
+                return true;
+            },
+            else => return false,
+        }
+        self.app.sys.volume = sys.volume();
+        self.scheduleAll();
+        return true;
     }
 
     fn setAuth(self: *Lock, on: bool) void {
