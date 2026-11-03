@@ -75,6 +75,7 @@ FreeBSD のインストーラは次のことまで行います。
 | ログイン画面の顔認証 | ○(greetd のとき。PAM サービス `ame-greetd` を `/etc/pam.d` に) | ○(greetd のとき。`/etc/pam.d` と `/usr/local/etc/pam.d` の両方に。SDDM では使えない) |
 | 曲のウィジェット・「再生中」・歌詞 | ○ | ○(ビジュアライザーの音は PulseAudio のモニター) |
 | 充電のアニメーション | ○(カーネルの uevent で抜き差しを知る) | ○(devd の ACPI の知らせ) |
+| スリープのあとにイヤホンをつなぎ直す | ○(logind・elogind) | ×(BlueZ が無い) |
 | AirPods をつないだときのカード | ○(BlueZ) | ×(BlueZ が無い。FreeBSD の Bluetooth は AirPods の音にも標準では対応しない) |
 | AirPods の頭の動き | △(BlueZ。AirPods が頭の向きを送らないことがある) | × |
 

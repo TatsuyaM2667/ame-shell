@@ -89,6 +89,8 @@
 
 **つないだときのカード**: AirPods をつなぐと、iPhone / iPad のように画面の下からカードが上がり、名前・AirPods の絵・**左右とケースの電池の残り**(リングと数字。充電中は稲妻)を見せて、約 6 秒で消えます(押すとすぐ消える)。電池は AirPods の通信(AAP)で読みます。`ame-ctl airpods popup` でも出せます。要らなければ `airpods { popup off }`(そのときは今までどおり通知)。
 
+**スリープのあと**: スリープ中は PC の Bluetooth も止まるので接続は切れますが、戻るとすぐ、スリープの前につながっていた AirPods などのイヤホン・スピーカーをつなぎ直し、音の出力先にも戻します(つながるまで 4 秒おきに最大 5 回)。スリープの合図(logind・elogind の PrepareForSleep)を受けてから眠ってもらうよう、少しだけ待ってもらう登録(delay inhibitor)をしています。要らなければ `airpods { reconnect-after-sleep off }`。
+
 **頭の動きで操作**: AirPods Pro 2 など、空間オーディオのために頭の向きを測れる AirPods で、頭を動かして操作します(Linux のみ。ユーティリティの「AirPods 操作」・`ame-ctl airpods on|off`・設定 `airpods { enabled on }`。既定はオフ)。
 
 - **頭を右 / 左へ振って戻す**: 右 / 左のワークスペースへ

@@ -54,6 +54,7 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
   - 電池の残量が少ないとき、充電器の抜き差し(満充電まであと何分・何時ごろ)、USB 機器・USB メモリ・SD カードの抜き差し(名前・容量・ラベル)も通知
 - **録画**(ユーティリティの録画ボタン): wf-recorder で `~/Videos` に保存。**PC で鳴っている音も一緒に**録る(PipeWire は既定の出力、PulseAudio は `<出力>.monitor`)
 - **スクリーンショット**: grim / slurp / wl-copy を使わず ame-shell が自分で撮る(ext-image-copy-capture、PNG は自前のエンコーダ、クリップボードは ext-data-control)
+- **スリープのあとに AirPods をつなぎ直す**: スリープの前につながっていたイヤホン・スピーカーを、戻るとすぐつなぎ直して音の出力先にも戻す(`airpods { reconnect-after-sleep off }` で止める)
 - **AirPods をつないだときのカード**: iPhone / iPad のように画面の下からカードが上がり、左右とケースの電池の残りを見せる(`airpods { popup off }` で通知に戻す)
 - **AirPods の頭の動き**(ユーティリティの「AirPods 操作」・`ame-ctl airpods toggle`・設定 `airpods { enabled on }`。Linux のみ): 頭を左右に振って戻すとワークスペース、上を向いて戻すとランチャー、下を向いて戻すとダッシュボード。AirPods 本来の操作もそのまま使える。AirPods が頭の向きを送るには Bluetooth の DeviceID を Apple(`bluetooth:004C:0000:0000`)にする必要がある
 - **ハンド操作**(ユーティリティの「ハンド操作」ボタン・`ame-ctl hand toggle`・設定 `hand { enabled on }`。既定はオフ): カメラに映った手の動きでカーソルと窓を操作します
