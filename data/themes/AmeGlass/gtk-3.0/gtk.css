@@ -116,3 +116,60 @@ menu, .menu, .context-menu, popover.background, tooltip.background {
   background-color: rgba(14, 18, 32, 0.96);
   color: @ame_fg;
 }
+
+/* フォーカスが外れた窓(GTK の :backdrop)でも透け具合を変えない。
+ * Adwaita の .background:backdrop などは上の指定より強いので、同じ指定を :backdrop にも書く */
+window.background:backdrop,
+window.thunar:backdrop,
+.thunar:backdrop {
+  background-color: @ame_bg;
+  color: @ame_fg;
+}
+.thunar scrolledwindow:backdrop,
+.thunar viewport:backdrop,
+.thunar paned:backdrop,
+.thunar notebook:backdrop,
+.thunar notebook > stack:backdrop,
+.thunar notebook > header:backdrop,
+.thunar .view:backdrop,
+.thunar treeview.view:backdrop,
+.thunar iconview:backdrop,
+.thunar placessidebar list:backdrop,
+.thunar placessidebar row:backdrop,
+.thunar .toolbar:backdrop,
+.thunar statusbar:backdrop,
+.thunar box:backdrop,
+.thunar grid:backdrop,
+.thunar frame > border:backdrop,
+.thunar treeview.view header button:backdrop,
+.thunar button:backdrop {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+.thunar headerbar:backdrop,
+.thunar .titlebar:backdrop,
+.thunar toolbar:backdrop,
+.thunar menubar:backdrop {
+  background-color: rgba(255, 255, 255, 0.035);
+  background-image: none;
+  box-shadow: none;
+}
+.thunar .sidebar:backdrop,
+.thunar placessidebar:backdrop {
+  background-color: rgba(255, 255, 255, 0.025);
+}
+.thunar placessidebar row:selected:backdrop,
+.thunar .sidebar row:selected:backdrop {
+  background-color: rgba(137, 180, 250, 0.16);
+}
+.thunar .view:selected:backdrop,
+.thunar iconview:selected:backdrop,
+.thunar treeview.view:selected:backdrop {
+  background-color: rgba(137, 180, 250, 0.20);
+  color: #ffffff;
+}
+.thunar entry:backdrop {
+  background-color: rgba(255, 255, 255, 0.06);
+  box-shadow: none;
+}
