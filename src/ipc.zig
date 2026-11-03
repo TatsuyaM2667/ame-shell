@@ -157,6 +157,12 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
             f.spectrum.fake = true;
         }
         app.lock.scheduleAll();
+    } else if (eq(u8, cmd, "debug-sleep")) {
+        // 試験用(AME_DEBUG のときだけ): スリープの前(on)・戻った(off)の合図を受け取ったことにする(btresume.zig)
+        if (std.posix.getenv("AME_DEBUG") == null) return "error: AME_DEBUG が必要です";
+        const conn = app.syswatch.conn orelse return "error: システムの D-Bus がありません";
+        @import("btresume.zig").prepareForSleep(app, conn, eq(u8, arg, "on"));
+        return @import("btresume.zig").status(out);
     } else if (eq(u8, cmd, "debug-battery")) {
         // 試験用(AME_DEBUG のときだけ): 「残り% [ac]」の電池の状態にして、少なくなったときの通知を確かめる
         if (std.posix.getenv("AME_DEBUG") == null) return "error: AME_DEBUG が必要です";

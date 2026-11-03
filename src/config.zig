@@ -104,6 +104,8 @@ pub const Config = struct {
     airpods_invert_pitch: bool = false,
     /// AirPods をつないだときのカード(airpodspopup.zig)
     airpods_popup: bool = true,
+    /// スリープから戻ったら、前につながっていたイヤホン・スピーカーをつなぎ直す(btresume.zig)
+    bt_reconnect: bool = true,
     /// 天気の場所(空 = IP アドレスから推定)。例: "Sapporo"、"Osaka"
     weather_location: Str = .{},
     // bar
@@ -381,6 +383,8 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             cfg.airpods_invert_pitch = boolean(val) orelse false;
         } else if (eq(u8, key, "popup")) {
             cfg.airpods_popup = boolean(val) orelse true;
+        } else if (eq(u8, key, "reconnect-after-sleep")) {
+            cfg.bt_reconnect = boolean(val) orelse true;
         } else ok = false;
     } else if (eq(u8, sec, "music-widget")) {
         if (eq(u8, key, "enabled")) {

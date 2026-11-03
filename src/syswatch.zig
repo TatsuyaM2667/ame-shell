@@ -118,11 +118,15 @@ pub const SysWatch = struct {
             "type='signal',sender='org.freedesktop.NetworkManager',path='/org/freedesktop/NetworkManager'",
             "type='signal',sender='org.freedesktop.NetworkManager',path_namespace='/org/freedesktop/NetworkManager/Devices'",
             // デーモンの起動・終了
+            // スリープの前後(logind・elogind / ConsoleKit): 戻ったらイヤホンをつなぎ直す(btresume.zig)
+            "type='signal',interface='org.freedesktop.login1.Manager',member='PrepareForSleep'",
+            "type='signal',interface='org.freedesktop.ConsoleKit.Manager',member='PrepareForSleep'",
             "type='signal',sender='org.freedesktop.DBus',member='NameOwnerChanged',arg0='org.bluez'",
             "type='signal',sender='org.freedesktop.DBus',member='NameOwnerChanged',arg0='org.freedesktop.NetworkManager'",
         };
         for (rules) |r| c.dbus_bus_add_match(conn, r, null);
         c.dbus_connection_flush(conn);
+        @import("btresume.zig").init(self.app, conn);
         var fd: c_int = -1;
         if (c.dbus_connection_get_unix_fd(conn, &fd) != 0 and fd >= 0) {
             self.dbus_fd = fd;
@@ -142,6 +146,14 @@ pub const SysWatch = struct {
         while (c.dbus_connection_pop_message(conn)) |msg| {
             defer c.dbus_message_unref(msg);
             if (c.dbus_message_get_type(msg) != c.DBUS_MESSAGE_TYPE_SIGNAL) continue;
+            if (c.dbus_message_is_signal(msg, "org.freedesktop.login1.Manager", "PrepareForSleep") != 0 or
+                c.dbus_message_is_signal(msg, "org.freedesktop.ConsoleKit.Manager", "PrepareForSleep") != 0)
+            {
+                var b: c.dbus_bool_t = 0;
+                if (c.dbus_message_get_args(msg, null, c.DBUS_TYPE_BOOLEAN, &b, c.DBUS_TYPE_INVALID) != 0)
+                    @import("btresume.zig").prepareForSleep(self.app, conn, b != 0);
+                continue;
+            }
             const path = std.mem.sliceTo(c.dbus_message_get_path(msg) orelse continue, 0);
             if (std.mem.startsWith(u8, path, "/org/bluez")) {
                 self.mark(.bt);

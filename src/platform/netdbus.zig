@@ -14,7 +14,7 @@
 //   nmcli dev wifi connect <SSID> [password <PW>]        → "" / "Error: …"(つながるか失敗するまで待つ)
 //   nmcli connection up|down id <名前>                   → 同上
 //   bluetoothctl show                                    → "Powered: yes|no" "PowerState: …"
-//   bluetoothctl devices [Paired|Connected]              → "Device AA:BB:… 名前"
+//   bluetoothctl devices [Paired|Connected|AirPods|Audio] → "Device AA:BB:… 名前"(AirPods / Audio は接続中のもの)
 //   bluetoothctl disconnect|power …                      → "" / "Failed: …"
 //   ame-bt power on|off                                  → "ok" / "Failed: …"(on は rfkill のブロックも外す)
 //   ame-bt scan <秒>                                     → "ok"(見つかった機器は BlueZ の信号で syswatch が拾う)
@@ -947,10 +947,13 @@ fn btctl(bus: *Bus, a: *Args, o: *Out) void {
         const want_conn = a.is(2, "Connected");
         // AirPods: 接続中で AAP の UUID を持つもの(airpods.zig)
         const want_apple = a.is(2, "AirPods");
+        // 接続中のイヤホン・スピーカー(スリープから戻ったときにつなぎ直す。btresume.zig)
+        const want_audio = a.is(2, "Audio");
         for (st.devs[0..st.n]) |*d| {
             if (want_paired and !d.paired) continue;
             if (want_conn and !d.connected) continue;
             if (want_apple and !(d.connected and d.apple)) continue;
+            if (want_audio and !(d.connected and d.audio)) continue;
             o.print("Device {s} {s}\n", .{ &d.addr, d.name[0..d.name_len] });
         }
         return;

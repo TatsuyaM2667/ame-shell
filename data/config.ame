@@ -88,6 +88,7 @@ airpods {
   invert-yaw off          // 左右が逆に動くときは on
   invert-pitch off        // 上下が逆に動くときは on
   popup on                // AirPods をつないだとき、iPhone のようなカード(左右・ケースの電池)を出す
+  reconnect-after-sleep on  // スリープから戻ったら、前につながっていたイヤホン・スピーカー(AirPods など)をつなぎ直す
 }
 
 // 顔認証: 登録した顔がカメラに写ったらロックを外す(パスワードもそのまま使える。赤外線カメラを優先)
