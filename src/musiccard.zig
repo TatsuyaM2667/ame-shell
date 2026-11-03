@@ -42,6 +42,8 @@ pub fn inRectPad(r: [4]f32, x: f32, y: f32, pad: f32) bool {
 /// クリックできる場所(描くたびに作り直す。座標は surface の論理 px)
 pub const Hits = struct {
     card: [4]f32 = .{ 0, 0, 0, 0 },
+    /// ジャケット(ロック画面では押すと大きく広げる)
+    art: [4]f32 = .{ 0, 0, 0, 0 },
     prev: [4]f32 = .{ 0, 0, 0, 0 },
     play: [4]f32 = .{ 0, 0, 0, 0 },
     next: [4]f32 = .{ 0, 0, 0, 0 },
@@ -151,6 +153,7 @@ pub const Card = struct {
         _ = cv.text(tx, ay + 18 * k, 16 * k, white.alpha(0.97), show_t, .{ .bold = true, .max_w = tw });
         _ = cv.text(tx, ay + 37 * k, 12.5 * k, white.alpha(0.72), show_a, .{ .max_w = tw });
         self.hits.card = .{ px0, cy0, pw, ch };
+        self.hits.art = .{ ax, ay, art, art };
         if (m.length_s > 0) {
             const pos = m.position();
             // 再生位置のバー: クリック・ドラッグで移動(ドラッグ中はつまみの位置を見せる)
@@ -210,6 +213,77 @@ pub const Card = struct {
         var pb: [8]u8 = undefined;
         const pct = std.fmt.bufPrint(&pb, "{d}", .{@as(u32, @intFromFloat(@round(lvl * 100)))}) catch "";
         _ = cv.text(px0 + pw - pad, vy + 4.5 * k, 12.5 * k, white.alpha(0.75), if (muted) "消音" else pct, .{ .alignment = .right });
+    }
+
+    /// 広げた「再生中」(ロック画面でジャケットを押したとき。iPhone / iPad のロック画面のように)の、
+    /// 大きなジャケットの下の部分: 曲名・アーティスト・再生位置と時間・前/再生/次・音量。
+    /// 横は cx を中心に幅 w、上端 y。hits は呼ぶ側が art(大きなジャケット)を入れたあとに上書きでよい。高さを返す
+    pub fn drawExpanded(self: *Card, app: *App, cv: *gfx.Canvas, cx: f32, y: f32, w: f32, k: f32, acc: Color) f32 {
+        _ = acc;
+        const m = app.media;
+        const x0 = cx - w / 2;
+        const ps = self.play_s.x;
+        const show_t = if (m.lyrics.qTitle().len > 0) m.lyrics.qTitle() else m.title[0..m.title_len];
+        const show_a = if (m.lyrics.qArtist().len > 0) m.lyrics.qArtist() else m.artist[0..m.artist_len];
+        _ = cv.text(x0, y + 24 * k, 22 * k, white.alpha(0.97), show_t, .{ .bold = true, .max_w = w });
+        _ = cv.text(x0, y + 48 * k, 16 * k, white.alpha(0.7), show_a, .{ .max_w = w });
+
+        // 再生位置(つまみは押している間だけ大きく)と、経過・残りの時間
+        var yy = y + 70 * k;
+        if (m.length_s > 0) {
+            const seeking = self.drag == 2;
+            const f = if (seeking) self.drag_v else clamp01(m.position() / m.length_s);
+            const bh: f32 = @as(f32, if (seeking) 8 else 6) * k;
+            cv.rect(x0, yy, w, bh, bh / 2, white.alpha(0.22));
+            cv.rect(x0, yy, w * f, bh, bh / 2, white.alpha(if (seeking) 1 else 0.85));
+            self.hits.seek = .{ x0, yy - 4 * k, w, bh + 8 * k };
+            var b1: [16]u8 = undefined;
+            var b2: [16]u8 = undefined;
+            const el: u32 = @intFromFloat(f * m.length_s);
+            const rem: u32 = @intFromFloat(@max(m.length_s - f * m.length_s, 0));
+            const t1 = std.fmt.bufPrint(&b1, "{d}:{d:0>2}", .{ el / 60, el % 60 }) catch "";
+            const t2 = std.fmt.bufPrint(&b2, "-{d}:{d:0>2}", .{ rem / 60, rem % 60 }) catch "";
+            _ = cv.text(x0, yy + 24 * k, 12 * k, white.alpha(0.6), t1, .{});
+            _ = cv.text(x0 + w, yy + 24 * k, 12 * k, white.alpha(0.6), t2, .{ .alignment = .right });
+        }
+        yy += 70 * k;
+
+        // 前・再生/一時停止・次(大きく)
+        const gap: f32 = @min(96 * k, w * 0.3);
+        const bs: f32 = 56 * k;
+        self.hits.prev = .{ cx - gap - bs / 2, yy - bs / 2, bs, bs };
+        self.hits.play = .{ cx - bs / 2, yy - bs / 2, bs, bs };
+        self.hits.next = .{ cx + gap - bs / 2, yy - bs / 2, bs, bs };
+        _ = cv.text(cx - gap, yy + 12 * k, 34 * k, white.alpha(0.92), I_PREV, .{ .alignment = .center });
+        _ = cv.text(cx + gap, yy + 12 * k, 34 * k, white.alpha(0.92), I_NEXT, .{ .alignment = .center });
+        cv.save();
+        cv.scaleAbout(cx, yy, 0.6 + 0.4 * ps);
+        cv.opacity(ps);
+        _ = cv.text(cx, yy + 16 * k, 46 * k, white, I_PAUSE, .{ .alignment = .center });
+        cv.restore();
+        cv.save();
+        cv.scaleAbout(cx, yy, 1 - 0.4 * ps);
+        cv.opacity(1 - ps);
+        _ = cv.text(cx, yy + 16 * k, 46 * k, white, I_PLAY, .{ .alignment = .center });
+        cv.restore();
+        yy += 58 * k;
+
+        // 音量: 左右にスピーカー(左を押すと消音)、間にバー
+        const vol = app.sys.volume;
+        const lvl = if (self.drag == 1) self.drag_v else if (vol.known) clamp01(vol.level) else 0;
+        const muted = vol.muted and self.drag != 1;
+        const bx = x0 + 28 * k;
+        const bw = w - 56 * k;
+        const bh: f32 = @as(f32, if (self.drag == 1) 8 else 6) * k;
+        _ = cv.text(x0 + 8 * k, yy + 6 * k, 17 * k, white.alpha(if (muted) 0.5 else 0.75), if (muted) I_VOL_MUTE else I_VOL_LO, .{ .alignment = .center });
+        _ = cv.text(x0 + w - 8 * k, yy + 6 * k, 17 * k, white.alpha(0.75), I_VOL_HI, .{ .alignment = .center });
+        cv.rect(bx, yy - bh / 2, bw, bh, bh / 2, white.alpha(0.22));
+        cv.rect(bx, yy - bh / 2, bw * lvl, bh, bh / 2, white.alpha(if (muted) 0.35 else 0.85));
+        self.hits.mute = .{ x0 - 6 * k, yy - 14 * k, 28 * k, 28 * k };
+        self.hits.vol = .{ bx, yy - 10 * k, bw, 20 * k };
+        yy += 20 * k;
+        self.hits.card = .{ x0, y, w, yy - y };
+        return yy - y;
     }
 
     /// カードの上の操作。扱ったら true(呼ぶ側で描き直す)

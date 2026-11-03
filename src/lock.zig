@@ -97,6 +97,11 @@ pub const Lock = struct {
     /// これより新しい ID の通知をロック画面に出す(ロックしてから来たもの)
     first_notif_id: u32 = 0,
     cards: [6]lockui.Card = [_]lockui.Card{.{}} ** 6,
+    /// 広げた「再生中」(ジャケットを押すと、真ん中に大きなジャケットと、その色の背景。iPhone / iPad のロック画面のように)
+    np_open: bool = false,
+    np: Spring = Spring.init(0, 0.46, 0.84),
+    /// 広げ始めたときの小さなジャケットの場所(そこから大きくなる)
+    np_from: [4]f32 = .{ 0, 0, 0, 0 },
     /// 曲のカードの上に浮かべる同期歌詞(ホーム画面のウィジェットと同じもの。musiccard.zig)
     lyrics: musiccard.Lyrics = .{},
     hits: lockui.Hits = .{},
@@ -262,6 +267,8 @@ pub const Lock = struct {
         self.expand.snap(0);
         self.media_s.snap(0);
         self.music.reset(self.app);
+        self.np_open = false;
+        self.np.snap(0);
         self.first_notif_id = self.app.notifs.next_id;
         for (&self.cards) |*cd| cd.* = .{};
         self.updateSpectrum();
@@ -606,7 +613,11 @@ pub const Lock = struct {
         if (!self.greeter and self.mediaKey(ev.sym)) return;
         // 眺める画面: どのキーでも入力画面へ(文字ならそのまま 1 文字目として入れる)
         if (!self.auth_mode) {
-            if (ev.sym == c.XKB_KEY_Escape) return;
+            if (ev.sym == c.XKB_KEY_Escape) {
+                // 広げた「再生中」を閉じる
+                if (self.np_open) self.setNowPlaying(false);
+                return;
+            }
             self.setAuth(true);
         }
         switch (ev.sym) {
@@ -647,9 +658,21 @@ pub const Lock = struct {
     fn pointer(ctx: *anyopaque, _: *Surface, ev: surface.PointerEvent) void {
         const self: *Lock = @ptrCast(@alignCast(ctx));
         if (self.busy or self.unlocking) return;
+        // ジャケットを押す: 広げた「再生中」を開く・閉じる
+        if (!self.auth_mode and !self.greeter and ev.kind == .press and ev.button == 0x110 and
+            self.app.media.status != .none and musiccard.inRectPad(self.music.hits.art, ev.x, ev.y, 0))
+        {
+            self.setNowPlaying(!self.np_open);
+            return;
+        }
         if (!self.auth_mode and !self.greeter and self.mediaPointer(ev)) return;
         if (ev.kind != .press) return;
         self.last_input_ms = @import("platform/loop.zig").nowMs();
+        // 広げている間は、ほかの所を押すと閉じる(入力画面へは行かない)
+        if (self.np_open and !self.auth_mode) {
+            self.setNowPlaying(false);
+            return;
+        }
         // ログイン画面のボタン(どちらの画面でも)
         if (self.greeter) {
             const g = @import("greeter.zig");
@@ -716,8 +739,21 @@ pub const Lock = struct {
         return true;
     }
 
+    /// 広げた「再生中」を開く・閉じる
+    fn setNowPlaying(self: *Lock, on: bool) void {
+        if (on) self.np_from = self.music.hits.art;
+        self.np_open = on;
+        self.np.set(if (on) 1 else 0);
+        self.last_input_ms = @import("platform/loop.zig").nowMs();
+        self.scheduleAll();
+    }
+
     fn setAuth(self: *Lock, on: bool) void {
         self.auth_mode = on;
+        if (on and self.np_open) {
+            self.np_open = false;
+            self.np.set(0);
+        }
         // 入力画面を開いた(触った): 顔認証が終わっていれば、もう一度試す
         if (on) self.startFace();
         self.auth.set(if (on) 1 else 0);

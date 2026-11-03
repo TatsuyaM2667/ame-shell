@@ -268,6 +268,8 @@ pub fn debugFakeImpl(self: *Media, spec: []const u8) void {
     const len = std.fmt.parseFloat(f32, it.next() orelse "0") catch 0;
     const pos = std.fmt.parseFloat(f32, it.next() orelse "0") catch 0;
     const album = it.next() orelse "";
+    // 6 つ目: ジャケットの画像のパス(試験で背景の色付けなどを見るため)
+    const art = it.next() orelse "";
     self.status = .playing;
     Media.set(&self.artist, &self.artist_len, artist);
     Media.set(&self.title, &self.title_len, title);
@@ -278,6 +280,11 @@ pub fn debugFakeImpl(self: *Media, spec: []const u8) void {
     self.pos_at_ms = loop.nowMs();
     self.last_resync_ms = loop.nowMs() + 3_600_000; // 本物のプレイヤーの位置で上書きしない
     self.lyrics.request(artist, title, len);
+    if (art.len > 0) {
+        var ub: [512]u8 = undefined;
+        Media.set(&self.art_url, &self.art_len, std.fmt.bufPrint(&ub, "file://{s}", .{art}) catch "");
+        self.loadArt();
+    }
     self.lyrics.trySidecar("demo");
     self.app.dashboard.dataChanged();
 }
