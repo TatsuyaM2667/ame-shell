@@ -383,6 +383,7 @@ fn worker(mode: Mode) void {
     var hits: u32 = 0;
     var seen_face = false;
     var dark_face = false;
+    var last_add: i64 = 0;
     var best: f32 = -1;
     var got = Enrolled{ .ir = ir, .n = 0, .embs = undefined };
     while (!st.quit.load(.acquire)) {
@@ -425,10 +426,12 @@ fn worker(mode: Mode) void {
                 } else hits = 0;
             },
             .enroll => {
-                // 今までのものとほとんど同じ顔(向き)は足さない
                 var near: f32 = -1;
                 for (got.embs[0..got.n]) |*k| near = @max(near, face.cosine(k, &e));
-                if (got.n < MAX_ENROLL and near < 0.93) {
+                // まったく同じ顔(動いていない)は足さない。少しでも向き・表情が違えば足す。
+                // 0.4 秒おきにして、7 秒の間に顔の向きを変えた分を集める
+                if (got.n < MAX_ENROLL and near < 0.98 and now - last_add >= 400) {
+                    last_add = now;
                     got.embs[got.n] = e;
                     got.n += 1;
                     send(.{ .code = @intFromEnum(Code.progress), .n = @intCast(got.n) });
@@ -442,10 +445,16 @@ fn worker(mode: Mode) void {
         .verify => send(.{ .code = @intFromEnum(if (seen_face) Code.no_match else if (dark_face) Code.too_dark else Code.no_face), .score = best }),
         .enroll => {
             if (got.n < MIN_ENROLL) return sendCode(if (got.n == 0 and dark_face) .too_dark else .enroll_few);
-            // 全部が同じ人か(どの 2 つも、ある程度近い)
-            for (0..got.n) |i| for (i + 1..got.n) |j| {
-                if (face.cosine(&got.embs[i], &got.embs[j]) < 0.35) return sendCode(.enroll_mixed);
+            // 全部が同じ人か: 平均の顔(長さ 1 にそろえる)に、どれも十分近い。
+            // 2 つずつ比べると、正面と大きく傾けた顔の組で同じ人でも下がるので、平均と比べる
+            var mean = [_]f32{0} ** face.EMB;
+            for (got.embs[0..got.n]) |*e| for (&mean, e) |*mv, x| {
+                mv.* += x;
             };
+            var len: f32 = 0;
+            for (mean) |x| len += x * x;
+            for (&mean) |*mv| mv.* /= @max(@sqrt(len), 1e-6);
+            for (got.embs[0..got.n]) |*e| if (face.cosine(e, &mean) < 0.5) return sendCode(.enroll_mixed);
             if (!saveEnrolled(&got)) return sendCode(.failed);
             send(.{ .code = @intFromEnum(Code.enrolled), .n = @intCast(got.n) });
         },

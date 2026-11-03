@@ -47,16 +47,29 @@ pub const Recognizer = struct {
         return self;
     }
 
-    /// いちばん大きく写った顔。無ければ null
+    /// いちばん大きく写った顔。無ければ null。
+    /// 映像全体を 128×128 に縮めると顔は 20 画素ほどになり、目・鼻・口の位置が 10 画素ほどずれる(切り抜きがずれて、
+    /// 同じ人でも特徴がばらつく)。見つけた顔の周りだけをもう一度 128×128 にして探し直し、位置を細かく求める
     pub fn detect(self: *Recognizer, img: Image) !?Face {
-        const side: f32 = @floatFromInt(@max(img.w, img.h));
-        const pad_x = (side - @as(f32, @floatFromInt(img.w))) / 2;
-        const pad_y = (side - @as(f32, @floatFromInt(img.h))) / 2;
+        const W: f32 = @floatFromInt(img.w);
+        const H: f32 = @floatFromInt(img.h);
+        const side = @max(W, H);
+        const first = try self.region(img, (W - side) / 2, (H - side) / 2, side) orelse return null;
+        // 顔の箱の 2.2 倍の正方形(顔が入力の半分ほどになる大きさ)
+        const s2 = @max(first.w, first.h) * 2.2;
+        if (s2 >= side * 0.8) return first;
+        const cx = first.x + first.w / 2;
+        const cy = first.y + first.h / 2;
+        return try self.region(img, cx - s2 / 2, cy - s2 / 2, s2) orelse first;
+    }
+
+    /// 画像の (x0, y0) から一辺 side の正方形を 128×128 にして顔を探す(外側は黒)
+    fn region(self: *Recognizer, img: Image, x0: f32, y0: f32, side: f32) !?Face {
         const inp = self.det.input();
         const sc = side / DET;
         for (0..DET) |y| for (0..DET) |x| {
-            const sx = (@as(f32, @floatFromInt(x)) + 0.5) * sc - pad_x - 0.5;
-            const sy = (@as(f32, @floatFromInt(y)) + 0.5) * sc - pad_y - 0.5;
+            const sx = (@as(f32, @floatFromInt(x)) + 0.5) * sc + x0 - 0.5;
+            const sy = (@as(f32, @floatFromInt(y)) + 0.5) * sc + y0 - 0.5;
             const px = sample(img, sx, sy);
             for (0..3) |k| inp[(y * DET + x) * 3 + k] = if (self.det_signed) px[k] / 127.5 - 1 else px[k] / 255;
         };
@@ -89,20 +102,15 @@ pub const Recognizer = struct {
             wsum += s;
         }
         for (&acc) |*v| v.* /= wsum;
-        const X = struct {
-            fn f(v: f32, s: f32, p: f32) f32 {
-                return v * s - p;
-            }
-        }.f;
         var f = Face{
-            .x = X(acc[0] - acc[2] / 2, side, pad_x),
-            .y = X(acc[1] - acc[3] / 2, side, pad_y),
+            .x = (acc[0] - acc[2] / 2) * side + x0,
+            .y = (acc[1] - acc[3] / 2) * side + y0,
             .w = acc[2] * side,
             .h = acc[3] * side,
             .score = best_s,
             .pts = undefined,
         };
-        for (0..4) |k| f.pts[k] = .{ X(acc[4 + k * 2], side, pad_x), X(acc[5 + k * 2], side, pad_y) };
+        for (0..4) |k| f.pts[k] = .{ acc[4 + k * 2] * side + x0, acc[5 + k * 2] * side + y0 };
         // 両目は画像の左にある方を先に(鏡にした映像でも同じ型に合うように)
         if (f.pts[0][0] > f.pts[1][0]) std.mem.swap([2]f32, &f.pts[0], &f.pts[1]);
         return f;
