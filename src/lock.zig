@@ -596,7 +596,7 @@ pub const Lock = struct {
         } else {
             self.setMsg("パスワードが違います");
             self.shake.kick(420);
-        self.last_input_ms = @import("platform/loop.zig").nowMs();
+            self.last_input_ms = @import("platform/loop.zig").nowMs();
         }
         self.scheduleAll();
     }
