@@ -889,32 +889,38 @@ fn sendStatus(s: Status) void {
 }
 
 fn worker() void {
-    const a = std.heap.c_allocator;
-    const bytes = loadModel(a) orelse return;
+    // 推論のメモリは全部この worker 専用の領域から取り、終わるときに丸ごと OS に返す。
+    // c_allocator(musl の malloc)だと、細かいテンソルの領域がオフにしたあともヒープに残っていた
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // モデルのファイル(7MB)は読み終えたらすぐ返したいので、別に mmap で取る
+    const fa = std.heap.page_allocator;
+    const bytes = loadModel(fa) orelse return;
     var det_b: []const u8 = undefined;
     var lmk_b: []const u8 = undefined;
     if (!zip.unzipStored(bytes, "hand_detector.tflite", &det_b) or !zip.unzipStored(bytes, "hand_landmarks_detector.tflite", &lmk_b)) {
-        a.free(bytes);
+        fa.free(bytes);
         log.err("モデルの中身が読めません", .{});
         sendStatus(.failed);
         return;
     }
     sendStatus(.loading);
     var det = nn.Net.init(a, det_b, 2) catch |e| {
-        a.free(bytes);
+        fa.free(bytes);
         log.err("手のひらの検出モデルを読めません: {}", .{e});
         sendStatus(.failed);
         return;
     };
     defer det.deinit();
     var lmk = nn.Net.init(a, lmk_b, 2) catch |e| {
-        a.free(bytes);
+        fa.free(bytes);
         log.err("関節のモデルを読めません: {}", .{e});
         sendStatus(.failed);
         return;
     };
     defer lmk.deinit();
-    a.free(bytes); // 重みは f32 に変換済み。ファイルの中身はもう要らない
+    fa.free(bytes); // 重みは f32 に変換済み。ファイルの中身はもう要らない
     var tr = track.Tracker.init(&det, &lmk);
     tr.det_signed = false;
 
