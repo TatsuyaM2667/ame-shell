@@ -267,13 +267,18 @@ pub fn build(b: *std.Build) void {
     // --- マウスカーソルのテーマ "ame"(tools/cursorgen.zig が SVG を nanosvg で描いて Xcursor を書く)---
     // 古い名前は同じファイルへのシンボリックリンクなので、installDirectory(リンクを実体にして写す)を通さず
     // 生成器が share/icons/ame に直接書く(0.2 秒ほど。毎回作り直す)
-    const cursorgen = b.addExecutable(.{ .name = "cursorgen", .root_source_file = b.path("tools/cursorgen.zig"), .target = b.graph.host, .optimize = .ReleaseFast });
-    cursorgen.linkLibC();
-    cursorgen.addIncludePath(b.path("third_party"));
-    cursorgen.addCSourceFile(.{ .file = b.path("third_party/nanosvg_impl.c"), .flags = &.{ "-O2", "-fno-sanitize=undefined" } });
-    const cursor_run = b.addRunArtifact(cursorgen);
-    cursor_run.addArg(b.getInstallPath(.prefix, "share/icons/ame"));
-    b.getInstallStep().dependOn(&cursor_run.step);
+    // 別の OS 向けに --libc を付けて試しビルドするときは作らない(--libc は手元で動かす生成器にも効いてしまい、
+    // 生成器がリンクできない。その OS の上でビルドすれば作られる)
+    const cross_libc = b.libc_file != null and target.result.os.tag != b.graph.host.result.os.tag;
+    if (!cross_libc) {
+        const cursorgen = b.addExecutable(.{ .name = "cursorgen", .root_source_file = b.path("tools/cursorgen.zig"), .target = b.graph.host, .optimize = .ReleaseFast });
+        cursorgen.linkLibC();
+        cursorgen.addIncludePath(b.path("third_party"));
+        cursorgen.addCSourceFile(.{ .file = b.path("third_party/nanosvg_impl.c"), .flags = &.{ "-O2", "-fno-sanitize=undefined" } });
+        const cursor_run = b.addRunArtifact(cursorgen);
+        cursor_run.addArg(b.getInstallPath(.prefix, "share/icons/ame"));
+        b.getInstallStep().dependOn(&cursor_run.step);
+    }
 
     // --- 実行とテスト ---
     const run = b.addRunArtifact(exe);
