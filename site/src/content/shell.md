@@ -85,6 +85,19 @@
 - **Wi-Fi・Bluetooth のパネル**: 一覧・接続・パスワード入力。外側をクリックすると閉じます。AirPods などは接続すると高音質(A2DP)の出力にし、通話用の低音質(HFP)への自動切り替えを止めます。
 - **セッション**(Super+Escape): ロック・ログアウト・スリープ・再起動・電源オフ。危険な操作は 2 回押しです。FreeBSD では ConsoleKit2 で行います。
 
+## AirPods の頭の動き {#airpods}
+
+AirPods Pro 2 など、空間オーディオのために頭の向きを測れる AirPods で、頭を動かして操作します(Linux のみ。ユーティリティの「AirPods 操作」・`ame-ctl airpods on|off`・設定 `airpods { enabled on }`。既定はオフ)。
+
+- **頭を右 / 左へ振って戻す**: 右 / 左のワークスペースへ
+- **上を向いて戻す**: ランチャー
+- **下を向いて戻す**: ダッシュボード
+- 振ったまま・向いたまま(よそ見・キーボードを見る)では何もしません。戻したときにだけ動きます。基準はふだんの姿勢へゆっくり合わせ直すので、姿勢が変わっても誤って動きません。
+- AirPods 本来の操作(軸を押す・つまむ)はそのまま使えます。
+- 仕組み: BlueZ で接続中の AirPods に L2CAP(PSM 0x1001)でつなぎ、Apple のアクセサリの通信(AAP)で頭の向きを頼みます。通信の形は [LibrePods](https://github.com/kavishdevar/librepods) の解析によります。
+- **AirPods は、つないでいる機器が Apple のものでないと頭の向きを送りません**(試した AirPods Pro 2 は断る返事を返しました)。`/etc/bluetooth/main.conf` の `[General]` に `DeviceID = bluetooth:004C:0000:0000` を書いて Bluetooth を再起動し、AirPods をつなぎ直してください。断られたときは ame-shell が通知で知らせます。
+- 向きが逆に感じるときは `airpods { invert-yaw on }` / `invert-pitch on`。どれだけ振ったら動くかは `yaw-angle`(既定 25 度)・`pitch-angle`(既定 18 度)。今の角度は `ame-ctl airpods status` で見られます。
+
 ## ハンド操作 {#hand}
 
 カメラに映った手の動きで、カーソルと窓を操作します。ユーティリティ(Super+U)の「ハンド操作」ボタンか `ame-ctl hand toggle` で切り替えます(既定はオフ。`hand { enabled on }` で起動時からオン)。
@@ -153,7 +166,7 @@ pub fn frame(dt: f32, w: f32, _: f32) bool {
 
 ## そのほか {#misc}
 
-- **充電のアニメーション**: 充電器をつなぐと、iPhone の MagSafe のように画面全体を使って知らせます。画面が少し暗くなって真ん中から光の輪が広がり、リングがポンと現れて 0 から今の残り % まで光りながら満ち、約 2.8 秒で消えます(20% 以下は黄色、それ以上は緑)。ロック中はロック画面の上に出ます。クリックやキーは下の窓へそのまま届きます。要らなければ `shell { charge-animation off }`。
+- **充電のアニメーション**: 充電器をつなぐと、iPhone の MagSafe のように画面全体を使って知らせます。電池の通知を切っていても出ます。画面が少し暗くなって真ん中から光の輪が広がり、リングがポンと現れて 0 から今の残り % まで光りながら満ち、約 2.8 秒で消えます(20% 以下は黄色、それ以上は緑)。ロック中はロック画面の上に出ます。クリックやキーは下の窓へそのまま届きます。要らなければ `shell { charge-animation off }`。
 - **端末**: ghostty(ame-shell と同じ Zig 製。無ければ foot)。半透明の夜空色で開き、最初に fastfetch を表示します。中のシェルは zsh の設定つき。
 - **ファイル**(Super+E): Thunar を、端末と同じ半透明のテーマ(AmeGlass)で開きます。ほかの GTK アプリの見た目は変えません。
 - **日本語入力**: fcitx5 + Mozc。Chimera などパッケージの無い環境では `sh install.sh --mozc` でソースからビルドします。

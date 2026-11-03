@@ -54,6 +54,7 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
   - 電池の残量が少ないとき、充電器の抜き差し(満充電まであと何分・何時ごろ)、USB 機器・USB メモリ・SD カードの抜き差し(名前・容量・ラベル)も通知
 - **録画**(ユーティリティの録画ボタン): wf-recorder で `~/Videos` に保存。**PC で鳴っている音も一緒に**録る(PipeWire は既定の出力、PulseAudio は `<出力>.monitor`)
 - **スクリーンショット**: grim / slurp / wl-copy を使わず ame-shell が自分で撮る(ext-image-copy-capture、PNG は自前のエンコーダ、クリップボードは ext-data-control)
+- **AirPods の頭の動き**(ユーティリティの「AirPods 操作」・`ame-ctl airpods toggle`・設定 `airpods { enabled on }`。Linux のみ): 頭を左右に振って戻すとワークスペース、上を向いて戻すとランチャー、下を向いて戻すとダッシュボード。AirPods 本来の操作もそのまま使える。AirPods が頭の向きを送るには Bluetooth の DeviceID を Apple(`bluetooth:004C:0000:0000`)にする必要がある
 - **ハンド操作**(ユーティリティの「ハンド操作」ボタン・`ame-ctl hand toggle`・設定 `hand { enabled on }`。既定はオフ): カメラに映った手の動きでカーソルと窓を操作します
   - 指さすとカーソルが指先に付いて動き、窓のフォーカスも移る / **つまむ**と短くでクリック、つまんだまま動かすと窓をつかんで移動、**持ったまま手を近づける・遠ざけるとズーム** /
     **手を払う**と隣のワークスペース / **指の本数**を示して止めるとその番号へ / **開いた手を止める**と手のメニュー(ランチャー・ダッシュボード・全画面・浮かせる・大きく・小さく・スクショ・閉じる・ワークスペース 1〜9)/ **握りこぶし**で閉じる。操作のたびに水の波紋、カーソルの後ろには船の航跡のような V 字の波
@@ -316,6 +317,7 @@ ame-ctl workspace <1-9>                  ame-ctl window close|fullscreen|float|f
 ame-ctl screenshot region|full|clip      ame-ctl avatar pick
 ame-ctl media play-pause|next|previous    ame-ctl net wifi|saved|radio|ssid|bt|bt-devices
 ame-ctl hand on|off|toggle|status        (ハンド操作)
+ame-ctl airpods on|off|toggle|status     (AirPods の頭の動きで操作)
 ame-ctl face enroll|clear|status        (顔認証: 顔を登録・消す)
 ame-ctl widget music <隅|on|off>       (ホーム画面の曲のウィジェット: top-left / top-right / bottom-left / bottom-right)
 ame-ctl lock | reload | widgets reload | stats | restart | quit
