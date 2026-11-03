@@ -388,6 +388,16 @@ elif command -v systemctl >/dev/null 2>&1; then
 else
     info "(このシステムのユーザーサービスは確認できません。PipeWire が自動で起動するようにしてください)"
 fi
+# 音質: サンプリング周波数の変換をいちばん高い品質に(既定は 4。CPU の増え方はわずか)。
+# アプリの音(client)と pactl 経由の音(pipewire-pulse)の両方。自分で置いた設定があればそのまま
+for d in client.conf.d pipewire-pulse.conf.d; do
+    f="$HOME/.config/pipewire/$d/90-ame-quality.conf"
+    if [ -n "$(ls "$HOME/.config/pipewire/$d" 2>/dev/null)" ]; then
+        info "[ok] ~/.config/pipewire/$d(設定済みのためそのまま)"
+    else
+        mkdir -p "$HOME/.config/pipewire/$d" && cp "$REPO/data/pipewire/90-ame-quality.conf" "$f" && info "音質の設定: $f"
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # フォルダを開くアプリ(ファイルマネージャ): 決まっていない、または KDE の Dolphin(消した場合など)なら thunar に

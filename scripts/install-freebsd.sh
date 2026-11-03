@@ -205,6 +205,16 @@ service dbus status >/dev/null 2>&1 || service dbus start || true
 service seatd status >/dev/null 2>&1 || service seatd start || true
 # sddm は今は起動しない(この端末の画面を取ってしまうため)。再起動後に起動する
 pw groupmod video -m "$TARGET_USER" && info "$TARGET_USER を video グループへ(seatd・明るさ)"
+# カメラ(ハンド操作): FreeBSD では webcamd が USB カメラを /dev/video0(V4L2)として見せる。
+# cuse(ユーザー空間のキャラクタデバイス)を読み込み、webcamd をサービスとして有効にし、webcamd グループで読めるようにする
+if pkg info -e webcamd || pkg install -y webcamd >/dev/null 2>&1; then
+    add_kld cuse
+    sysrc webcamd_enable=YES >/dev/null
+    pw groupmod webcamd -m "$TARGET_USER" 2>/dev/null && info "$TARGET_USER を webcamd グループへ(カメラ・ハンド操作)"
+    service webcamd status >/dev/null 2>&1 || service webcamd start >/dev/null 2>&1 || info "(webcamd は再起動後に動きます)"
+else
+    info "(webcamd を入れられませんでした。ハンド操作のカメラは使えません: pkg install webcamd)"
+fi
 if [ "$DO_TAP" = 1 ]; then
     # Super キー単独のタップを検出するため、video グループに入力デバイスの読み取りを許可する
     # (Linux の input グループと同じ。キー入力を読めるようになる点に注意)
@@ -284,6 +294,13 @@ su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_CONFIG_HOME= sh '$REPO/scripts/ap
 # フォルダを開くアプリ: 決まっていなければ thunar に
 if command -v thunar >/dev/null 2>&1 && command -v xdg-mime >/dev/null 2>&1; then
     su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_CONFIG_HOME= sh -c '[ -n \"\$(xdg-mime query default inode/directory 2>/dev/null)\" ] || xdg-mime default thunar.desktop inode/directory'"
+fi
+
+# 音質: PulseAudio のサンプリング周波数の変換を高い品質に(Linux の PipeWire の resample.quality = 10 と同じ考え)。
+# 自分で daemon.conf を置いていればそのまま
+if [ ! -f "$UHOME/.config/pulse/daemon.conf" ]; then
+    su -m "$TARGET_USER" -c "env HOME='$UHOME' sh -c 'mkdir -p \"\$HOME/.config/pulse\" && printf \"%s\\n\" \"# ame-shell: 音質(サンプリング周波数の変換)\" \"resample-method = speex-float-10\" \"default-sample-format = float32le\" > \"\$HOME/.config/pulse/daemon.conf\"'" &&
+        info "音質の設定: ~/.config/pulse/daemon.conf"
 fi
 
 # キーボード配列: コンソールの keymap(rc.conf の keymap="jp.kbd" など)と同じ配列を Wayland でも使う
