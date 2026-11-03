@@ -66,6 +66,21 @@ FreeBSD のインストーラは次のことまで行います。
 
 > 手の認識([ame-hand](https://github.com/TatsuyaM2667/ame-hand))と顔認証([ame-face](https://github.com/TatsuyaM2667/ame-face))は別のリポジトリです。初めてビルドするときに、Zig が GitHub から取ってきます(どの OS でもネットワークが要ります。2 回目からは `~/.cache/zig` を使います)。
 
+## 機能ごとの OS の違い {#os-features}
+
+| 機能 | Chimera / Arch | FreeBSD |
+|---|---|---|
+| ハンド操作 | ○(カメラは `/dev/video*`。旧 River 0.3 のセッションでは riverctl で窓を操作) | ○(webcamd。インストーラが設定) |
+| ロック画面の顔認証 | ○ | ○(パスワードは setuid の ame-auth、カメラは webcamd) |
+| ログイン画面の顔認証 | ○(greetd のとき。PAM サービス `ame-greetd` を `/etc/pam.d` に) | ○(greetd のとき。`/etc/pam.d` と `/usr/local/etc/pam.d` の両方に。SDDM では使えない) |
+| 曲のウィジェット・「再生中」・歌詞 | ○ | ○(ビジュアライザーの音は PulseAudio のモニター) |
+| 充電のアニメーション | ○(カーネルの uevent で抜き差しを知る) | ○(devd の ACPI の知らせ) |
+| AirPods をつないだときのカード | ○(BlueZ) | ×(BlueZ が無い。FreeBSD の Bluetooth は AirPods の音にも標準では対応しない) |
+| AirPods の頭の動き | △(BlueZ。AirPods が頭の向きを送らないことがある) | × |
+
+- **Bluetooth の DeviceID**(AirPods の頭の動き用): `/etc/bluetooth/main.conf` の `[General]` に `DeviceID = bluetooth:004C:0000:0000` を書いて、Bluetooth を再起動します(Chimera: `doas dinitctl restart bluetoothd` / Arch: `sudo systemctl restart bluetooth`)。
+- **ログイン画面の顔認証**は、ログイン画面を greetd(ame-greeter)にしたときだけ使えます。更新(`ame-update`)のたびに、ログイン画面の設定も入れ直します(FreeBSD も)。
+
 ## 更新 {#update}
 
 ```sh
