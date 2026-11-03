@@ -128,6 +128,13 @@ vt = 7
 command = "$GREETER"
 user = "$GUSER"
 EOF
+# 顔認証つきの PAM サービス ame-greetd(install-session.sh が作る)があれば、それで認証する
+for p in /etc/pam.d/ame-greetd /usr/lib/pam.d/ame-greetd; do
+    if [ -f "$p" ] && [ "$(uname -s)" != FreeBSD ]; then
+        printf '\n[general]\n# 顔認証(%s)→ だめならパスワード\nservice = "ame-greetd"\n' "$p" >> "$TMP"
+        break
+    fi
+done
 if cmp -s "$TMP" "$CONF"; then
     info "$CONF は設定済み"
 elif [ "$DRY" = 1 ]; then

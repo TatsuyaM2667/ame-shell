@@ -350,6 +350,34 @@ if [ "$USER_MODE" = 0 ] && [ "$OS" != FreeBSD ]; then
     fi
 fi
 
+# PAM(ログイン画面 greetd の顔認証。Linux の全ユーザー用インストールで、greetd の PAM 設定があるときだけ)
+# ame-greetd: 顔認証のモジュール(ame-greeter が頼んだときだけカメラを使う)→ だめなら greetd と同じ認証。
+# greetd の config.toml の [general] service = "ame-greetd" で使う(scripts/greeter-setup.sh が書く)
+if [ "$USER_MODE" = 0 ] && [ "$OS" != FreeBSD ] && [ -f "$OUT/lib/libpam_ame_face.so" ]; then
+    GREETD_PAM=""
+    for p in /etc/pam.d/greetd /usr/lib/pam.d/greetd; do [ -f "$p" ] && GREETD_PAM="$p" && break; done
+    if [ -n "$GREETD_PAM" ]; then
+        install_file "$OUT/lib/libpam_ame_face.so" "$PREFIX/lib/ame-shell/pam_ame_face.so" 755
+        NOLOGIN=""
+        for m in /lib/security/pam_nologin.so /usr/lib/security/pam_nologin.so /lib64/security/pam_nologin.so /usr/lib/x86_64-linux-gnu/security/pam_nologin.so; do
+            [ -f "$m" ] && NOLOGIN=1 && break
+        done
+        tmp=$(mktemp "${TMPDIR:-/tmp}/ame-pam.XXXXXX") || exit 1
+        {
+            echo "# ame-shell のログイン画面(greetd)用(install-session.sh が作成)"
+            echo "# 顔認証(ame-greeter が頼んだときだけ。一致しなければ次へ)→ $GREETD_PAM と同じ認証"
+            [ -n "$NOLOGIN" ] && echo "auth requisite pam_nologin.so"
+            echo "-auth sufficient $PREFIX/lib/ame-shell/pam_ame_face.so"
+            echo "auth include greetd"
+            echo "account include greetd"
+            echo "password include greetd"
+            echo "session include greetd"
+        } > "$tmp"
+        install_file "$tmp" "$PAM_DIR/ame-greetd" 644
+        rm -f "$tmp"
+    fi
+fi
+
 # FreeBSD のロック画面: pam_unix は root でないと照合できないので、照合の補助 ame-auth を root の setuid で入れる
 # (照合するのは呼び出した人のパスワードだけ。swaylock が setuid で入るのと同じ考え。src/auth_helper.zig)
 if [ "$USER_MODE" = 0 ] && [ "$OS" = FreeBSD ]; then
