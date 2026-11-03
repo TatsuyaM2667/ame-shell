@@ -221,6 +221,8 @@ pub const Wm = struct {
     /// 縁のダブルクリック(タイトルバーの無い窓でもタイルに戻せるように)
     grip_last_ms: u64 = 0,
     grip_last_win: ?*Window = null,
+    grip_last_x: f32 = 0,
+    grip_last_y: f32 = 0,
     mgr: *c.struct_river_window_manager_v1,
     xkb: ?*c.struct_river_xkb_bindings_v1 = null,
     lsh: ?*c.struct_river_layer_shell_v1 = null,
@@ -335,6 +337,13 @@ pub const Wm = struct {
         // ame-shell が把握している「アクティブな出力」に合わせる
         if (self.app.focused_output) |ao| for (self.outputs.items) |o| if (o.ame == ao) return o;
         return if (self.outputs.items.len > 0) self.outputs.items[0] else null;
+    }
+
+    fn gripPtrX(self: *Wm) f32 {
+        return if (self.seat()) |s| @floatFromInt(s.ptr_x) else 0;
+    }
+    fn gripPtrY(self: *Wm) f32 {
+        return if (self.seat()) |s| @floatFromInt(s.ptr_y) else 0;
     }
 
     fn seat(self: *Wm) ?*WSeat {
@@ -762,13 +771,17 @@ pub const Wm = struct {
         const w = self.grip_hover orelse return;
         // 縁をダブルクリック: タイルに戻す
         const now = loop.nowMs();
-        if (self.grip_last_win == w and now -| self.grip_last_ms < 450) {
+        // (1 回目で大きさを変えた・離れた所を押した・遅い、ときはダブルクリックにしない)
+        const near = @abs(self.grip_last_x - self.gripPtrX()) < 6 and @abs(self.grip_last_y - self.gripPtrY()) < 6;
+        if (self.grip_last_win == w and now -| self.grip_last_ms < 350 and near) {
             self.grip_last_win = null;
             self.gripLeave();
             self.toggleFloat(w);
             return;
         }
         self.grip_last_ms = now;
+        self.grip_last_x = self.gripPtrX();
+        self.grip_last_y = self.gripPtrY();
         self.grip_last_win = w;
         if (self.grip_edges == 0) return;
         for (self.seats.items) |s| {
@@ -1548,13 +1561,15 @@ fn opRelease(s: *WSeat, river_op: bool) void {
     // 上の端へ持っていって離したときに、ダッシュボードが開かないように
     s.wm.app.edge_quiet_until_ms = loop.nowMs() + 900;
     if (s.op == .resize) if (s.op_window) |w| c.river_window_v1_inform_resize_end(w.obj);
-    // 浮いた窓を画面の上の端まで持っていって離した: タイルに戻す
-    if (s.op == .move) if (s.op_window) |w| if (w.out) |o| {
-        const top = if (o.area) |ar| ar[1] else o.y;
-        // カーソルが上の端に着いた、または窓の上の辺が使える範囲より上へ出た(カーソルの位置が届いていなくても分かるように)
-        const ptr_top = s.op_py + s.op_dy <= top + 4 and (s.op_px != 0 or s.op_py != 0);
-        const win_top = w.float_rect[1] < @as(f32, @floatFromInt(top)) - 6;
-        if (ptr_top or win_top) {
+    // 大きさを変えた直後にもう一度縁をつかんでも、ダブルクリック(タイルに戻す)にしない
+    if (s.op_dx != 0 or s.op_dy != 0) s.wm.grip_last_win = null;
+    // 浮いた窓を、カーソルごと画面のいちばん上の端まで持っていって離した: タイルに戻す。
+    // 窓の上辺が上へはみ出しただけ・上の方で離しただけでは戻さない(大きさを変えたり動かしたりしている途中に、
+    // 勝手にタイルに戻ってしまうため)。手の操作(hand)では戻さない(カーソルの位置が揺れるため)
+    if (s.op == .move and river_op) if (s.op_window) |w| if (w.out) |o| {
+        const py = s.op_py + s.op_dy;
+        const ptr_top = py <= o.y + 2 and (s.op_px != 0 or s.op_py != 0);
+        if (ptr_top) {
             w.floating = false;
             s.wm.app.osd.info("タイルに戻しました");
         }
