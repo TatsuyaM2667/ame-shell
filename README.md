@@ -60,6 +60,7 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
   - 手の認識は MediaPipe の手のモデル(Apache-2.0、約 8MB。初めてオンにしたときに `~/.local/share/ame-shell/models` へ取ってくる)を、**Zig で書いた推論エンジン**(別のリポジトリ [ame-hand](https://github.com/TatsuyaM2667/ame-hand)。ame-shell 側は River の操作につなぐ `src/hand/hand.zig`)で動かします。C++・Python・OpenCV は使いません
   - カメラは V4L2 を直接(FreeBSD は webcamd)。オンの間だけ CPU を 1 コアの 10〜20% ほど使い、オフにするとカメラ・スレッド・モデルのメモリを全部返します
   - ame-shell が WM を兼ねるセッション(River 0.5。FreeBSD は常にこれ)では窓そのものをつかんで動かし・ズームします。River 0.3 のセッション(Chimera・Arch で内蔵 WM を使わないとき)では、ワークスペース・閉じる・全画面・浮かせる・大きく/小さく を riverctl と同じ命令で行い、つまんで動かすのは左ボタンのドラッグになります
+- **充電のアニメーション**: 充電器をつなぐと、iPhone の MagSafe のように画面全体に光の輪と残り % のリングを出す(ロック中も。`shell { charge-animation off }` で出さない)
 - **ホーム画面の曲のウィジェット**: ロック画面と同じ曲のカードを、デスクトップの四隅のどこかに置く(同期歌詞つき)(窓の下。ドラッグで近い隅へ動かせ、覚える。`ame-ctl widget music <隅>`、`music-widget { corner … }`)
 - **ロック画面**(Super+L、ext-session-lock + PAM。iOS / iPadOS のロック画面のような作り、`src/lockui.zig`):
   - 眺める画面: くっきりした壁紙(オーロラ・雨はロック中も動き続ける)の上に日付・特大の時計・電池、
