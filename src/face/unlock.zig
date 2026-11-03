@@ -132,7 +132,7 @@ pub fn tryUnlock(app: *App) void {
     start(app, .verify);
 }
 
-/// 登録を始める(ame-ctl face enroll / ランチャー)
+/// 登録を始める。パスワードで本人を確かめた後に lock.zig(finish)からだけ呼ぶ(ame-ctl / ランチャーは lockForEnroll)
 pub fn enroll(app: *App) []const u8 {
     if (st.running) return "error: 顔認証がすでに動いています";
     start(app, .enroll);

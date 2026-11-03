@@ -264,7 +264,7 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
     } else if (eq(u8, cmd, "face")) {
         // 顔認証(ロック画面で顔を見てロックを外す)の登録・削除・状態
         const fa = @import("face/unlock.zig");
-        if (eq(u8, arg, "enroll")) return fa.enroll(app);
+        if (eq(u8, arg, "enroll")) return app.lock.lockForEnroll(); // 先にパスワードで本人を確かめる
         if (eq(u8, arg, "clear")) return fa.clear();
         if (eq(u8, arg, "status") or arg.len == 0) return fa.status(out);
         return "error: face enroll|clear|status";

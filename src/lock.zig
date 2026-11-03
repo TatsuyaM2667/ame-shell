@@ -110,6 +110,11 @@ pub const Lock = struct {
     drag_v: f32 = 0,
     vol_sent: f32 = -1,
     vol_sent_ms: u64 = 0,
+    /// 顔の登録の前の本人確認として出したロック(lockForEnroll)。パスワードが通ったら登録を始める。
+    /// 鍵の掛かっていない状態から始めたものなので、Esc で何もせず外してよい
+    enroll_req: bool = false,
+    /// パスワードが通った: ロックが外れたら顔の登録を始める
+    enroll_after: bool = false,
     spectrum: framedata.Spectrum,
 
     pub fn create(app: *App) !*Lock {
@@ -171,7 +176,17 @@ pub const Lock = struct {
     }
 
     pub fn lock(self: *Lock) []const u8 {
-        if (self.locked) return "ok (already locked)";
+        if (self.locked) {
+            // 登録の本人確認の途中にロックを頼まれた(放置で自動ロックなど): ふつうのロックにする(Esc で外せなくする)
+            if (self.enroll_req) {
+                self.enroll_req = false;
+                self.enroll_after = false;
+                self.msg_len = 0;
+                faceauth.tryUnlock(self.app);
+                self.scheduleAll();
+            }
+            return "ok (already locked)";
+        }
         // FreeBSD の pam_unix は root でないとパスワードを照合できない(Linux の unix_chkpwd に当たる補助が無い)。
         // FreeBSD の swaylock パッケージは setuid で入るので、ロックはそれに任せる
         // ame-auth(root の setuid の照合の補助)が入っていれば、Linux と同じ ame-shell のロック画面を使う
@@ -191,6 +206,30 @@ pub const Lock = struct {
             return "error: lock unavailable (see notification)";
         }
         if (!self.startSession()) return "error: lock request failed";
+        return "ok";
+    }
+
+    /// 顔を登録する前に、ロック画面と同じ入力欄でパスワードを確かめる(ランチャー / ame-ctl face enroll)。
+    /// 通ったらロックを外して登録を始める。Esc でやめられる
+    pub fn lockForEnroll(self: *Lock) []const u8 {
+        if (self.locked) return "error: ロック中です";
+        if (@import("builtin").os.tag == .freebsd and findAuthHelper() == null) {
+            const why = "パスワードを確かめられないため、顔を登録できません(ame-auth を入れてください)";
+            self.app.osd.info(why);
+            return "error: ame-auth not found";
+        }
+        if (self.preflight()) |why| {
+            self.app.osd.info(why);
+            return "error: パスワードを確かめられません";
+        }
+        self.enroll_req = true;
+        self.enroll_after = false;
+        if (!self.startSession()) {
+            self.enroll_req = false;
+            return "error: lock request failed";
+        }
+        self.setAuth(true);
+        self.setMsg("顔を登録するには、パスワードを入力してください");
         return "ok";
     }
 
@@ -239,7 +278,7 @@ pub const Lock = struct {
         self.app.launcher.close();
         self.app.dashboard.close();
         // 顔を登録してあれば、すぐに顔で確かめ始める(パスワードもそのまま使える)
-        if (!self.greeter) faceauth.tryUnlock(self.app);
+        if (!self.greeter and !self.enroll_req) faceauth.tryUnlock(self.app);
         return true;
     }
 
@@ -263,13 +302,19 @@ pub const Lock = struct {
     pub fn tick(self: *Lock) void {
         if (!self.locked) return;
         // 入力画面のまま 12 秒触らなければ、眺める画面にもどる
-        if (self.auth_mode and self.pw_len == 0 and !self.busy and @import("platform/loop.zig").nowMs() -| self.last_input_ms > 12_000) self.setAuth(false);
+        if (self.auth_mode and !self.enroll_req and self.pw_len == 0 and !self.busy and @import("platform/loop.zig").nowMs() -| self.last_input_ms > 12_000) self.setAuth(false);
         self.updateSpectrum();
         self.scheduleAll();
     }
 
     fn finish(self: *Lock, unlock: bool) void {
         faceauth.stop();
+        const enroll_now = unlock and self.enroll_after;
+        self.enroll_req = false;
+        self.enroll_after = false;
+        defer if (enroll_now) {
+            _ = faceauth.enroll(self.app);
+        };
         self.spectrum.stop();
         for (&self.views) |*v| {
             if (v.*) |vv| vv.surf.destroy();
@@ -415,7 +460,7 @@ pub const Lock = struct {
 
     /// 顔認証で本人と分かった(face/unlock.zig): パスワードが通ったときと同じようにロックを外す
     pub fn faceUnlocked(self: *Lock) void {
-        if (!self.locked or self.unlocking or self.greeter or self.busy) return;
+        if (!self.locked or self.unlocking or self.greeter or self.busy or self.enroll_req) return;
         self.setMsg("ようこそ");
         self.unlocking = true;
         self.ripple_req = true;
@@ -435,7 +480,8 @@ pub const Lock = struct {
         self.pw_len = 0;
         if (n >= 1 and b == 1) {
             if (self.greeter) @import("greeter.zig").saveLastUser();
-            self.setMsg("ようこそ");
+            self.setMsg(if (self.enroll_req) "確認できました。顔の登録を始めます" else "ようこそ");
+            self.enroll_after = self.enroll_req;
             self.unlocking = true;
             if (self.greeter) {
                 self.unlock_s.set(1);
@@ -471,6 +517,14 @@ pub const Lock = struct {
         switch (ev.sym) {
             c.XKB_KEY_Return, c.XKB_KEY_KP_Enter => self.startAuth(),
             c.XKB_KEY_Escape => {
+                // 登録の本人確認: 空で Esc なら、登録をやめてそのまま外す(もとから鍵は掛かっていなかった)
+                if (self.enroll_req and self.pw_len == 0) {
+                    self.setMsg("顔の登録をやめました");
+                    self.unlocking = true;
+                    self.unlock_s.set(1);
+                    self.scheduleAll();
+                    return;
+                }
                 // 空なら眺める画面へもどる
                 if (self.pw_len == 0) self.setAuth(false);
                 @memset(&self.pw, 0);
@@ -642,7 +696,7 @@ pub const Lock = struct {
     fn setAuth(self: *Lock, on: bool) void {
         self.auth_mode = on;
         // 入力画面を開いた(触った): 顔認証が終わっていれば、もう一度試す
-        if (on and !self.greeter and self.locked and !self.unlocking) faceauth.tryUnlock(self.app);
+        if (on and !self.greeter and !self.enroll_req and self.locked and !self.unlocking) faceauth.tryUnlock(self.app);
         self.auth.set(if (on) 1 else 0);
         if (on) self.last_input_ms = @import("platform/loop.zig").nowMs();
         self.updateSpectrum();

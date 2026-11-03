@@ -80,7 +80,7 @@ const actions = [_]struct { a: Action, icon: []const u8, name: []const u8, desc:
     .{ .a = .wallpaper, .icon = "\u{F0E09}", .name = "壁紙", .desc = "壁紙を選ぶ", .keys = "wallpaper kabegami" },
     .{ .a = .update, .icon = "\u{F06B0}", .name = "アップデート", .desc = "パッケージと ame-shell を更新する(ame-update)", .keys = "update upgrade appudeto koushin" },
     .{ .a = .lock, .icon = "\u{F033E}", .name = "ロック", .desc = "画面をロックする", .keys = "lock rokku" },
-    .{ .a = .face_enroll, .icon = "\u{F0C7B}", .name = "顔を登録", .desc = "顔認証でロックを外せるように、カメラで顔を登録する", .keys = "face kao touroku faceid ninshou" },
+    .{ .a = .face_enroll, .icon = "\u{F0C7B}", .name = "顔を登録", .desc = "パスワードで本人を確かめてから、顔認証用にカメラで顔を登録する", .keys = "face kao touroku faceid ninshou" },
     .{ .a = .logout, .icon = "\u{F0343}", .name = "ログアウト", .desc = "River を終了する", .keys = "logout exit" },
     .{ .a = .sleep, .icon = "\u{F04B2}", .name = "スリープ", .desc = "ロックしてサスペンド", .keys = "sleep suspend" },
     .{ .a = .reboot, .icon = "\u{F0709}", .name = "再起動", .desc = "コンピュータを再起動する", .keys = "reboot restart" },
@@ -597,7 +597,7 @@ pub const Launcher = struct {
                 self.close();
                 switch (a) {
                     .lock => _ = self.app.lock.lock(),
-                    .face_enroll => _ = @import("face/unlock.zig").enroll(self.app),
+                    .face_enroll => _ = self.app.lock.lockForEnroll(), // 先にパスワードで本人を確かめる
                     .logout => self.app.riverCommand(&.{"exit"}),
                     .sleep => {
                         _ = self.app.lock.lock();

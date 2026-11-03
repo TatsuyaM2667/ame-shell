@@ -617,7 +617,7 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
     // ---- 下: 光が流れる案内とホームバー ----
     {
         const e = stagger(appear, 6);
-        const hint = if (a > 0.5) "Esc でもどる" else if (self.greeter) "キーを押すかクリックしてログイン" else "キーを押すかクリックしてロックを解除";
+        const hint = if (self.enroll_req) "顔の登録の前の本人確認 · 空のまま Esc でやめる" else if (a > 0.5) "Esc でもどる" else if (self.greeter) "キーを押すかクリックしてログイン" else "キーを押すかクリックしてロックを解除";
         const hy = H - 46 + (1 - e) * 16;
         shimmer(cv, W / 2, hy, 14, hint, self.time_s, e);
         // 顔認証の様子(face/unlock.zig): 確かめている間は顔のアイコンがゆっくり明滅する
