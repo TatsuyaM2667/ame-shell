@@ -161,6 +161,8 @@ pub const WSeat = struct {
     op_dx: i32 = 0,
     op_dy: i32 = 0,
     op_end_pending: bool = false,
+    /// 今の操作はハンド操作で始めた(River のポインタ操作ではない)
+    hand_op: bool = false,
     /// 大きさを変える辺(xdg の resize_edge: 上 1・下 2・左 4・右 8)。窓の縁をドラッグしたときはアプリが教える
     op_edges: u32 = 0,
     req_edges: u32 = 0,
@@ -200,6 +202,10 @@ pub const Action = union(enum) {
     // 外部から(バー・ame-ctl)
     set_tags_on: struct { out: ?*WOut, mask: u32 },
     focus_window: *Window,
+    // ハンド操作(hand/hand.zig): River のポインタ操作を使わず、手の動いた量で窓を動かす
+    hand_grab,
+    hand_drag: [2]i32,
+    hand_release,
 };
 
 const PtrBind = struct { wm: *Wm, obj: *c.struct_river_pointer_binding_v1, action: Action };
@@ -279,6 +285,17 @@ pub const Wm = struct {
     pub fn push(self: *Wm, a: Action) void {
         self.queue.append(a) catch return;
         self.requestManage();
+    }
+
+    /// ハンド操作(hand/hand.zig): 隣のワークスペース(1〜9)へ。dir = +1 で次、-1 で前。端では止まる
+    pub fn handWorkspace(self: *Wm, dir: i32) bool {
+        const o = self.focusedOutput() orelse return false;
+        const low: u32 = o.tags & 0x1ff;
+        const cur: i32 = if (low == 0) 0 else @ctz(low);
+        const next = std.math.clamp(cur + dir, 0, 8);
+        if (next == cur) return false;
+        self.push(.{ .tags = @as(u32, 1) << @intCast(next) });
+        return true;
     }
 
     /// ほかのモジュール(wobble.zig)から: 次の manage / render を回してもらう
@@ -571,14 +588,16 @@ pub const Wm = struct {
                 } else if (s) |ss| ss.focused = self.firstVisible(next);
                 if (next.ame) |ao| self.app.focused_output = ao;
             },
-            .op_move, .op_resize => if (s) |ss| {
+            .op_move, .op_resize, .hand_grab => if (s) |ss| {
+                if (a == .hand_grab and ss.op != .none) return;
+                const is_move = a != .op_resize;
                 const w = ss.pointer_window orelse return;
                 if (w.fullscreen) return;
                 const was_float = w.floating;
                 if (!w.floating) {
                     w.floating = true;
                     w.float_rect = .{ w.tx, w.ty, w.tw, w.th };
-                    if (a == .op_move and w.tw > 0 and w.th > 0) {
+                    if (is_move and w.tw > 0 and w.th > 0) {
                         // タイルから引きはがした: ひと回り小さくして、つかんだ所がカーソルの下に残るように
                         const nw = @min(w.tw, @max(w.tw * 0.7, 480));
                         const nh = @min(w.th, @max(w.th * 0.7, 320));
@@ -592,7 +611,7 @@ pub const Wm = struct {
                     }
                     self.floatHint();
                 }
-                ss.op = if (a == .op_move) .move else .resize;
+                ss.op = if (is_move) .move else .resize;
                 ss.op_window = w;
                 ss.op_start = w.float_rect;
                 ss.op_dx = 0;
@@ -609,12 +628,21 @@ pub const Wm = struct {
                     ss.op_edges = (if (px < r[0] + r[2] / 2) @as(u32, 4) else 8) | (if (py < r[1] + r[3] / 2) @as(u32, 1) else 2);
                 }
                 ss.focused = w;
-                c.river_seat_v1_op_start_pointer(ss.obj);
+                if (a == .hand_grab) ss.hand_op = true else c.river_seat_v1_op_start_pointer(ss.obj);
                 if (a == .op_resize) c.river_window_v1_inform_resize_start(w.obj);
                 // 浮いた窓をつかんで動かす: 紙・液体のようにたわむ(wobble.zig。窓の絵を撮って網目で描く)
-                if (a == .op_move and was_float) if (w.out) |wo| if (wo.ame) |ao| {
+                if (is_move and was_float) if (w.out) |wo| if (wo.ame) |ao| {
                     wobble.begin(w, w.ident[0..w.ident_len], .{ w.tx, w.ty, w.tw, w.th }, .{ @floatFromInt(ss.ptr_x), @floatFromInt(ss.ptr_y) }, ao, .{ @floatFromInt(wo.x), @floatFromInt(wo.y) }, isGlassy(w.app_id[0..w.app_id_len]));
                 };
+            },
+            .hand_drag => |d| if (s) |ss| {
+                if (ss.hand_op and ss.op != .none) opDelta(ss, d[0], d[1]);
+            },
+            .hand_release => if (s) |ss| {
+                if (ss.hand_op) {
+                    ss.hand_op = false;
+                    if (ss.op != .none) opRelease(ss, false);
+                }
             },
             .set_tags_on => |st| {
                 const oo = st.out orelse o orelse return;
@@ -1473,6 +1501,10 @@ fn sInteract(data: ?*anyopaque, _: ?*c.struct_river_seat_v1, win: ?*c.struct_riv
 fn sShellInteract(_: ?*anyopaque, _: ?*c.struct_river_seat_v1, _: ?*c.struct_river_shell_surface_v1) callconv(.C) void {}
 fn sOpDelta(data: ?*anyopaque, _: ?*c.struct_river_seat_v1, dx: i32, dy: i32) callconv(.C) void {
     const s: *WSeat = @ptrCast(@alignCast(data.?));
+    opDelta(s, dx, dy);
+}
+
+fn opDelta(s: *WSeat, dx: i32, dy: i32) void {
     const w = s.op_window orelse return;
     const fx: f32 = @floatFromInt(dx);
     const fy: f32 = @floatFromInt(dy);
@@ -1508,6 +1540,11 @@ fn sOpDelta(data: ?*anyopaque, _: ?*c.struct_river_seat_v1, dx: i32, dy: i32) ca
 }
 fn sOpRelease(data: ?*anyopaque, _: ?*c.struct_river_seat_v1) callconv(.C) void {
     const s: *WSeat = @ptrCast(@alignCast(data.?));
+    opRelease(s, true);
+}
+
+/// river_op: River のポインタ操作として始めたか(手の操作は false。op_end を送らない)
+fn opRelease(s: *WSeat, river_op: bool) void {
     // 上の端へ持っていって離したときに、ダッシュボードが開かないように
     s.wm.app.edge_quiet_until_ms = loop.nowMs() + 900;
     if (s.op == .resize) if (s.op_window) |w| c.river_window_v1_inform_resize_end(w.obj);
@@ -1529,7 +1566,7 @@ fn sOpRelease(data: ?*anyopaque, _: ?*c.struct_river_seat_v1) callconv(.C) void 
     s.op = .none;
     s.op_window = null;
     // op_end は manage sequence の中で送る必要がある
-    s.op_end_pending = true;
+    if (river_op) s.op_end_pending = true;
     s.wm.requestManage();
 }
 fn sPtrPos(data: ?*anyopaque, _: ?*c.struct_river_seat_v1, x: i32, y: i32) callconv(.C) void {

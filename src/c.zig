@@ -46,6 +46,7 @@ pub usingnamespace @cImport({
     @cInclude("ext-data-control-v1-client-protocol.h");
     @cInclude("viewporter-client-protocol.h");
     @cInclude("single-pixel-buffer-v1-client-protocol.h");
+    @cInclude("wlr-virtual-pointer-unstable-v1-client-protocol.h");
     @cInclude("xkbcommon/xkbcommon.h");
     // GPU
     @cInclude("EGL/egl.h");

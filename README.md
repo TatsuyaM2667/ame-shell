@@ -54,6 +54,11 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
   - 電池の残量が少ないとき、充電器の抜き差し(満充電まであと何分・何時ごろ)、USB 機器・USB メモリ・SD カードの抜き差し(名前・容量・ラベル)も通知
 - **録画**(ユーティリティの録画ボタン): wf-recorder で `~/Videos` に保存。**PC で鳴っている音も一緒に**録る(PipeWire は既定の出力、PulseAudio は `<出力>.monitor`)
 - **スクリーンショット**: grim / slurp / wl-copy を使わず ame-shell が自分で撮る(ext-image-copy-capture、PNG は自前のエンコーダ、クリップボードは ext-data-control)
+- **ハンド操作**(ユーティリティの「ハンド操作」ボタン・`ame-ctl hand toggle`・設定 `hand { enabled on }`。既定はオフ): カメラに映った手の動きでカーソルと窓を操作します
+  - 指さす(人差し指だけ伸ばす)とカーソルが指先に付いて動き、窓のフォーカスも移る / 親指と人差し指で**つまむ**と短くでクリック、つまんだまま動かすとカーソルの下の窓をつかんで動かす /
+    開いた手を**左右に払う**と隣のワークスペース / **握りこぶし**を 0.9 秒保つと窓を閉じる / **開いた手を止めて** 1.3 秒で全画面。操作のたびに水の波紋が広がる
+  - 手の認識は MediaPipe の手のモデル(Apache-2.0、約 8MB。初めてオンにしたときに `~/.local/share/ame-shell/models` へ取ってくる)を、**Zig で書いた推論エンジン**(`src/hand/`)で動かします。C++・Python・OpenCV は使いません
+  - カメラは V4L2 を直接(FreeBSD は webcamd)。オンの間だけ CPU を 1 コアの 10〜20% ほど使い、オフにするとカメラ・スレッド・モデルのメモリを全部返します
 - **ロック画面**(Super+L、ext-session-lock + PAM。iOS / iPadOS のロック画面のような作り、`src/lockui.zig`):
   - 眺める画面: くっきりした壁紙(オーロラ・雨はロック中も動き続ける)の上に日付・特大の時計・電池、
     再生中の曲(右下の小さなカード: 回るレコードと液体のビジュアライザー、進み具合、前・再生・次のボタン。歌詞はダッシュボードと同じ見せ方で上に浮かぶ)、
@@ -302,6 +307,7 @@ ame-ctl accent '#ff88aa'|reset           ame-ctl notify <テキスト>
 ame-ctl workspace <1-9>                  ame-ctl window close|fullscreen|float|focus-next|…(River 0.5)
 ame-ctl screenshot region|full|clip      ame-ctl avatar pick
 ame-ctl media play-pause|next|previous    ame-ctl net wifi|saved|radio|ssid|bt|bt-devices
+ame-ctl hand on|off|toggle|status        (ハンド操作)
 ame-ctl lock | reload | widgets reload | stats | restart | quit
 ```
 

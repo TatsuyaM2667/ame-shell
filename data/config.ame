@@ -69,3 +69,9 @@ lyrics {
   netease on              // NetEase Cloud Music(非公式の公開 API。日本語の曲に強い)
   kugou on                // 酷狗(Kugou。日本語・中国語の曲の同期歌詞が多い)
 }
+
+// ハンド操作: カメラに映った手の動きでカーソルと窓を操作する(ユーティリティのボタン・ame-ctl hand toggle でも切り替え)
+hand {
+  enabled off             // on なら起動したときからオン
+  // camera "/dev/video0" // 使うカメラ(省略すると /dev/video* から自動で選ぶ)
+}

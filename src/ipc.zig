@@ -83,6 +83,7 @@ const help =
     \\  avatar pick           (ユーザーの写真をファイル選択の画面から選ぶ)
     \\  media play-pause|next|previous   (再生中の曲の操作)
     \\  net wifi|saved|radio|ssid|bt|bt-devices   (Wi-Fi・Bluetooth の状態。NetworkManager / BlueZ に D-Bus で聞く)
+    \\  hand on|off|toggle|status   (ハンド操作: カメラで手の動きを見てカーソル・窓を操作する)
     \\  lock
     \\  reload                 (設定の再読込)
     \\  widgets reload
@@ -124,6 +125,10 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
         // 試験用(AME_DEBUG が設定されているときだけ): 「アーティスト|曲名|長さ秒|位置秒」で再生中のふりをする
         if (std.posix.getenv("AME_DEBUG") == null) return "error: AME_DEBUG が必要です";
         app.media.debugFake(rest);
+    } else if (eq(u8, cmd, "debug-hand")) {
+        // 試験用(AME_DEBUG のときだけ): カメラ無しで手の形と位置を与える(<none|point|pinch|open|fist> <x 0〜1> <y 0〜1>)
+        if (std.posix.getenv("AME_DEBUG") == null) return "error: AME_DEBUG が必要です";
+        @import("hand/hand.zig").debugInject(app, rest);
     } else if (eq(u8, cmd, "debug-wobble")) {
         // 試験用(AME_DEBUG のときだけ): 浮いた窓のたわみを、カーソル無しで動かす(start / move dx dy / release)
         if (std.posix.getenv("AME_DEBUG") == null) return "error: AME_DEBUG が必要です";
@@ -250,6 +255,11 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
     } else if (eq(u8, cmd, "screenshot")) {
         const k = @import("shot.zig").Kind.parse(if (arg.len > 0) arg else "region") orelse return "error: screenshot region|full|clip";
         @import("shot.zig").take(app, k, 0);
+    } else if (eq(u8, cmd, "hand")) {
+        // ハンド操作(カメラで手の動きを見て、カーソルと窓を操作する)
+        const hand = @import("hand/hand.zig");
+        if (eq(u8, arg, "on")) hand.enable(app) else if (eq(u8, arg, "off")) hand.disable() else if (eq(u8, arg, "toggle") or arg.len == 0) hand.toggle(app) else if (!eq(u8, arg, "status")) return "error: hand on|off|toggle|status";
+        return if (hand.enabled()) "on" else "off";
     } else if (eq(u8, cmd, "lock")) {
         return app.lock.lock();
     } else if (eq(u8, cmd, "reload")) {

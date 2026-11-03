@@ -124,6 +124,9 @@ pub const App = struct {
     dc_mgr: ?*c.struct_ext_data_control_manager_v1 = null,
     /// 浮いた窓の縁の、大きさを変えるつまみ(wm.zig): 透明な 1 画素を拡大して置く
     viewporter: ?*c.struct_wp_viewporter = null,
+    /// 仮想ポインタ(ハンド操作でカーソルを動かす、hand/hand.zig)
+    vptr_mgr: ?*c.struct_zwlr_virtual_pointer_manager_v1 = null,
+    vptr_mgr_version: u32 = 0,
     spb_mgr: ?*c.struct_wp_single_pixel_buffer_manager_v1 = null,
     /// River 0.5 以降: ame-shell 自身がウィンドウマネージャ(src/wm)
     wm: ?*Wm = null,
@@ -297,6 +300,8 @@ pub const App = struct {
             app.lock.greet();
         }
         app.initialized = true;
+        // ハンド操作(設定で hand { enabled on } のとき。ログイン画面では使わない)
+        if (app.cfg.hand_enabled and !@import("greeter.zig").enabled()) @import("hand/hand.zig").enable(app);
         logRss("after-surfaces");
         return app;
     }
@@ -333,6 +338,8 @@ pub const App = struct {
                 @import("wm/wobble.zig").reap(self);
             }
         }
+        // カメラのスレッドを止めてから終わる
+        @import("hand/hand.zig").disable();
     }
     fn onWaylandFd(ctx: *anyopaque, _: c_int, events: u32) void {
         const self: *App = @ptrCast(@alignCast(ctx));
@@ -808,6 +815,9 @@ fn onGlobal(data: ?*anyopaque, reg: ?*c.struct_wl_registry, name: u32, interface
         app.viewporter = @ptrCast(bind(reg, name, &c.wp_viewporter_interface, ver, 1));
     } else if (iface(interface, &c.wp_single_pixel_buffer_manager_v1_interface)) {
         app.spb_mgr = @ptrCast(bind(reg, name, &c.wp_single_pixel_buffer_manager_v1_interface, ver, 1));
+    } else if (iface(interface, &c.zwlr_virtual_pointer_manager_v1_interface)) {
+        app.vptr_mgr = @ptrCast(bind(reg, name, &c.zwlr_virtual_pointer_manager_v1_interface, ver, 2));
+        app.vptr_mgr_version = @min(ver, 2);
     } else if (iface(interface, &c.ext_data_control_manager_v1_interface)) {
         app.dc_mgr = @ptrCast(bind(reg, name, &c.ext_data_control_manager_v1_interface, ver, 1));
     } else if (iface(interface, &c.wl_seat_interface)) {
@@ -851,6 +861,7 @@ fn onGlobalRemove(data: ?*anyopaque, _: ?*c.struct_wl_registry, name: u32) callc
         @import("shot.zig").outputRemoved(app, o);
         @import("ripple.zig").outputRemoved(app, o);
         @import("wm/wobble.zig").outputRemoved(o);
+        @import("hand/hand.zig").outputRemoved(o);
         if (app.wm) |w| w.outputRemoved(o);
         c.wl_output_release(o.wl);
         _ = app.outputs.orderedRemove(i);

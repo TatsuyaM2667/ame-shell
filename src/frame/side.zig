@@ -106,10 +106,14 @@ fn drawNotifs(f: *Frame, cv: *gfx.Canvas, w: f32) bool {
 // ユーティリティ(右下): トグルと電源プロファイル、録画
 // ---------------------------------------------------------------------------
 
-const UtilBtn = enum(u8) { wifi, bt, dnd, inhibit, record, screenshot, saver, balanced, perf };
+const UtilBtn = enum(u8) { wifi, bt, dnd, inhibit, record, screenshot, hand, saver, balanced, perf };
+const N_UTIL = 10;
+/// 大きいボタン(上の 2 段)の数。残りは電源プロファイル
+const N_BIG = 7;
 
-fn utilButtons(f: *Frame) [9]struct { b: UtilBtn, icon: []const u8, label: []const u8, on: bool } {
+fn utilButtons(f: *Frame) [N_UTIL]struct { b: UtilBtn, icon: []const u8, label: []const u8, on: bool } {
     const d = f.app.dashboard;
+    const hand_on = @import("../hand/hand.zig").enabled();
     return .{
         .{ .b = .wifi, .icon = "\u{F05A9}", .label = "Wi-Fi", .on = d.store.wifi_on != 0 },
         .{ .b = .bt, .icon = "\u{F00AF}", .label = "Bluetooth", .on = d.store.bt_on != 0 },
@@ -117,6 +121,7 @@ fn utilButtons(f: *Frame) [9]struct { b: UtilBtn, icon: []const u8, label: []con
         .{ .b = .inhibit, .icon = "\u{F0176}", .label = "スリープ防止", .on = f.sidev.inhibit },
         .{ .b = .record, .icon = if (f.sidev.recording) "\u{F04DB}" else "\u{F044A}", .label = if (f.sidev.recording) "録画停止" else "録画", .on = f.sidev.recording },
         .{ .b = .screenshot, .icon = "\u{F0100}", .label = "スクショ", .on = false },
+        .{ .b = .hand, .icon = "\u{F0A79}", .label = if (hand_on) "ハンド操作 オン" else "ハンド操作(カメラ)", .on = hand_on },
         .{ .b = .saver, .icon = "\u{F032A}", .label = "省電力", .on = f.sidev.profile == .saver },
         .{ .b = .balanced, .icon = "\u{F05D1}", .label = "バランス", .on = f.sidev.profile == .balanced },
         .{ .b = .perf, .icon = "\u{F0463}", .label = "高性能", .on = f.sidev.profile == .performance },
@@ -125,14 +130,16 @@ fn utilButtons(f: *Frame) [9]struct { b: UtilBtn, icon: []const u8, label: []con
 
 fn utilRect(i: usize, w: f32) [4]f32 {
     const pad: f32 = 14;
-    if (i < 6) {
-        const bw = (w - pad * 2 - 2 * 8) / 3;
-        const col: f32 = @floatFromInt(i % 3);
-        const row: f32 = @floatFromInt(i / 3);
-        return .{ pad + col * (bw + 8), 44 + row * 58, bw, 50 };
+    if (i < N_BIG) {
+        // 4 列 × 2 段。7 つ目(ハンド操作)は 2 列分の幅
+        const bw = (w - pad * 2 - 3 * 8) / 4;
+        const col: f32 = @floatFromInt(i % 4);
+        const row: f32 = @floatFromInt(i / 4);
+        const span: f32 = if (i == N_BIG - 1) 2 else 1;
+        return .{ pad + col * (bw + 8), 44 + row * 58, bw * span + 8 * (span - 1), 50 };
     }
     const bw = (w - pad * 2 - 2 * 8) / 3;
-    const col: f32 = @floatFromInt(i - 6);
+    const col: f32 = @floatFromInt(i - N_BIG);
     return .{ pad + col * (bw + 8), 44 + 2 * 58 + 6, bw, 34 };
 }
 
@@ -162,7 +169,7 @@ fn drawUtil(f: *Frame, cv: *gfx.Canvas, w: f32) bool {
         if (b.on) cv.shadow(r[0], r[1] + 2, r[2], r[3], 14, 8, acc.alpha(0.4));
         cv.rectGrad(r[0], r[1], r[2], r[3], 14, top, bot);
         const fg = if (b.on) Color.hex(0x08101e) else txt;
-        if (i < 6) {
+        if (i < N_BIG) {
             _ = cv.text(r[0] + r[2] / 2, r[1] + 22, 17, fg, b.icon, .{ .alignment = .center });
             _ = cv.text(r[0] + r[2] / 2, r[1] + 41, 10.5, fg, b.label, .{ .alignment = .center, .max_w = r[2] - 8 });
         } else {
@@ -208,6 +215,7 @@ fn utilPress(f: *Frame, i: usize) void {
             // パネルが閉じ終わってから範囲を選ぶ(保存してコピー。足りないコマンドは通知で知らせる)
             @import("../shot.zig").take(app, .region, 400);
         },
+        .hand => @import("../hand/hand.zig").toggle(app),
         .saver => data.setPowerProfile(.saver),
         .balanced => data.setPowerProfile(.balanced),
         .perf => data.setPowerProfile(.performance),
@@ -384,7 +392,7 @@ pub fn pointer(f: *Frame, which: Which, ev: surface.PointerEvent, lx: f32, ly: f
             }
         },
         .utilities => {
-            for (0..9) |i| {
+            for (0..N_UTIL) |i| {
                 const r = utilRect(i, f.util.w.x);
                 if (lx >= r[0] and lx < r[0] + r[2] and ly >= r[1] and ly < r[1] + r[3]) hov = @intCast(i);
             }

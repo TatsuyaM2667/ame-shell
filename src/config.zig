@@ -42,6 +42,9 @@ pub const Config = struct {
     super_launcher: bool = true,
     /// タッチパッドのタップでクリック(River 0.5 のセッション)
     tap_to_click: bool = true,
+    /// ハンド操作(hand/hand.zig): 起動時にオンにするか・使うカメラ(空 = /dev/video* から自動)
+    hand_enabled: bool = false,
+    hand_camera: Str = .{},
     /// 天気の場所(空 = IP アドレスから推定)。例: "Sapporo"、"Osaka"
     weather_location: Str = .{},
     // bar
@@ -285,6 +288,12 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             cfg.super_launcher = boolean(val) orelse true;
         } else if (eq(u8, key, "frame-opacity")) {
             if (num(val)) |n| cfg.frame_opacity = std.math.clamp(n, 0, 1) else ok = false;
+        } else ok = false;
+    } else if (eq(u8, sec, "hand")) {
+        if (eq(u8, key, "enabled")) {
+            cfg.hand_enabled = boolean(val) orelse false;
+        } else if (eq(u8, key, "camera")) {
+            cfg.hand_camera.set(val);
         } else ok = false;
     } else if (eq(u8, sec, "bar")) {
         if (eq(u8, key, "height")) {
