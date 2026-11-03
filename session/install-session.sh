@@ -388,6 +388,14 @@ if [ "$USER_MODE" = 0 ] && [ -f "$OUT/lib/libpam_ame_face.so" ]; then
     fi
 fi
 
+# FreeBSD: ログイン画面がすでに ame-greeter なら、greeter-setup をやり直して顔認証の PAM サービス(ame-greetd)を
+# 使わせる(Linux は下の「インストール後の設定」の 4 で同じことをする。FreeBSD ではその設定を行わないため)
+if [ "$USER_MODE" = 0 ] && [ "$OS" = FreeBSD ] && [ -z "$DESTDIR" ] && [ "$DRY" = 0 ] &&
+    [ -f "$ROOT/scripts/greeter-setup.sh" ] && grep -q "ame-greeter" /usr/local/etc/greetd/config.toml 2>/dev/null; then
+    sh "$ROOT/scripts/greeter-setup.sh" --user "$U" --prefix "$PREFIX" --manifest "$TMP_MANIFEST" >/dev/null &&
+        say "  ログイン画面(greetd)の設定を更新しました(顔認証)"
+fi
+
 # FreeBSD のロック画面: pam_unix は root でないと照合できないので、照合の補助 ame-auth を root の setuid で入れる
 # (照合するのは呼び出した人のパスワードだけ。swaylock が setuid で入るのと同じ考え。src/auth_helper.zig)
 if [ "$USER_MODE" = 0 ] && [ "$OS" = FreeBSD ]; then
