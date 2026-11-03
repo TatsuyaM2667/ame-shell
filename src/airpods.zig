@@ -25,8 +25,8 @@ const log = std.log.scoped(.airpods);
 pub const supported = builtin.os.tag == .linux;
 
 // ---- AAP のパケット(LibrePods より)----
-const HANDSHAKE = [_]u8{ 0x00, 0x00, 0x04, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-const REQUEST_NOTIFICATIONS = [_]u8{ 0x04, 0x00, 0x04, 0x00, 0x0F, 0x00, 0xFF, 0xFF, 0xFF, 0xFF };
+pub const HANDSHAKE = [_]u8{ 0x00, 0x00, 0x04, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+pub const REQUEST_NOTIFICATIONS = [_]u8{ 0x04, 0x00, 0x04, 0x00, 0x0F, 0x00, 0xFF, 0xFF, 0xFF, 0xFF };
 const HEAD_TRACKING_START = [_]u8{
     0x04, 0x00, 0x04, 0x00, 0x17, 0x00, 0x00, 0x00, 0x10, 0x00, 0x10, 0x00, 0x08, 0xA1, 0x02, 0x42,
     0x0B, 0x08, 0x0E, 0x10, 0x02, 0x1A, 0x05, 0x01, 0x40, 0x9C, 0x00, 0x00,
@@ -151,7 +151,7 @@ fn onMsg(ctx: *anyopaque, fd: c_int, _: u32) void {
                     },
                     .no_device => app.osd.info("AirPods が接続されていません(つなぐと自動で始めます)"),
                     .failed => app.osd.info("AirPods に接続できませんでした(しばらくしてもう一度試します)"),
-                    .rejected => app.notifs.post("AirPods 操作", "AirPods が頭の向きを送ってくれません", "AirPods は、つないでいる機器が Apple のものでないと頭の向きを送らないようです。/etc/bluetooth/main.conf の [General] に DeviceID = bluetooth:004C:0000:0000 を書いて Bluetooth を再起動し、AirPods をつなぎ直してください", 0),
+                    .rejected => app.notifs.post("AirPods 操作", "AirPods が頭の向きを送ってくれません", "頭の向きを頼むと、AirPods が「使えない」と返しました。/etc/bluetooth/main.conf の [General] に DeviceID = bluetooth:004C:0000:0000 を書いて Bluetooth を再起動し、AirPods をいったん削除してペアリングし直すと送るようになることがあります", 0),
                     else => {},
                 }
                 app.redrawBars();
@@ -222,7 +222,7 @@ fn worker() void {
             if (sleepQuit(5000)) break;
             continue;
         }
-        const fd = connectL2cap(&addr) orelse {
+        const fd = connectL2cap(&addr, &st.quit) orelse {
             Report(&last, .failed);
             if (sleepQuit(5000)) break;
             continue;
@@ -232,6 +232,22 @@ fn worker() void {
         // 断られた(Apple の機器でないため): 設定を直してつなぎ直すまで、ゆっくり試し直す
         if (sleepQuit(if (r == .rejected) 30_000 else 2000)) break;
     }
+}
+
+/// 接続中の AirPods のアドレスと名前(ame-ctl airpods popup)
+pub fn connectedAirPods(addr: *[17]u8, name_buf: []u8) ?[]const u8 {
+    var out: [2048]u8 = undefined;
+    const s = @import("platform/netdbus.zig").run(&.{ "bluetoothctl", "devices", "AirPods" }, &out) orelse return null;
+    var it = std.mem.splitScalar(u8, s, '\n');
+    while (it.next()) |line| {
+        if (!std.mem.startsWith(u8, line, "Device ") or line.len < 7 + 17) continue;
+        @memcpy(addr, line[7..24]);
+        const name = std.mem.trim(u8, line[24..], " ");
+        const n = @min(name.len, name_buf.len);
+        @memcpy(name_buf[0..n], name[0..n]);
+        return name_buf[0..n];
+    }
+    return null;
 }
 
 /// 接続中の AirPods のアドレスと名前(BlueZ を D-Bus で読む。netdbus.zig)
@@ -258,7 +274,8 @@ const SockaddrL2 = extern struct {
     bdaddr_type: u8,
 };
 
-fn connectL2cap(addr: *const [17]u8) ?c_int {
+/// AirPods の AAP(L2CAP PSM 0x1001)につなぐ。quit が立ったらやめる(ポップアップの電池の読み取りでも使う)
+pub fn connectL2cap(addr: *const [17]u8, quit: *const std.atomic.Value(bool)) ?c_int {
     const AF_BLUETOOTH = 31;
     const BTPROTO_L2CAP = 0;
     const fd = c.socket(AF_BLUETOOTH, c.SOCK_SEQPACKET | c.SOCK_CLOEXEC | c.SOCK_NONBLOCK, BTPROTO_L2CAP);
@@ -283,7 +300,7 @@ fn connectL2cap(addr: *const [17]u8) ?c_int {
     // つながるまで最長 8 秒(quit を見ながら)
     var waited: u32 = 0;
     while (waited < 8000) : (waited += 200) {
-        if (st.quit.load(.acquire)) break;
+        if (quit.load(.acquire)) break;
         var pfd = [_]std.posix.pollfd{.{ .fd = fd, .events = std.posix.POLL.OUT, .revents = 0 }};
         const n = std.posix.poll(&pfd, 200) catch break;
         if (n == 0) continue;
@@ -297,7 +314,7 @@ fn connectL2cap(addr: *const [17]u8) ?c_int {
     return null;
 }
 
-fn sendPkt(fd: c_int, p: []const u8) bool {
+pub fn sendPkt(fd: c_int, p: []const u8) bool {
     return c.send(fd, p.ptr, p.len, c.MSG_NOSIGNAL) == @as(isize, @intCast(p.len));
 }
 
@@ -548,4 +565,49 @@ test "最初の 10 個で正面を決める" {
     const a = cb.angles(.{ 0, 1000 + 3200, 1000 + 3200 }).?;
     try std.testing.expectApproxEqAbs(@as(f32, 18), a[0], 0.01); // 上下だけ
     try std.testing.expectApproxEqAbs(@as(f32, 0), a[1], 0.01);
+}
+
+// ---- 電池(AAP のパケット 04 00 04 00 04 00 [数] ([部品] 01 [残り%] [状態] 01) × 数)----
+
+pub const Battery = struct {
+    /// 残り %(null = 分からない・つながっていない)
+    level: ?u8 = null,
+    charging: bool = false,
+};
+
+/// 左・右・ケースの順
+pub const Batteries = [3]Battery;
+
+pub fn parseBattery(p: []const u8, out: *Batteries) bool {
+    if (p.len < 7) return false;
+    const prefix = [_]u8{ 0x04, 0x00, 0x04, 0x00, 0x04, 0x00 };
+    if (!std.mem.eql(u8, p[0..6], &prefix)) return false;
+    const n: usize = p[6];
+    if (n == 0 or n > 3 or p.len < 7 + n * 5) return false;
+    out.* = .{ .{}, .{}, .{} };
+    for (0..n) |i| {
+        const e = p[7 + i * 5 ..][0..5];
+        if (e[1] != 0x01) return false;
+        const idx: usize = switch (e[0]) {
+            0x04 => 0, // 左
+            0x02 => 1, // 右
+            0x08 => 2, // ケース
+            else => continue,
+        };
+        // 状態: 01 充電中 / 02 使用中 / 04 つながっていない / 05 最適化充電
+        if (e[3] == 0x04) continue;
+        out[idx] = .{ .level = @min(e[2], 100), .charging = e[3] == 0x01 or e[3] == 0x05 };
+    }
+    return true;
+}
+
+test "電池のパケットを読む" {
+    // AirPods Pro 2 が返した実際のもの: 左 60% 使用中・右 47% 使用中・ケースはつながっていない
+    const p = [_]u8{ 0x04, 0x00, 0x04, 0x00, 0x04, 0x00, 0x03, 0x04, 0x01, 0x3c, 0x02, 0x01, 0x02, 0x01, 0x2f, 0x02, 0x01, 0x08, 0x01, 0x00, 0x04, 0x01 };
+    var b: Batteries = undefined;
+    try std.testing.expect(parseBattery(&p, &b));
+    try std.testing.expectEqual(@as(u8, 60), b[0].level.?);
+    try std.testing.expectEqual(@as(u8, 47), b[1].level.?);
+    try std.testing.expect(b[2].level == null);
+    try std.testing.expect(!b[0].charging);
 }

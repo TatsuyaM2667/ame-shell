@@ -19,6 +19,7 @@ const Lock = @import("lock.zig").Lock;
 const MusicWidget = @import("musicwidget.zig").MusicWidget;
 const ChargeAnim = @import("chargeanim.zig").ChargeAnim;
 const NowPlaying = @import("nowplaying.zig").NowPlaying;
+const AirPodsPopup = @import("airpodspopup.zig").Popup;
 const Media = @import("media.zig").Media;
 const Notifs = @import("notify.zig").Notifs;
 const Osd = @import("osd.zig").Osd;
@@ -204,6 +205,8 @@ pub const App = struct {
     charge: ?*ChargeAnim = null,
     /// ホーム画面の「再生中」を広げたもの(曲のウィジェットのジャケットを押したとき)
     nowplaying: ?*NowPlaying = null,
+    /// AirPods をつないだときのカード
+    airpods_popup: ?*AirPodsPopup = null,
     media: *Media = undefined,
     syswatch: *SysWatch = undefined,
     wallpick: *WallPick = undefined,
@@ -291,6 +294,7 @@ pub const App = struct {
         app.musicw = MusicWidget.create(app) catch null;
         app.charge = ChargeAnim.create(app) catch null;
         app.nowplaying = NowPlaying.create(app) catch null;
+        app.airpods_popup = AirPodsPopup.create(app) catch null;
         app.wallpick = try WallPick.create(app);
         app.avatar = try Avatar.create(app);
         app.syswatch = try SysWatch.create(app);
@@ -348,6 +352,7 @@ pub const App = struct {
                 if (self.musicw) |m| m.reap();
                 if (self.charge) |ch| ch.reap();
                 if (self.nowplaying) |np| np.reap();
+                if (self.airpods_popup) |pp| pp.reap();
                 self.wallpick.reap();
                 @import("shot.zig").reap(self);
                 @import("ripple.zig").reap(self);
@@ -879,6 +884,7 @@ fn onGlobalRemove(data: ?*anyopaque, _: ?*c.struct_wl_registry, name: u32) callc
         if (app.musicw) |m| m.outputRemoved(o);
         if (app.charge) |ch| ch.outputRemoved(o);
         if (app.nowplaying) |np| np.outputRemoved(o);
+        if (app.airpods_popup) |pp| pp.outputRemoved(o);
         @import("shot.zig").outputRemoved(app, o);
         @import("ripple.zig").outputRemoved(app, o);
         @import("wm/wobble.zig").outputRemoved(o);

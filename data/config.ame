@@ -87,6 +87,7 @@ airpods {
   pitch-angle 18          // 上下に向いたとみなす角度(度)
   invert-yaw off          // 左右が逆に動くときは on
   invert-pitch off        // 上下が逆に動くときは on
+  popup on                // AirPods をつないだとき、iPhone のようなカード(左右・ケースの電池)を出す
 }
 
 // 顔認証: 登録した顔がカメラに写ったらロックを外す(パスワードもそのまま使える。赤外線カメラを優先)

@@ -145,7 +145,8 @@ pub const SysWatch = struct {
             const path = std.mem.sliceTo(c.dbus_message_get_path(msg) orelse continue, 0);
             if (std.mem.startsWith(u8, path, "/org/bluez")) {
                 self.mark(.bt);
-                if (self.app.cfg.notify_usb and std.mem.indexOf(u8, path, "/dev_") != null and
+                // つながった・切れた: AirPods ならカード(airpodspopup.zig)、ほかは通知(notify_usb のとき)
+                if (std.mem.indexOf(u8, path, "/dev_") != null and
                     c.dbus_message_is_signal(msg, "org.freedesktop.DBus.Properties", "PropertiesChanged") != 0)
                     self.btConnectedSignal(msg, path);
             } else if (std.mem.startsWith(u8, path, "/org/freedesktop/NetworkManager")) {
@@ -189,6 +190,21 @@ pub const SysWatch = struct {
         var nb: [96]u8 = undefined;
         var ib: [48]u8 = undefined;
         const name = self.bluezProp(path, "Alias", &nb) orelse "Bluetooth の機器";
+        // AirPods(Apple の機器 ID v004C のヘッドホン)をつないだ: iPhone のようなカードで知らせる
+        if (on and self.app.cfg.airpods_popup) {
+            var mb: [64]u8 = undefined;
+            var ab: [24]u8 = undefined;
+            var ib2: [48]u8 = undefined;
+            const modalias = self.bluezProp(path, "Modalias", &mb) orelse "";
+            const icon2 = self.bluezProp(path, "Icon", &ib2) orelse "";
+            if (std.mem.indexOf(u8, modalias, "v004C") != null and std.mem.startsWith(u8, icon2, "audio")) {
+                if (self.bluezProp(path, "Address", &ab)) |addr| if (self.app.airpods_popup) |pp| {
+                    pp.show(addr, name);
+                    return;
+                };
+            }
+        }
+        if (!self.app.cfg.notify_usb) return;
         const icon = self.bluezProp(path, "Icon", &ib) orelse "";
         const kind: []const u8 = if (std.mem.startsWith(u8, icon, "audio-head")) "ヘッドホン" else if (std.mem.startsWith(u8, icon, "audio")) "オーディオ機器" else if (std.mem.eql(u8, icon, "input-mouse")) "マウス" else if (std.mem.eql(u8, icon, "input-keyboard")) "キーボード" else if (std.mem.startsWith(u8, icon, "input-gaming")) "ゲームパッド" else if (std.mem.startsWith(u8, icon, "phone")) "スマートフォン" else "Bluetooth の機器";
         var sb: [96]u8 = undefined;

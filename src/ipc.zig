@@ -271,7 +271,16 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
     } else if (eq(u8, cmd, "airpods")) {
         // AirPods の頭の動きで操作する(左右に振る: ワークスペース / 上: ランチャー / 下: ダッシュボード)
         const ap = @import("airpods.zig");
-        if (eq(u8, arg, "on")) ap.enable(app) else if (eq(u8, arg, "off")) ap.disable() else if (eq(u8, arg, "toggle")) ap.toggle(app) else if (!eq(u8, arg, "status") and arg.len != 0) return "error: airpods on|off|toggle|status";
+        // airpods popup: 接続中の AirPods のカードを出す(つないだときに出るものと同じ)
+        if (eq(u8, arg, "popup")) {
+            var addr: [17]u8 = undefined;
+            var nb: [64]u8 = undefined;
+            const name = ap.connectedAirPods(&addr, &nb) orelse return "error: AirPods が接続されていません";
+            const pp = app.airpods_popup orelse return "error: unavailable";
+            pp.show(&addr, name);
+            return "ok";
+        }
+        if (eq(u8, arg, "on")) ap.enable(app) else if (eq(u8, arg, "off")) ap.disable() else if (eq(u8, arg, "toggle")) ap.toggle(app) else if (!eq(u8, arg, "status") and arg.len != 0) return "error: airpods on|off|toggle|status|popup";
         return ap.status(out);
     } else if (eq(u8, cmd, "face")) {
         // 顔認証(ロック画面で顔を見てロックを外す)の登録・削除・状態
