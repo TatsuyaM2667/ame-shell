@@ -106,14 +106,15 @@ fn drawNotifs(f: *Frame, cv: *gfx.Canvas, w: f32) bool {
 // ユーティリティ(右下): トグルと電源プロファイル、録画
 // ---------------------------------------------------------------------------
 
-const UtilBtn = enum(u8) { wifi, bt, dnd, inhibit, record, screenshot, hand, saver, balanced, perf };
-const N_UTIL = 10;
-/// 大きいボタン(上の 2 段)の数。残りは電源プロファイル
-const N_BIG = 7;
+const UtilBtn = enum(u8) { wifi, bt, dnd, inhibit, record, screenshot, hand, airpods, saver, balanced, perf };
+const N_UTIL = 11;
+/// 大きいボタン(上の 2 段 × 4 列)の数。残りは電源プロファイル
+const N_BIG = 8;
 
 fn utilButtons(f: *Frame) [N_UTIL]struct { b: UtilBtn, icon: []const u8, label: []const u8, on: bool } {
     const d = f.app.dashboard;
     const hand_on = @import("../hand/hand.zig").enabled();
+    const ap_on = @import("../airpods.zig").enabled();
     return .{
         .{ .b = .wifi, .icon = "\u{F05A9}", .label = "Wi-Fi", .on = d.store.wifi_on != 0 },
         .{ .b = .bt, .icon = "\u{F00AF}", .label = "Bluetooth", .on = d.store.bt_on != 0 },
@@ -121,7 +122,10 @@ fn utilButtons(f: *Frame) [N_UTIL]struct { b: UtilBtn, icon: []const u8, label: 
         .{ .b = .inhibit, .icon = "\u{F0176}", .label = "スリープ防止", .on = f.sidev.inhibit },
         .{ .b = .record, .icon = if (f.sidev.recording) "\u{F04DB}" else "\u{F044A}", .label = if (f.sidev.recording) "録画停止" else "録画", .on = f.sidev.recording },
         .{ .b = .screenshot, .icon = "\u{F0100}", .label = "スクショ", .on = false },
-        .{ .b = .hand, .icon = "\u{F0A79}", .label = if (hand_on) "ハンド操作 オン" else "ハンド操作(カメラ)", .on = hand_on },
+        // 手を振る形(F0A79 はゴミ箱だった)
+        .{ .b = .hand, .icon = "\u{F1821}", .label = "ハンド操作", .on = hand_on },
+        // 左右のイヤホンの形。AirPods の頭の動きで操作する(airpods.zig)
+        .{ .b = .airpods, .icon = "\u{F184F}", .label = "AirPods 操作", .on = ap_on },
         .{ .b = .saver, .icon = "\u{F032A}", .label = "省電力", .on = f.sidev.profile == .saver },
         .{ .b = .balanced, .icon = "\u{F05D1}", .label = "バランス", .on = f.sidev.profile == .balanced },
         .{ .b = .perf, .icon = "\u{F0463}", .label = "高性能", .on = f.sidev.profile == .performance },
@@ -131,12 +135,11 @@ fn utilButtons(f: *Frame) [N_UTIL]struct { b: UtilBtn, icon: []const u8, label: 
 fn utilRect(i: usize, w: f32) [4]f32 {
     const pad: f32 = 14;
     if (i < N_BIG) {
-        // 4 列 × 2 段。7 つ目(ハンド操作)は 2 列分の幅
+        // 4 列 × 2 段
         const bw = (w - pad * 2 - 3 * 8) / 4;
         const col: f32 = @floatFromInt(i % 4);
         const row: f32 = @floatFromInt(i / 4);
-        const span: f32 = if (i == N_BIG - 1) 2 else 1;
-        return .{ pad + col * (bw + 8), 44 + row * 58, bw * span + 8 * (span - 1), 50 };
+        return .{ pad + col * (bw + 8), 44 + row * 58, bw, 50 };
     }
     const bw = (w - pad * 2 - 2 * 8) / 3;
     const col: f32 = @floatFromInt(i - N_BIG);
@@ -216,6 +219,7 @@ fn utilPress(f: *Frame, i: usize) void {
             @import("../shot.zig").take(app, .region, 400);
         },
         .hand => @import("../hand/hand.zig").toggle(app),
+        .airpods => @import("../airpods.zig").toggle(app),
         .saver => data.setPowerProfile(.saver),
         .balanced => data.setPowerProfile(.balanced),
         .perf => data.setPowerProfile(.performance),
