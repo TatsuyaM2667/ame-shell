@@ -38,7 +38,12 @@ pub const Net = struct {
     prof: ?*[128]u64 = null,
 
     pub fn init(a: std.mem.Allocator, bytes: []const u8, threads: usize) Error!Net {
-        var m = try tfl.load(a, bytes);
+        return initModel(a, try tfl.load(a, bytes), threads);
+    }
+
+    /// 読み込み済みのモデルから(顔の見分けの ONNX は face/onnx.zig がこの形に直す)。m は Net が持つ
+    pub fn initModel(a: std.mem.Allocator, m_in: tfl.Model, threads: usize) Error!Net {
+        var m = m_in;
         errdefer m.deinit(a);
         const n = m.tensors.len;
         const vals = try a.alloc([]f32, n);
