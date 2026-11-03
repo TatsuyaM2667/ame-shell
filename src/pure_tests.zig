@@ -7,13 +7,6 @@ test {
     _ = @import("greeter.zig");
     _ = @import("png.zig");
     _ = @import("lyrics.zig");
-    _ = @import("hand/zip.zig");
-    _ = @import("hand/tflite.zig");
-    _ = @import("hand/track.zig");
-    _ = @import("hand/gesture.zig");
-    _ = @import("face/face.zig");
-    _ = @import("face/onnx.zig");
-    _ = @import("face/core.zig");
 }
 
 test "spring converges and is velocity-continuous" {

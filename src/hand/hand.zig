@@ -31,11 +31,13 @@ const Spring = anim.Spring;
 const theme = @import("../theme.zig");
 const loop = @import("../platform/loop.zig");
 const sys = @import("../platform/sys.zig");
-const v4l2 = @import("../platform/v4l2.zig");
-const track = @import("track.zig");
-const nn = @import("nn.zig");
-const zip = @import("zip.zig");
-const gesture = @import("gesture.zig");
+// 手の認識そのもの(推論エンジン・追跡・ジェスチャー・カメラ)は別のリポジトリ ame-hand
+const handlib = @import("ame-hand");
+const v4l2 = handlib.v4l2;
+const track = handlib.track;
+const nn = handlib.nn;
+const zip = handlib.zip;
+const gesture = handlib.gesture;
 
 const log = std.log.scoped(.hand);
 

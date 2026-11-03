@@ -1,23 +1,24 @@
 // 顔認証: ロック画面で、登録した顔がカメラに写ったらロックを外す。登録もここ(ame-ctl face enroll / ランチャー)。
 //
 //   ロック画面を触った時(パスワードの入力画面を開いた時)だけ … 別スレッドでカメラを開き、0.15 秒おきに顔を探して
-//       特徴を比べる(最長 6 秒)。照合の決まりは face/core.zig(赤外線のみ・近い 2 つの平均 ≥ threshold・3 コマ続けて)。
+//       特徴を比べる(最長 6 秒)。照合の決まりは ame-face の core.zig(赤外線のみ・近い 2 つの平均 ≥ threshold・3 コマ続けて)。
 //       パスワードはいつでも使える(顔認証はその横で動くだけ)。続けて 3 回一致しなければ、パスワードで外すまで使わない(lock.zig)
 //   登録 … パスワードで本人を確かめた後(lock.zig の lockForEnroll)、7 秒ほどカメラを見てもらい、
 //       向きの違う顔の特徴を最大 12 個 $XDG_DATA_HOME/ame-shell/face.bin(0600)に
 //
-// ログイン画面(greetd)では、同じ照合を PAM モジュール(src/pam_face.zig)が行う。
+// ログイン画面(greetd)では、同じ照合を PAM モジュール(ame-face の pam_face.zig)が行う。
 //
 // モデル(初めて登録するときに取ってきて $XDG_DATA_HOME/ame-shell/models に置く。SHA-256 を確かめる):
 //   顔の検出 … MediaPipe の BlazeFace short range(Apache-2.0)
-//   顔の特徴 … OpenCV Zoo の SFace(Apache-2.0、ONNX。face/onnx.zig で自作のエンジンの形に直す)
+//   顔の特徴 … OpenCV Zoo の SFace(Apache-2.0、ONNX。ame-face の onnx.zig で自作のエンジンの形に直す)
 const std = @import("std");
 const c = @import("../c.zig");
 const App = @import("../app.zig").App;
 const loop = @import("../platform/loop.zig");
 const sys = @import("../platform/sys.zig");
-const core = @import("core.zig");
-const face = @import("face.zig");
+// 顔の検出・特徴・照合の決まりは別のリポジトリ ame-face
+const core = @import("ame-face").core;
+const face = @import("ame-face").face;
 
 const log = std.log.scoped(.face);
 
