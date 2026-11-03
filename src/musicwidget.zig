@@ -367,6 +367,14 @@ pub const MusicWidget = struct {
             }
             return;
         }
+        // ジャケットを押す: 「再生中」を画面いっぱいに広げる(ロック画面と同じ。nowplaying.zig)
+        if (ev.kind == .press and ev.button == 0x110 and musiccard.inRectPad(self.card.hits.art, ev.x, ev.y, 0)) {
+            if (self.app.nowplaying) |np| if (self.out) |o| {
+                const a = self.card.hits.art;
+                np.open(o, .{ s.origin[0] + a[0], s.origin[1] + a[1], a[2], a[3] });
+                return;
+            };
+        }
         if (self.card.pointer(self.app, ev)) {
             s.schedule();
             return;

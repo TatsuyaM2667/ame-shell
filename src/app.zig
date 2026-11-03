@@ -18,6 +18,7 @@ const Launcher = @import("launcher.zig").Launcher;
 const Lock = @import("lock.zig").Lock;
 const MusicWidget = @import("musicwidget.zig").MusicWidget;
 const ChargeAnim = @import("chargeanim.zig").ChargeAnim;
+const NowPlaying = @import("nowplaying.zig").NowPlaying;
 const Media = @import("media.zig").Media;
 const Notifs = @import("notify.zig").Notifs;
 const Osd = @import("osd.zig").Osd;
@@ -201,6 +202,8 @@ pub const App = struct {
     musicw: ?*MusicWidget = null,
     /// 充電器をつないだときの全画面のアニメーション
     charge: ?*ChargeAnim = null,
+    /// ホーム画面の「再生中」を広げたもの(曲のウィジェットのジャケットを押したとき)
+    nowplaying: ?*NowPlaying = null,
     media: *Media = undefined,
     syswatch: *SysWatch = undefined,
     wallpick: *WallPick = undefined,
@@ -287,6 +290,7 @@ pub const App = struct {
         app.media = try Media.create(app);
         app.musicw = MusicWidget.create(app) catch null;
         app.charge = ChargeAnim.create(app) catch null;
+        app.nowplaying = NowPlaying.create(app) catch null;
         app.wallpick = try WallPick.create(app);
         app.avatar = try Avatar.create(app);
         app.syswatch = try SysWatch.create(app);
@@ -343,6 +347,7 @@ pub const App = struct {
                 self.lock.reap();
                 if (self.musicw) |m| m.reap();
                 if (self.charge) |ch| ch.reap();
+                if (self.nowplaying) |np| np.reap();
                 self.wallpick.reap();
                 @import("shot.zig").reap(self);
                 @import("ripple.zig").reap(self);
@@ -873,6 +878,7 @@ fn onGlobalRemove(data: ?*anyopaque, _: ?*c.struct_wl_registry, name: u32) callc
         app.lock.outputRemoved(o);
         if (app.musicw) |m| m.outputRemoved(o);
         if (app.charge) |ch| ch.outputRemoved(o);
+        if (app.nowplaying) |np| np.outputRemoved(o);
         @import("shot.zig").outputRemoved(app, o);
         @import("ripple.zig").outputRemoved(app, o);
         @import("wm/wobble.zig").outputRemoved(o);

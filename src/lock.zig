@@ -283,6 +283,7 @@ pub const Lock = struct {
             self.views[i] = .{ .lock = self, .out = o, .surf = s };
         }
         if (self.app.musicw) |m| m.update(); // ホーム画面の曲のウィジェットの音を止める
+        if (self.app.nowplaying) |np| np.update(); // ホーム画面で広げていたら閉じる
         // ランチャー等は閉じておく(ロック解除後に開いたままにならないように)
         self.app.launcher.close();
         self.app.dashboard.close();
