@@ -1065,8 +1065,6 @@ fn loadModel(a: std.mem.Allocator) ?[]u8 {
     return null;
 }
 
-
-
 /// 試験用(ame-ctl debug-hand): カメラ無しで 1 コマ分の手を与える。
 /// "<形> [本数] <x> <y> [大きさ]"(x, y は画面の 0〜1。number のときだけ本数。大きさは手の大きさ ÷ 画像の幅、既定 0.2)
 pub fn debugInject(app: *App, args: []const u8) void {
@@ -1124,8 +1122,8 @@ fn curWorkspace(app: *App) u32 {
     return if (low == 0) 0 else @ctz(low);
 }
 
-/// 払う動きで隣のワークスペースへ。移った先(1 始まり)、端なら null
-fn stepWorkspace(app: *App, dir: i32) ?u8 {
+/// 払う動きで隣のワークスペースへ。移った先(1 始まり)、端なら null(AirPods の頭の動きでも使う)
+pub fn stepWorkspace(app: *App, dir: i32) ?u8 {
     if (app.wm) |w| return w.handWorkspace(dir);
     const cur: i32 = @intCast(curWorkspace(app));
     const next = std.math.clamp(cur + dir, 0, 8);

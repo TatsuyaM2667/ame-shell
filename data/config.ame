@@ -78,6 +78,17 @@ hand {
   // camera "/dev/video0" // 使うカメラ(省略すると /dev/video* から自動で選ぶ)
 }
 
+// AirPods の頭の動きで操作する(AirPods Pro 2 など。Linux のみ。ame-ctl airpods on|off、ユーティリティの「AirPods 操作」)
+//   頭を右/左へ振って戻す → 右/左のワークスペース、上を向いて戻す → ランチャー、下を向いて戻す → ダッシュボード
+//   振ったまま・向いたまま(よそ見・キーボードを見る)では何もしない。AirPods 本来の操作(軸を押す・つまむ)もそのまま使える
+airpods {
+  enabled off
+  yaw-angle 25            // 左右に振ったとみなす角度(度)
+  pitch-angle 18          // 上下に向いたとみなす角度(度)
+  invert-yaw off          // 左右が逆に動くときは on
+  invert-pitch off        // 上下が逆に動くときは on
+}
+
 // 顔認証: 登録した顔がカメラに写ったらロックを外す(パスワードもそのまま使える。赤外線カメラを優先)
 face {
   enabled on              // 顔を登録してあれば、ロック画面で顔を見てロックを外す(登録: ランチャーの「顔を登録」か ame-ctl face enroll)

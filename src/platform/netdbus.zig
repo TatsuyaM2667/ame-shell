@@ -836,6 +836,8 @@ const BtDev = struct {
     paired: bool = false,
     connected: bool = false,
     audio: bool = false,
+    /// AirPods(Apple の AAP の UUID 74ec2172-… を持つ。airpods.zig が頭の動きを読む)
+    apple: bool = false,
 };
 
 const BtState = struct {
@@ -911,6 +913,7 @@ fn readBluez(bus: *Bus, st: *BtState) bool {
                             while (getS(&a)) |u| : (_ = c.dbus_message_iter_next(&a)) {
                                 // 0000110b = Audio Sink(イヤホン・スピーカー)
                                 if (std.ascii.startsWithIgnoreCase(u, "0000110b")) x.d.audio = true;
+                                if (std.ascii.startsWithIgnoreCase(u, "74ec2172-0bad-4d01-8f77-997b2be0722a")) x.d.apple = true;
                             }
                         }
                     }
@@ -942,9 +945,12 @@ fn btctl(bus: *Bus, a: *Args, o: *Out) void {
     if (a.is(1, "devices")) {
         const want_paired = a.is(2, "Paired");
         const want_conn = a.is(2, "Connected");
+        // AirPods: 接続中で AAP の UUID を持つもの(airpods.zig)
+        const want_apple = a.is(2, "AirPods");
         for (st.devs[0..st.n]) |*d| {
             if (want_paired and !d.paired) continue;
             if (want_conn and !d.connected) continue;
+            if (want_apple and !(d.connected and d.apple)) continue;
             o.print("Device {s} {s}\n", .{ &d.addr, d.name[0..d.name_len] });
         }
         return;

@@ -96,6 +96,12 @@ pub const Config = struct {
     music_corner: Corner = .bottom_right,
     /// 充電器をつないだときの全画面のアニメーション(chargeanim.zig)
     charge_anim: bool = true,
+    /// AirPods の頭の動きで操作する(airpods.zig)
+    airpods_enabled: bool = false,
+    airpods_yaw: f32 = 25,
+    airpods_pitch: f32 = 18,
+    airpods_invert_yaw: bool = false,
+    airpods_invert_pitch: bool = false,
     /// 天気の場所(空 = IP アドレスから推定)。例: "Sapporo"、"Osaka"
     weather_location: Str = .{},
     // bar
@@ -359,6 +365,18 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             if (num(val)) |n| cfg.face_threshold = std.math.clamp(n, 0.5, 0.95) else ok = false;
         } else if (eq(u8, key, "require_ir")) {
             cfg.face_require_ir = boolean(val) orelse true;
+        } else ok = false;
+    } else if (eq(u8, sec, "airpods")) {
+        if (eq(u8, key, "enabled")) {
+            cfg.airpods_enabled = boolean(val) orelse false;
+        } else if (eq(u8, key, "yaw-angle")) {
+            if (num(val)) |n| cfg.airpods_yaw = std.math.clamp(n, 10, 60) else ok = false;
+        } else if (eq(u8, key, "pitch-angle")) {
+            if (num(val)) |n| cfg.airpods_pitch = std.math.clamp(n, 8, 45) else ok = false;
+        } else if (eq(u8, key, "invert-yaw")) {
+            cfg.airpods_invert_yaw = boolean(val) orelse false;
+        } else if (eq(u8, key, "invert-pitch")) {
+            cfg.airpods_invert_pitch = boolean(val) orelse false;
         } else ok = false;
     } else if (eq(u8, sec, "music-widget")) {
         if (eq(u8, key, "enabled")) {

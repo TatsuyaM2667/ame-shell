@@ -8,6 +8,7 @@ test {
     _ = @import("png.zig");
     _ = @import("lyrics.zig");
     _ = @import("chargeanim.zig");
+    _ = @import("airpods.zig");
 }
 
 test "spring converges and is velocity-continuous" {

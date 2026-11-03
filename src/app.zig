@@ -310,6 +310,7 @@ pub const App = struct {
         app.initialized = true;
         // ハンド操作(設定で hand { enabled on } のとき。ログイン画面では使わない)
         if (app.cfg.hand_enabled and !@import("greeter.zig").enabled()) @import("hand/hand.zig").enable(app);
+        if (app.cfg.airpods_enabled and !@import("greeter.zig").enabled()) @import("airpods.zig").enable(app);
         logRss("after-surfaces");
         return app;
     }
