@@ -204,7 +204,8 @@ pub const Action = union(enum) {
     focus_window: *Window,
     // ハンド操作(hand/hand.zig): River のポインタ操作を使わず、手の動いた量で窓を動かす
     hand_grab,
-    hand_drag: [2]i32,
+    hand_drag: struct { dx: i32, dy: i32, scale: f32 = 1 },
+    hand_scale: f32,
     hand_release,
 };
 
@@ -290,14 +291,14 @@ pub const Wm = struct {
     }
 
     /// ハンド操作(hand/hand.zig): 隣のワークスペース(1〜9)へ。dir = +1 で次、-1 で前。端では止まる
-    pub fn handWorkspace(self: *Wm, dir: i32) bool {
-        const o = self.focusedOutput() orelse return false;
+    pub fn handWorkspace(self: *Wm, dir: i32) ?u8 {
+        const o = self.focusedOutput() orelse return null;
         const low: u32 = o.tags & 0x1ff;
         const cur: i32 = if (low == 0) 0 else @ctz(low);
         const next = std.math.clamp(cur + dir, 0, 8);
-        if (next == cur) return false;
+        if (next == cur) return null;
         self.push(.{ .tags = @as(u32, 1) << @intCast(next) });
-        return true;
+        return @intCast(next + 1);
     }
 
     /// ほかのモジュール(wobble.zig)から: 次の manage / render を回してもらう
@@ -645,7 +646,37 @@ pub const Wm = struct {
                 };
             },
             .hand_drag => |d| if (s) |ss| {
-                if (ss.hand_op and ss.op != .none) opDelta(ss, d[0], d[1]);
+                if (ss.hand_op and ss.op != .none) {
+                    opDelta(ss, d.dx, d.dy);
+                    // ズーム: つかんだ所を中心に、つかんだときの大きさから倍率をかける
+                    if (ss.op == .move) if (ss.op_window) |w| {
+                        const s0 = ss.op_start;
+                        const ow = std.math.clamp(s0[2] * d.scale, 260, 4000);
+                        const oh = std.math.clamp(s0[3] * d.scale, 180, 3000);
+                        if (@abs(ow - s0[2]) > 1 or @abs(w.float_rect[2] - s0[2]) > 1) {
+                            const fx = std.math.clamp((@as(f32, @floatFromInt(ss.op_px)) - s0[0]) / @max(s0[2], 1), 0, 1);
+                            const fy = std.math.clamp((@as(f32, @floatFromInt(ss.op_py)) - s0[1]) / @max(s0[3], 1), 0, 1);
+                            const fdx: f32 = @floatFromInt(d.dx);
+                            const fdy: f32 = @floatFromInt(d.dy);
+                            w.float_rect = .{ s0[0] + fdx + fx * (s0[2] - ow), s0[1] + fdy + fy * (s0[3] - oh), ow, oh };
+                            // 大きさが変わると、たわませている窓の絵と合わなくなるので本物を見せる
+                            wobble.forget(w);
+                            self.requestManage();
+                        }
+                    };
+                }
+            },
+            .hand_scale => |k| if (fw) |w| {
+                // 大きく・小さく(手のメニュー): タイルの窓は今の場所で浮かせてから、真ん中を保って変える
+                if (w.fullscreen) return;
+                if (!w.floating) {
+                    w.floating = true;
+                    w.float_rect = .{ w.tx, w.ty, w.tw, w.th };
+                }
+                const r = w.float_rect;
+                const nw = std.math.clamp(r[2] * k, 260, 4000);
+                const nh = std.math.clamp(r[3] * k, 180, 3000);
+                w.float_rect = .{ r[0] + (r[2] - nw) / 2, r[1] + (r[3] - nh) / 2, nw, nh };
             },
             .hand_release => if (s) |ss| {
                 if (ss.hand_op) {
