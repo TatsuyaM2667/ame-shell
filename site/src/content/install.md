@@ -53,6 +53,8 @@ FreeBSD のインストーラは次のことまで行います。
 
 - **GPU ドライバ**: drm-kmod を入れ、amdgpu / i915kms などを設定します(NVIDIA は nvidia-drm)。
 - **サービス**: dbus・seatd・sddm を有効にし、video グループへ追加します。
+- **カメラ**(ハンド操作): webcamd を入れて有効にし(cuse を読み込む)、webcamd グループへ追加します。USB カメラが `/dev/video0` になります。
+- **音質**: PulseAudio のサンプリング周波数の変換を高品質に(`~/.config/pulse/daemon.conf` が無いときだけ)。
 - **ツールチェイン**: Zig 0.13 と Odin をソースからビルドします(FreeBSD のパッケージに無いため)。
 - **タッチパッド**: I2C(ig4・iichid・hmt)と PS/2(psm の Synaptics / Elantech)の設定をします。
 - **Bluetooth**: ファームウェア(Realtek / Intel)・ng_ubt・hcsecd・sdpd・bthidd を設定します。
