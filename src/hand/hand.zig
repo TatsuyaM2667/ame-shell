@@ -123,6 +123,8 @@ const State = struct {
     pinch_t0: u64 = 0,
     pinch_p0: [2]f32 = .{ 0, 0 },
     dragging: bool = false,
+    /// 旧 River でのつかむ動き: 仮想ポインタの左ボタンを押したまま
+    vbutton: bool = false,
     drag_size0: f32 = 0.2,
     // 払う(手のひらの生の位置、カメラの 0〜1)
     hist: [16]struct { t: u64, x: f32 } = undefined,
@@ -417,12 +419,12 @@ fn frame(app: *App, m: Msg) void {
         const dx = st.cur[0] - st.pinch_p0[0];
         const dy = st.cur[1] - st.pinch_p0[1];
         if (!st.dragging and (dx * dx + dy * dy > 30 * 30 or now -| st.pinch_t0 > 420)) {
-            if (app.wm) |w| {
-                w.push(.hand_grab);
+            if (grabStart(app)) {
                 st.dragging = true;
                 st.drag_size0 = st.size;
             }
         }
+        // 旧 River では、押したままのカーソルの動き(movePointer)がそのままドラッグになる
         if (st.dragging) if (app.wm) |w| {
             // 手の大きさの変わり方 = ズーム(少しの揺れは無視する)
             var scale = st.size / @max(st.drag_size0, 0.01);
@@ -456,13 +458,11 @@ fn frame(app: *App, m: Msg) void {
             const dx = m.px - st.hist[k].x;
             if (@abs(dx) > 0.16) {
                 const dir: i32 = if (dx < 0) 1 else -1;
-                if (app.wm) |w| {
-                    if (w.handWorkspace(dir)) |n| {
-                        var b: [32]u8 = undefined;
-                        setBanner(std.fmt.bufPrint(&b, "{s} {d}", .{ if (dir > 0) "→" else "←", n }) catch "");
-                        addRipple(st.cur, theme.accent(app), 140, 1200);
-                    } else setBanner(if (dir > 0) "これより先はありません" else "これより前はありません");
-                }
+                if (stepWorkspace(app, dir)) |n| {
+                    var b: [32]u8 = undefined;
+                    setBanner(std.fmt.bufPrint(&b, "{s} {d}", .{ if (dir > 0) "→" else "←", n }) catch "");
+                    addRipple(st.cur, theme.accent(app), 140, 1200);
+                } else setBanner(if (dir > 0) "これより先はありません" else "これより前はありません");
                 st.swipe_quiet = now + 750;
                 st.n_hist = 0;
                 st.open_blocked = true;
@@ -487,7 +487,7 @@ fn frame(app: *App, m: Msg) void {
             if (now -| st.hold_t0 >= need) {
                 st.hold_done = true;
                 if (st.hold == .fist) {
-                    if (app.wm) |w| w.push(.close);
+                    winOp(app, .close);
                     addRipple(st.cur, theme.danger(app), 120, 1100);
                     setBanner("閉じました");
                 } else openMenu(app);
@@ -515,7 +515,7 @@ fn frame(app: *App, m: Msg) void {
 
 fn gotoWorkspace(app: *App, n: u8) void {
     if (n < 1 or n > 9) return;
-    if (app.wm) |w| w.push(.{ .tags = @as(u32, 1) << @intCast(n - 1) });
+    app.focusTags(@as(u32, 1) << @intCast(n - 1));
     var b: [32]u8 = undefined;
     setBanner(std.fmt.bufPrint(&b, "ワークスペース {d}", .{n}) catch "");
     addRipple(st.cur, theme.accent(app), 150, 1300);
@@ -590,12 +590,12 @@ fn choose(app: *App, h: i32) void {
     switch (items[@intCast(h)].it) {
         .launcher => ipc.runCommand(app, "launcher open"),
         .dashboard => ipc.runCommand(app, "dashboard toggle"),
-        .fullscreen => if (app.wm) |w| w.push(.fullscreen),
-        .float => if (app.wm) |w| w.push(.float),
-        .bigger => if (app.wm) |w| w.push(.{ .hand_scale = 1.2 }),
-        .smaller => if (app.wm) |w| w.push(.{ .hand_scale = 1.0 / 1.2 }),
+        .fullscreen => winOp(app, .fullscreen),
+        .float => winOp(app, .float),
+        .bigger => winScale(app, 1.2),
+        .smaller => winScale(app, 1.0 / 1.2),
         .screenshot => @import("../shot.zig").take(app, .full, 450),
-        .close => if (app.wm) |w| w.push(.close),
+        .close => winOp(app, .close),
     }
     setBanner(items[@intCast(h)].label);
 }
@@ -620,6 +620,13 @@ fn endDrag() void {
     if (!st.dragging) return;
     st.dragging = false;
     if (st.app) |app| if (app.wm) |w| w.push(.hand_release);
+    if (st.vbutton) {
+        st.vbutton = false;
+        if (st.vptr) |vp| {
+            c.zwlr_virtual_pointer_v1_button(vp, @truncate(loop.nowMs()), 0x110, 0);
+            c.zwlr_virtual_pointer_v1_frame(vp);
+        }
+    }
 }
 
 fn movePointer(p: [2]f32) void {
@@ -749,9 +756,7 @@ fn drawMenu(app: *App, cv: *gfx.Canvas, now: u64) bool {
     }
     // ワークスペース 1〜9
     const cur_ws: u32 = blk: {
-        const w = app.wm orelse break :blk 0;
-        const o = w.focusedOutput() orelse break :blk 0;
-        break :blk o.tags & 0x1ff;
+        break :blk @as(u32, 1) << @intCast(curWorkspace(app));
     };
     for (0..9) |i| {
         const p = wsPos(i);
@@ -1077,4 +1082,66 @@ pub fn debugInject(app: *App, args: []const u8) void {
         return;
     }
     frame(app, .{ .kind = 0, .has = 1, .gesture = @intFromEnum(g), .fingers = fingers, .cx = x, .cy = y, .px = x, .py = y, .pinch = if (g == .pinch) 0.15 else 1.0, .size = size });
+}
+
+// ---- 窓の操作: River 0.5(ame-shell が WM を兼ねる)は内蔵 WM へ、River 0.3/0.4 は river-control(riverctl と同じ命令)へ ----
+
+const WinOp = enum { close, fullscreen, float };
+
+fn winOp(app: *App, op: WinOp) void {
+    if (app.wm) |w| return w.push(switch (op) {
+        .close => .close,
+        .fullscreen => .fullscreen,
+        .float => .float,
+    });
+    app.riverCommand(&.{switch (op) {
+        .close => "close",
+        .fullscreen => "toggle-fullscreen",
+        .float => "toggle-float",
+    }});
+}
+
+/// 窓を大きく・小さく。旧 River の resize は浮いた窓にだけ効くので、タイルの窓はまず浮かせる
+fn winScale(app: *App, f: f32) void {
+    if (app.wm) |w| return w.push(.{ .hand_scale = f });
+    const dx: [:0]const u8 = if (f > 1) "160" else "-160";
+    const dy: [:0]const u8 = if (f > 1) "100" else "-100";
+    app.riverCommand(&.{ "resize", "horizontal", dx });
+    app.riverCommand(&.{ "resize", "vertical", dy });
+}
+
+/// 今のワークスペース(1 つ目のタグ、0 始まり)
+fn curWorkspace(app: *App) u32 {
+    const tags: u32 = blk: {
+        if (app.wm) |w| if (w.focusedOutput()) |o| break :blk o.tags;
+        if (st.out) |o| break :blk o.focused_tags;
+        if (app.activeOutput()) |o| break :blk o.focused_tags;
+        break :blk 1;
+    };
+    const low = tags & 0x1ff;
+    return if (low == 0) 0 else @ctz(low);
+}
+
+/// 払う動きで隣のワークスペースへ。移った先(1 始まり)、端なら null
+fn stepWorkspace(app: *App, dir: i32) ?u8 {
+    if (app.wm) |w| return w.handWorkspace(dir);
+    const cur: i32 = @intCast(curWorkspace(app));
+    const next = std.math.clamp(cur + dir, 0, 8);
+    if (next == cur) return null;
+    app.focusTags(@as(u32, 1) << @intCast(next));
+    return @intCast(next + 1);
+}
+
+/// つかんで動かす: 内蔵 WM は窓そのものを動かす。旧 River は左ボタンを押したままカーソルを動かす
+/// (アプリの中でのドラッグ: 文字の選択・ファイルのドラッグ・タイトルバーを持って動かす など)
+fn grabStart(app: *App) bool {
+    if (app.wm) |w| {
+        w.push(.hand_grab);
+        return true;
+    }
+    const vp = st.vptr orelse return false;
+    c.zwlr_virtual_pointer_v1_button(vp, @truncate(loop.nowMs()), 0x110, 1);
+    c.zwlr_virtual_pointer_v1_frame(vp);
+    st.vbutton = true;
+    return true;
 }
