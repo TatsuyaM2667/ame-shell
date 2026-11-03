@@ -411,6 +411,11 @@ pub const Launcher = struct {
                 best += frecency(&e);
                 self.results.append(.{ .kind = .app, .idx = @intCast(i), .score = best }) catch {};
             }
+            // 操作(ロック・顔を登録など)も、名前を打てば ">" なしで出す(同点ならアプリが上)
+            if (q.len > 0) for (actions, 0..) |ac, i| {
+                const sc = @max(anim.fuzzy(q, ac.name), anim.fuzzy(q, ac.keys));
+                if (sc >= 0) self.results.append(.{ .kind = .action, .idx = @intCast(i), .score = sc - 1 }) catch {};
+            };
         }
         const Ctx = struct {
             l: *Launcher,
