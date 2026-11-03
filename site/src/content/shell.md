@@ -87,7 +87,9 @@
 
 ## AirPods の頭の動き {#airpods}
 
-AirPods Pro 2 など、空間オーディオのために頭の向きを測れる AirPods で、頭を動かして操作します(Linux のみ。ユーティリティの「AirPods 操作」・`ame-ctl airpods on|off`・設定 `airpods { enabled on }`。既定はオフ)。
+**つないだときのカード**: AirPods をつなぐと、iPhone / iPad のように画面の下からカードが上がり、名前・AirPods の絵・**左右とケースの電池の残り**(リングと数字。充電中は稲妻)を見せて、約 6 秒で消えます(押すとすぐ消える)。電池は AirPods の通信(AAP)で読みます。`ame-ctl airpods popup` でも出せます。要らなければ `airpods { popup off }`(そのときは今までどおり通知)。
+
+**頭の動きで操作**: AirPods Pro 2 など、空間オーディオのために頭の向きを測れる AirPods で、頭を動かして操作します(Linux のみ。ユーティリティの「AirPods 操作」・`ame-ctl airpods on|off`・設定 `airpods { enabled on }`。既定はオフ)。
 
 - **頭を右 / 左へ振って戻す**: 右 / 左のワークスペースへ
 - **上を向いて戻す**: ランチャー
@@ -95,7 +97,7 @@ AirPods Pro 2 など、空間オーディオのために頭の向きを測れる
 - 振ったまま・向いたまま(よそ見・キーボードを見る)では何もしません。戻したときにだけ動きます。基準はふだんの姿勢へゆっくり合わせ直すので、姿勢が変わっても誤って動きません。
 - AirPods 本来の操作(軸を押す・つまむ)はそのまま使えます。
 - 仕組み: BlueZ で接続中の AirPods に L2CAP(PSM 0x1001)でつなぎ、Apple のアクセサリの通信(AAP)で頭の向きを頼みます。通信の形は [LibrePods](https://github.com/kavishdevar/librepods) の解析によります。
-- **AirPods は、つないでいる機器が Apple のものでないと頭の向きを送りません**(試した AirPods Pro 2 は断る返事を返しました)。`/etc/bluetooth/main.conf` の `[General]` に `DeviceID = bluetooth:004C:0000:0000` を書いて Bluetooth を再起動し、AirPods をつなぎ直してください。断られたときは ame-shell が通知で知らせます。
+- **試した AirPods Pro 2 は、頭の向きを頼むと「使えない」と返しました**。`/etc/bluetooth/main.conf` の `[General]` に `DeviceID = bluetooth:004C:0000:0000` を書いて Bluetooth を再起動しても同じでした(AirPods の音の出どころがこの PC であることも確かめました)。AirPods をいったん削除してペアリングし直すと変わる可能性があります。断られたときは ame-shell が通知で知らせます。
 - 向きが逆に感じるときは `airpods { invert-yaw on }` / `invert-pitch on`。どれだけ振ったら動くかは `yaw-angle`(既定 25 度)・`pitch-angle`(既定 18 度)。今の角度は `ame-ctl airpods status` で見られます。
 
 ## ハンド操作 {#hand}
