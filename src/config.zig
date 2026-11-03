@@ -45,6 +45,8 @@ pub const Config = struct {
     /// ハンド操作(hand/hand.zig): 起動時にオンにするか・使うカメラ(空 = /dev/video* から自動)
     hand_enabled: bool = false,
     hand_camera: Str = .{},
+    /// 指の軌跡に波を立てる
+    hand_trail: bool = true,
     /// 天気の場所(空 = IP アドレスから推定)。例: "Sapporo"、"Osaka"
     weather_location: Str = .{},
     // bar
@@ -292,6 +294,8 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
     } else if (eq(u8, sec, "hand")) {
         if (eq(u8, key, "enabled")) {
             cfg.hand_enabled = boolean(val) orelse false;
+        } else if (eq(u8, key, "trail")) {
+            cfg.hand_trail = boolean(val) orelse true;
         } else if (eq(u8, key, "camera")) {
             cfg.hand_camera.set(val);
         } else ok = false;

@@ -5,7 +5,8 @@
 //   手のひらを左右に払う          … 隣のワークスペースへ(左へ払う = 次、右へ = 前)
 //   握りこぶしを保つ(0.9 秒)    … フォーカス中の窓を閉じる
 //   手のひらを開いて止める(1.3 秒)… 全画面の切り替え
-// 操作のたびに、カーソルの位置から水の波紋が広がる。
+//   指の本数を示して止める(0.7 秒)… その番号のワークスペース(親指だけ = 1、ピース = 2、3 本 = 3、親指を曲げて 4 本 = 4)
+// 操作のたびに、カーソルの位置から水の波紋が広がる。指が通った跡には、波打つ光の筋と小さな波紋を残す。
 //
 // 作り:
 //   別スレッド … カメラ(platform/v4l2.zig)→ 手の関節 21 点(track.zig + nn.zig)→ 手の形と位置を pipe でメインへ
@@ -36,7 +37,7 @@ const log = std.log.scoped(.hand);
 
 const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task";
 
-pub const Gesture = enum(u8) { none, point, pinch, open, fist, other };
+pub const Gesture = enum(u8) { none, point, pinch, open, fist, other, number };
 
 const Status = enum(u8) { running, downloading, loading, no_camera, no_model, failed };
 
@@ -46,6 +47,9 @@ const Msg = extern struct {
     gesture: u8 = 0,
     status: u8 = 0,
     has: u8 = 0,
+    /// 指の本数の形(.number のとき 1〜4)
+    fingers: u8 = 0,
+    _r: [3]u8 = .{ 0, 0, 0 },
     /// カーソル(画面の 0〜1)・手のひらの中心(0〜1)・つまみの近さ(手の大きさで割った親指と人差し指の距離)
     cx: f32 = 0,
     cy: f32 = 0,
@@ -54,10 +58,15 @@ const Msg = extern struct {
     pinch: f32 = 9,
 };
 
-const Ripple = struct { x: f32, y: f32, t0: u64, col: Color, big: bool };
+/// 波紋: 広がりきる半径(px)と時間(ms)
+const Ripple = struct { x: f32, y: f32, t0: u64, col: Color, size: f32, dur: f32 };
+const TrailPt = struct { x: f32, y: f32, t: u64, d: f32 };
+/// 軌跡が消えるまで(ms)
+const TRAIL_MS: f32 = 850;
 
 const HOLD_FIST_MS = 900;
 const HOLD_OPEN_MS = 1300;
+const HOLD_NUM_MS = 700;
 
 const State = struct {
     app: ?*App = null,
@@ -85,6 +94,18 @@ const State = struct {
     gesture: Gesture = .none,
     cand: Gesture = .none,
     cand_n: u8 = 0,
+    cand_fingers: u8 = 0,
+    fingers: u8 = 0,
+    // 指の本数でワークスペース
+    num: u8 = 0,
+    num_t0: u64 = 0,
+    num_p0: [2]f32 = .{ 0, 0 },
+    num_done: bool = false,
+    // 指の軌跡
+    trail: [48]TrailPt = undefined,
+    n_trail: usize = 0,
+    trail_dist: f32 = 0,
+    wake_at: f32 = 0,
     // つまむ
     pinching: bool = false,
     pinch_t0: u64 = 0,
@@ -102,7 +123,7 @@ const State = struct {
     /// 払った後は、手の形が変わるまで開いた手の長押し(全画面)を受け付けない
     open_blocked: bool = false,
     // 波紋
-    ripples: [8]Ripple = undefined,
+    ripples: [40]Ripple = undefined,
     n_ripples: usize = 0,
     // 状態の表示
     msg: [128]u8 = undefined,
@@ -306,14 +327,19 @@ fn frame(app: *App, m: Msg) void {
 
     // 形: 2 コマ続いたら確定(1 コマだけの見間違いで操作しない)
     const g: Gesture = @enumFromInt(m.gesture);
-    if (g == st.cand) st.cand_n +|= 1 else {
+    if (g == st.cand and m.fingers == st.cand_fingers) st.cand_n +|= 1 else {
         st.cand = g;
+        st.cand_fingers = m.fingers;
         st.cand_n = 1;
     }
-    if (st.cand_n >= 2) st.gesture = st.cand;
+    if (st.cand_n >= 2) {
+        st.gesture = st.cand;
+        st.fingers = st.cand_fingers;
+    }
 
     // カーソル
     movePointer(st.cur);
+    trailAdd(app, st.cur, now);
 
     // ---- つまむ: 短くでクリック、動かすと窓をつかむ ----
     const pinch_now = if (st.pinching) m.pinch < 0.45 and st.gesture != .open else st.gesture == .pinch;
@@ -323,7 +349,7 @@ fn frame(app: *App, m: Msg) void {
         st.pinch_p0 = st.cur;
         st.dragging = false;
         st.press.set(1);
-        addRipple(st.cur, theme.accent(app), false);
+        addRipple(st.cur, theme.accent(app), 70, 1000);
     } else if (pinch_now and st.pinching) {
         const dx = st.cur[0] - st.pinch_p0[0];
         const dy = st.cur[1] - st.pinch_p0[1];
@@ -339,10 +365,10 @@ fn frame(app: *App, m: Msg) void {
         st.press.set(0);
         if (st.dragging) {
             endDrag();
-            addRipple(st.cur, theme.accent(app).lighten(0.2), true);
+            addRipple(st.cur, theme.accent(app).lighten(0.2), 120, 1100);
         } else {
             click();
-            addRipple(st.cur, theme.accent(app).lighten(0.3), true);
+            addRipple(st.cur, theme.accent(app).lighten(0.3), 120, 1100);
         }
     }
 
@@ -361,7 +387,7 @@ fn frame(app: *App, m: Msg) void {
             if (@abs(dx) > sz[0] * 0.22) {
                 const dir: i32 = if (dx < 0) 1 else -1;
                 if (app.wm) |w| {
-                    if (w.handWorkspace(dir)) addRipple(st.cur, theme.accent(app), true);
+                    if (w.handWorkspace(dir)) addRipple(st.cur, theme.accent(app), 120, 1100);
                 }
                 st.swipe_quiet = now + 900;
                 // 払った手をそのまま止めても全画面にならないように、形が変わるまで長押しを止める
@@ -395,16 +421,62 @@ fn frame(app: *App, m: Msg) void {
                 if (app.wm) |w| {
                     if (st.hold == .fist) {
                         w.push(.close);
-                        addRipple(st.cur, theme.danger(app), true);
+                        addRipple(st.cur, theme.danger(app), 120, 1100);
                     } else {
                         w.push(.fullscreen);
-                        addRipple(st.cur, theme.accent(app), true);
+                        addRipple(st.cur, theme.accent(app), 120, 1100);
                     }
                 }
             }
         }
     }
+    // ---- 指の本数を示して止める: そのワークスペースへ(いいね = 1、ピース = 2、3 本 = 3、親指を曲げて 4 本 = 4)----
+    if (st.gesture != .number or st.pinching or !settled) {
+        st.num = 0;
+        st.num_done = false;
+    } else {
+        const dx = st.cur[0] - st.num_p0[0];
+        const dy = st.cur[1] - st.num_p0[1];
+        if (st.num != st.fingers or dx * dx + dy * dy > 60 * 60) {
+            // 本数が変わった・手が動いた: やり直す(同じ本数のまま決めた後は、形を変えるまで繰り返さない)
+            if (st.num != st.fingers) st.num_done = false;
+            st.num = st.fingers;
+            st.num_t0 = now;
+            st.num_p0 = st.cur;
+        } else if (!st.num_done and now -| st.num_t0 >= HOLD_NUM_MS) {
+            st.num_done = true;
+            if (app.wm) |w| if (st.num >= 1 and st.num <= 9) {
+                w.push(.{ .tags = @as(u32, 1) << @intCast(st.num - 1) });
+                addRipple(st.cur, theme.accent(app), 150, 1300);
+            };
+        }
+    }
     sf.schedule();
+}
+
+// ---- 指の軌跡: 光る水の筋と、通った跡に小さな波紋 ----
+
+fn trailAdd(app: *App, p: [2]f32, now: u64) void {
+    if (!app.cfg.hand_trail) return;
+    if (st.n_trail > 0) {
+        const last = st.trail[st.n_trail - 1];
+        const dx = p[0] - last.x;
+        const dy = p[1] - last.y;
+        const d = @sqrt(dx * dx + dy * dy);
+        if (d < 3) return;
+        st.trail_dist += d;
+        // 一定の距離ごとに、通った所へ小さな波紋を落とす(速く動かすほど多く)
+        if (st.trail_dist - st.wake_at > 46) {
+            st.wake_at = st.trail_dist;
+            addRipple(p, theme.accent(app).lighten(0.25), 34, 800);
+        }
+    }
+    if (st.n_trail == st.trail.len) {
+        std.mem.copyForwards(TrailPt, st.trail[0 .. st.trail.len - 1], st.trail[1..]);
+        st.n_trail -= 1;
+    }
+    st.trail[st.n_trail] = .{ .x = p[0], .y = p[1], .t = now, .d = st.trail_dist };
+    st.n_trail += 1;
 }
 
 fn endDrag() void {
@@ -433,12 +505,12 @@ fn click() void {
     c.zwlr_virtual_pointer_v1_frame(vp);
 }
 
-fn addRipple(p: [2]f32, col: Color, big: bool) void {
+fn addRipple(p: [2]f32, col: Color, size: f32, dur: f32) void {
     if (st.n_ripples == st.ripples.len) {
         std.mem.copyForwards(Ripple, st.ripples[0 .. st.ripples.len - 1], st.ripples[1..]);
         st.n_ripples -= 1;
     }
-    st.ripples[st.n_ripples] = .{ .x = p[0], .y = p[1], .t0 = loop.nowMs(), .col = col, .big = big };
+    st.ripples[st.n_ripples] = .{ .x = p[0], .y = p[1], .t0 = loop.nowMs(), .col = col, .size = size, .dur = dur };
     st.n_ripples += 1;
 }
 
@@ -446,7 +518,44 @@ fn addRipple(p: [2]f32, col: Color, big: bool) void {
 // オーバーレイ: カーソル・長押しの輪・水の波紋
 // ---------------------------------------------------------------------------
 
-const RIPPLE_MS: f32 = 1100;
+/// 指の軌跡: 通った線を、波打ちながら細く薄く消えていく水の筋として描く。
+/// 線と直角の向きに、進んだ距離と時間で動く sin の揺れを足すので、筋そのものが波立って見える
+fn drawTrail(cv: *gfx.Canvas, acc: Color, now: u64) bool {
+    // 古い点を捨てる
+    var drop: usize = 0;
+    while (drop < st.n_trail and @as(f32, @floatFromInt(now -| st.trail[drop].t)) > TRAIL_MS) drop += 1;
+    if (drop > 0) {
+        std.mem.copyForwards(TrailPt, st.trail[0 .. st.n_trail - drop], st.trail[drop..st.n_trail]);
+        st.n_trail -= drop;
+    }
+    if (st.n_trail < 2) return st.n_trail > 0;
+    const tt = @as(f32, @floatFromInt(now % 100000)) / 1000;
+    var prev: [2]f32 = undefined;
+    for (st.trail[0..st.n_trail], 0..) |pt, i| {
+        // 進む向きと直角の向き
+        const nb = st.trail[@min(i + 1, st.n_trail - 1)];
+        const pa = st.trail[if (i > 0) i - 1 else 0];
+        var tx = nb.x - pa.x;
+        var ty = nb.y - pa.y;
+        const tl = @max(@sqrt(tx * tx + ty * ty), 0.001);
+        tx /= tl;
+        ty /= tl;
+        const age = @as(f32, @floatFromInt(now -| pt.t)) / TRAIL_MS; // 0 = 今、1 = 消える
+        const life = 1 - age;
+        // 古いほど大きく揺れて(波が広がる)、薄くなる
+        const amp = 2.5 + 15 * age;
+        const wave = @sin(pt.d * 0.075 - tt * 9) * amp;
+        const p = [2]f32{ pt.x - ty * wave, pt.y + tx * wave };
+        if (i > 0) {
+            const a = life * life;
+            cv.line(prev[0], prev[1], p[0], p[1], 3 + 12 * life, acc.alpha(0.18 * a)); // 光のにじみ
+            cv.line(prev[0], prev[1], p[0], p[1], 1.2 + 2.6 * life, acc.lighten(0.35).alpha(0.75 * a));
+            cv.line(prev[0], prev[1], p[0], p[1], 0.8 + 0.8 * life, Color.hex(0xffffff).alpha(0.55 * a)); // 水面のきらめき
+        }
+        prev = p;
+    }
+    return true;
+}
 
 fn draw(_: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
     const app = st.app orelse return false;
@@ -456,25 +565,29 @@ fn draw(_: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
     const now = loop.nowMs();
     const acc = theme.accent(app);
 
+    if (drawTrail(cv, acc, now)) animating = true;
+
     // 水の波紋: 3 つの輪が少しずつ遅れて広がり、外ほど細く薄くなる。内側にうっすら水面の明るさ
     var k: usize = 0;
     while (k < st.n_ripples) {
         const r = st.ripples[k];
-        const age = @as(f32, @floatFromInt(now -| r.t0)) / RIPPLE_MS;
+        const age = @as(f32, @floatFromInt(now -| r.t0)) / r.dur;
         if (age >= 1.25) {
             std.mem.copyForwards(Ripple, st.ripples[k .. st.n_ripples - 1], st.ripples[k + 1 .. st.n_ripples]);
             st.n_ripples -= 1;
             continue;
         }
         animating = true;
-        const max_r: f32 = if (r.big) 120 else 70;
+        const max_r = r.size;
+        // 小さな波紋(軌跡の跡)は細く控えめに
+        const thin: f32 = if (max_r < 50) 0.55 else 1;
         inline for (.{ 0.0, 0.13, 0.26 }) |delay| {
             const t = std.math.clamp((age - delay) / (1 - delay * 0.6), 0, 1);
             if (t > 0 and t < 1) {
                 const e = 1 - (1 - t) * (1 - t) * (1 - t); // 速く広がって、ゆっくり止まる
                 const rad = 6 + e * max_r;
                 const a = (1 - t) * (1 - t) * 0.75;
-                cv.arc(r.x, r.y, rad, 1.2 + 3.2 * (1 - t), 1, r.col.alpha(a), .{ .a = 0 });
+                cv.arc(r.x, r.y, rad, (1.2 + 3.2 * (1 - t)) * thin, 1, r.col.alpha(a * thin), .{ .a = 0 });
                 // 輪の内側のきらめき(細い白)
                 cv.arc(r.x, r.y, rad - 2.5, 0.8, 1, Color.hex(0xffffff).alpha(a * 0.35), .{ .a = 0 });
             }
@@ -505,6 +618,19 @@ fn draw(_: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
                 const col = if (st.hold == .fist) theme.danger(app) else acc;
                 cv.arc(x, y, 27, 3.5, (p - 0.15) / 0.85, col.alpha(a), Color.hex(0xffffff).alpha(0.12 * a));
                 _ = cv.text(x, y + 48, 11.5, Color.hex(0xffffff).alpha(0.85 * a), if (st.hold == .fist) "閉じる" else "全画面", .{ .alignment = .center, .bold = true });
+            }
+            animating = true;
+        }
+        // 指の本数: 輪が満ちたらそのワークスペースへ。輪の中に大きく番号
+        if (st.num != 0 and !st.num_done) {
+            const p = std.math.clamp(@as(f32, @floatFromInt(now -| st.num_t0)) / HOLD_NUM_MS, 0, 1);
+            if (p > 0.12) {
+                const r: f32 = 30;
+                cv.glass(x + 26, y - 62, 52, 52, 26, theme.glass(app));
+                cv.arc(x + 52, y - 36, r - 6, 3.2, (p - 0.12) / 0.88, acc.lighten(0.2).alpha(a), Color.hex(0xffffff).alpha(0.12 * a));
+                var nb: [4]u8 = undefined;
+                const ns = std.fmt.bufPrint(&nb, "{d}", .{st.num}) catch "";
+                _ = cv.text(x + 52, y - 27, 24, Color.hex(0xffffff).alpha(0.95 * a), ns, .{ .alignment = .center, .bold = true });
             }
             animating = true;
         }
@@ -664,15 +790,41 @@ fn features(h: track.Hand, w: usize, hh: usize) Msg {
         ext[i] = ratio[i] > 1.0;
     }
     const pinch = dist(p, 4, 8) / s;
+    // 親指が伸びているか(いいねの形・開いた手): 親指の先が中指の付け根から離れている(曲げていると 0.2 前後、伸ばすと 1 前後)
+    const thumb = dist(p, 4, 9) / s > 0.7 and dist(p, 4, 5) / s > 0.5;
     // 手が遠く小さく映っているときは、カーソルを動かすだけ(誤検出で操作しないように)
     const small = s < @as(f32, @floatFromInt(w)) * 0.06;
+    var number: u8 = 0;
     const g: Gesture = blk: {
         if (small) break :blk .point;
         // つまむ: 親指と人差し指の先が近く、人差し指は曲げきっていない(握りこぶしと分ける)
         if (pinch < 0.3 and ratio[0] > 0.85) break :blk .pinch;
-        if (!ext[0] and !ext[1] and !ext[2] and !ext[3]) break :blk .fist;
-        if (ext[0] and ext[1] and ext[2] and ext[3]) break :blk .open;
-        if (ext[0] and !ext[2] and !ext[3]) break :blk .point;
+        const n4 = @as(u8, @intFromBool(ext[0])) + @intFromBool(ext[1]) + @intFromBool(ext[2]) + @intFromBool(ext[3]);
+        if (n4 == 0) {
+            // 親指だけ立てる(いいね)= 1、全部曲げる = 握りこぶし
+            if (thumb) {
+                number = 1;
+                break :blk .number;
+            }
+            break :blk .fist;
+        }
+        if (n4 == 4) {
+            // 4 本 + 親指 = 開いた手、親指を曲げて 4 本 = 4
+            if (thumb) break :blk .open;
+            number = 4;
+            break :blk .number;
+        }
+        // 人差し指だけ = 指さす(親指はどちらでもよい)
+        if (ext[0] and !ext[1] and !ext[2] and !ext[3]) break :blk .point;
+        // 人差し指から順に 2 本・3 本(ピース・3 本指)= 2・3
+        if (ext[0] and ext[1] and !ext[2] and !ext[3]) {
+            number = 2;
+            break :blk .number;
+        }
+        if (ext[0] and ext[1] and ext[2] and !ext[3]) {
+            number = 3;
+            break :blk .number;
+        }
         break :blk .other;
     };
     const fw: f32 = @floatFromInt(w);
@@ -697,6 +849,7 @@ fn features(h: track.Hand, w: usize, hh: usize) Msg {
         .px = p[9][0] / fw,
         .py = p[9][1] / fh,
         .pinch = pinch,
+        .fingers = number,
     };
 }
 
@@ -766,6 +919,8 @@ pub fn debugInject(app: *App, args: []const u8) void {
     st.debug_until = loop.nowMs() + 2500;
     var it = std.mem.tokenizeScalar(u8, args, ' ');
     const g = std.meta.stringToEnum(Gesture, it.next() orelse "none") orelse .none;
+    // "number 3 x y" のように、指の本数の形は本数を続けて書く
+    const fingers: u8 = if (g == .number) std.fmt.parseInt(u8, it.next() orelse "1", 10) catch 1 else 0;
     const x = std.fmt.parseFloat(f32, it.next() orelse "0.5") catch 0.5;
     const y = std.fmt.parseFloat(f32, it.next() orelse "0.5") catch 0.5;
     if (g == .none) {
@@ -774,5 +929,5 @@ pub fn debugInject(app: *App, args: []const u8) void {
         frame(app, .{ .kind = 0, .has = 0 });
         return;
     }
-    frame(app, .{ .kind = 0, .has = 1, .gesture = @intFromEnum(g), .cx = x, .cy = y, .px = x, .py = y, .pinch = if (g == .pinch) 0.15 else 1.0 });
+    frame(app, .{ .kind = 0, .has = 1, .gesture = @intFromEnum(g), .cx = x, .cy = y, .px = x, .py = y, .pinch = if (g == .pinch) 0.15 else 1.0, .fingers = fingers });
 }
