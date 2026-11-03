@@ -153,24 +153,9 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         } else {
             cv.rect(0, 0, W, H, 0, black.alpha((0.22 * a + 0.3 * (1 - appear)) * (1 - un)));
         }
-        // 広げた「再生中」: 背景をジャケットの色に(大きくぼかしたジャケットと、ゆっくり回る 2 枚目で色が流れる)
+        // 広げた「再生中」: 背景をジャケットの色に(musiccard.drawNowPlayingBackdrop。ホーム画面と同じ)
         const npb = self.np.x * (1 - a) * (1 - un);
-        if (npb > 0.01 and !self.greeter) {
-            cv.save();
-            cv.opacity(clamp01(npb));
-            if (app.media.art_tex != 0) {
-                // 画面の縦横比に合わせて真ん中を切り抜く(ジャケットは正方形)
-                const uv: [4]f32 = if (W >= H) .{ 0, (1 - H / W) / 2, 1, 1 - (1 - H / W) / 2 } else .{ (1 - W / H) / 2, 0, 1 - (1 - W / H) / 2, 1 };
-                cv.imageEx(app.media.art_tex, 0, 0, W, H, 0, uv, 6.5, 0, 0.78, 1);
-                cv.imageEx(app.media.art_tex, -W * 0.25, -H * 0.25, W * 1.5, H * 1.5, 0, uv, 7.5, self.time_s * 0.05, 0.85, 0.5);
-                // 文字と操作が読めるよう、上と下を少し暗く
-                cv.rect(0, 0, W, H, 0, black.alpha(0.12));
-                cv.rectGrad(0, H * 0.55, W, H * 0.45, 0, black.alpha(0), black.alpha(0.35));
-            } else {
-                cv.rectGrad(0, 0, W, H, 0, Color.mix(acc, black, 0.35), Color.mix(acc, black, 0.8));
-            }
-            cv.restore();
-        }
+        if (npb > 0.01 and !self.greeter) musiccard.drawNowPlayingBackdrop(app, cv, W, H, clamp01(npb), self.time_s, acc);
     }
     if (self.greeter) if (out_backdrop) |bd| portal(self, cv, bd, W, H, acc, appear, a, un);
 
@@ -283,47 +268,9 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
     }
 
     // ---- 広げた「再生中」(ジャケットを押したとき): 小さなジャケットが真ん中へ大きくなり、
-    //      その下に曲名・再生位置・前/再生/次・音量。もう一度ジャケットか、ほかの所を押すと戻る ----
+    //      その下に曲名・再生位置・前/再生/次・音量(musiccard.Card.drawNowPlaying。ホーム画面と同じ)----
     if (np_e > 0.01 and app.media.status != .none) {
-        const k2 = std.math.clamp(@min(W / 1280, H / 800), 0.8, 1.4);
-        const top = date_y + 128 * clock_scale + 40;
-        const ctrl_h: f32 = 250 * k2;
-        const S = std.math.clamp(@min(H - 56 - top - ctrl_h, W * 0.6), 120, 420 * k2);
-        const bx = W / 2 - S / 2;
-        const by = top;
-        // 小さなジャケットの場所から(分からなければ真ん中の小さな四角から)
-        const f = if (self.np_from[2] > 0) self.np_from else [4]f32{ W / 2 - 40, by + S / 2 - 40, 80, 80 };
-        const e = self.np.x; // 少し行き過ぎて戻るバネ
-        const ax = lerp(f[0], bx, e);
-        const ay = lerp(f[1], by, e);
-        const sz = lerp(f[2], S, e);
-        const rad = lerp(14, 22 * k2, clamp01(e));
-        cv.save();
-        cv.opacity(clamp01(np_e * 1.5));
-        cv.shadow(ax, ay + 18 * k2, sz, sz, rad, 50 * k2, black.alpha(0.45));
-        if (app.media.art_tex != 0) {
-            cv.image(app.media.art_tex, ax, ay, sz, sz, rad);
-        } else {
-            cv.rectGrad(ax, ay, sz, sz, rad, acc.lighten(0.25), Color.mix(acc, Color.hex(0x101425), 0.45));
-            _ = cv.text(ax + sz / 2, ay + sz / 2 + sz * 0.14, sz * 0.38, white, "\u{F075A}", .{ .alignment = .center });
-        }
-        cv.rectBorder(ax, ay, sz, sz, rad, .{ .a = 0 }, white.alpha(0.14), 1);
-        cv.restore();
-
-        // 下の操作(ジャケットより少し遅れて下から出る)
-        const ce = clamp01((np_e - 0.35) / 0.65);
-        if (ce > 0.01) {
-            const saved = self.music.hits;
-            const cw = @max(S, @min(440 * k2, W - 48));
-            cv.save();
-            cv.opacity(ce);
-            cv.translate(0, (1 - ce) * 24);
-            _ = self.music.drawExpanded(app, cv, W / 2, by + S + 20 * k2, cw, k2, acc);
-            cv.restore();
-            // 閉じていく途中は、小さなカードの押せる場所のまま
-            if (!self.np_open) self.music.hits = saved;
-        }
-        if (self.np_open) self.music.hits.art = .{ bx, by, S, S };
+        self.music.drawNowPlaying(app, cv, W, H, date_y + 128 * clock_scale + 40, self.np.x, np_e, self.np_from, self.np_open, acc);
     }
 
     // ---- 通知(ロック中に来たもの。新しい順に重ねる。押すと広げる)----

@@ -215,8 +215,49 @@ pub const Card = struct {
         _ = cv.text(px0 + pw - pad, vy + 4.5 * k, 12.5 * k, white.alpha(0.75), if (muted) "消音" else pct, .{ .alignment = .right });
     }
 
-    /// 広げた「再生中」(ロック画面でジャケットを押したとき。iPhone / iPad のロック画面のように)の、
-    /// 大きなジャケットの下の部分: 曲名・アーティスト・再生位置と時間・前/再生/次・音量。
+    /// 広げた「再生中」の大きなジャケットと、その下の操作(ロック画面とホーム画面で共有)。
+    /// 小さなジャケットの場所 from から、上端 top の真ん中へ大きくなる。e はバネ(少し行き過ぎる)、
+    /// vis は見えている割合。open の間だけ hits を大きな方に置き換える(閉じていく途中は小さなカードのまま)
+    pub fn drawNowPlaying(self: *Card, app: *App, cv: *gfx.Canvas, W: f32, H: f32, top: f32, e: f32, vis: f32, from: [4]f32, open: bool, acc: Color) void {
+        const k2 = std.math.clamp(@min(W / 1280, H / 800), 0.8, 1.4);
+        const ctrl_h: f32 = 250 * k2;
+        const S = std.math.clamp(@min(H - 56 - top - ctrl_h, W * 0.6), 120, 420 * k2);
+        const bx = W / 2 - S / 2;
+        const by = top;
+        // 小さなジャケットの場所から(分からなければ真ん中の小さな四角から)
+        const f = if (from[2] > 0) from else [4]f32{ W / 2 - 40, by + S / 2 - 40, 80, 80 };
+        const ax = lerp(f[0], bx, e);
+        const ay = lerp(f[1], by, e);
+        const sz = lerp(f[2], S, e);
+        const rad = lerp(14, 22 * k2, clamp01(e));
+        cv.save();
+        cv.opacity(clamp01(vis * 1.5));
+        cv.shadow(ax, ay + 18 * k2, sz, sz, rad, 50 * k2, black.alpha(0.45));
+        if (app.media.art_tex != 0) {
+            cv.image(app.media.art_tex, ax, ay, sz, sz, rad);
+        } else {
+            cv.rectGrad(ax, ay, sz, sz, rad, acc.lighten(0.25), Color.mix(acc, Color.hex(0x101425), 0.45));
+            _ = cv.text(ax + sz / 2, ay + sz / 2 + sz * 0.14, sz * 0.38, white, I_MUSIC, .{ .alignment = .center });
+        }
+        cv.rectBorder(ax, ay, sz, sz, rad, .{ .a = 0 }, white.alpha(0.14), 1);
+        cv.restore();
+
+        // 下の操作(ジャケットより少し遅れて下から出る)
+        const ce = clamp01((vis - 0.35) / 0.65);
+        if (ce > 0.01) {
+            const saved = self.hits;
+            const cw = @max(S, @min(440 * k2, W - 48));
+            cv.save();
+            cv.opacity(ce);
+            cv.translate(0, (1 - ce) * 24);
+            _ = self.drawExpanded(app, cv, W / 2, by + S + 20 * k2, cw, k2, acc);
+            cv.restore();
+            if (!open) self.hits = saved;
+        }
+        if (open) self.hits.art = .{ bx, by, S, S };
+    }
+
+    /// 広げた「再生中」の大きなジャケットの下の部分: 曲名・アーティスト・再生位置と時間・前/再生/次・音量。
     /// 横は cx を中心に幅 w、上端 y。hits は呼ぶ側が art(大きなジャケット)を入れたあとに上書きでよい。高さを返す
     pub fn drawExpanded(self: *Card, app: *App, cv: *gfx.Canvas, cx: f32, y: f32, w: f32, k: f32, acc: Color) f32 {
         _ = acc;
@@ -225,8 +266,9 @@ pub const Card = struct {
         const ps = self.play_s.x;
         const show_t = if (m.lyrics.qTitle().len > 0) m.lyrics.qTitle() else m.title[0..m.title_len];
         const show_a = if (m.lyrics.qArtist().len > 0) m.lyrics.qArtist() else m.artist[0..m.artist_len];
-        _ = cv.text(x0, y + 24 * k, 22 * k, white.alpha(0.97), show_t, .{ .bold = true, .max_w = w });
-        _ = cv.text(x0, y + 48 * k, 16 * k, white.alpha(0.7), show_a, .{ .max_w = w });
+        // 曲名とアーティストは真ん中ぞろえ(大きなジャケットの真下に)
+        _ = cv.text(cx, y + 24 * k, 22 * k, white.alpha(0.97), show_t, .{ .bold = true, .max_w = w, .alignment = .center });
+        _ = cv.text(cx, y + 48 * k, 16 * k, white.alpha(0.7), show_a, .{ .max_w = w, .alignment = .center });
 
         // 再生位置(つまみは押している間だけ大きく)と、経過・残りの時間
         var yy = y + 70 * k;
@@ -462,3 +504,21 @@ pub const Lyrics = struct {
         return self.show.moving() or self.pop.moving() or self.scroll.moving();
     }
 };
+
+/// 広げた「再生中」の背景: 大きくぼかしたジャケット(画面の縦横比に合わせて真ん中を切り抜く)と、
+/// ゆっくり回る 2 枚目で色が流れる。ジャケットが無ければアクセント色。ロック画面とホーム画面で共有
+pub fn drawNowPlayingBackdrop(app: *App, cv: *gfx.Canvas, W: f32, H: f32, alpha: f32, time_s: f32, acc: Color) void {
+    cv.save();
+    cv.opacity(alpha);
+    if (app.media.art_tex != 0) {
+        const uv: [4]f32 = if (W >= H) .{ 0, (1 - H / W) / 2, 1, 1 - (1 - H / W) / 2 } else .{ (1 - W / H) / 2, 0, 1 - (1 - W / H) / 2, 1 };
+        cv.imageEx(app.media.art_tex, 0, 0, W, H, 0, uv, 6.5, 0, 0.78, 1);
+        cv.imageEx(app.media.art_tex, -W * 0.25, -H * 0.25, W * 1.5, H * 1.5, 0, uv, 7.5, time_s * 0.05, 0.85, 0.5);
+        // 文字と操作が読めるよう、全体と下を少し暗く
+        cv.rect(0, 0, W, H, 0, black.alpha(0.12));
+        cv.rectGrad(0, H * 0.55, W, H * 0.45, 0, black.alpha(0), black.alpha(0.35));
+    } else {
+        cv.rectGrad(0, 0, W, H, 0, Color.mix(acc, black, 0.35), Color.mix(acc, black, 0.8));
+    }
+    cv.restore();
+}
