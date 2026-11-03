@@ -17,6 +17,7 @@ const ipc = @import("ipc.zig");
 const Launcher = @import("launcher.zig").Launcher;
 const Lock = @import("lock.zig").Lock;
 const MusicWidget = @import("musicwidget.zig").MusicWidget;
+const ChargeAnim = @import("chargeanim.zig").ChargeAnim;
 const Media = @import("media.zig").Media;
 const Notifs = @import("notify.zig").Notifs;
 const Osd = @import("osd.zig").Osd;
@@ -198,6 +199,8 @@ pub const App = struct {
     lock: *Lock = undefined,
     /// ホーム画面の曲のウィジェット(Media より後に作るので、それまでは null)
     musicw: ?*MusicWidget = null,
+    /// 充電器をつないだときの全画面のアニメーション
+    charge: ?*ChargeAnim = null,
     media: *Media = undefined,
     syswatch: *SysWatch = undefined,
     wallpick: *WallPick = undefined,
@@ -283,6 +286,7 @@ pub const App = struct {
         app.lock = try Lock.create(app);
         app.media = try Media.create(app);
         app.musicw = MusicWidget.create(app) catch null;
+        app.charge = ChargeAnim.create(app) catch null;
         app.wallpick = try WallPick.create(app);
         app.avatar = try Avatar.create(app);
         app.syswatch = try SysWatch.create(app);
@@ -337,6 +341,7 @@ pub const App = struct {
                 self.notifs.reap();
                 self.lock.reap();
                 if (self.musicw) |m| m.reap();
+                if (self.charge) |ch| ch.reap();
                 self.wallpick.reap();
                 @import("shot.zig").reap(self);
                 @import("ripple.zig").reap(self);
@@ -866,6 +871,7 @@ fn onGlobalRemove(data: ?*anyopaque, _: ?*c.struct_wl_registry, name: u32) callc
         app.wallpick.outputRemoved(o);
         app.lock.outputRemoved(o);
         if (app.musicw) |m| m.outputRemoved(o);
+        if (app.charge) |ch| ch.outputRemoved(o);
         @import("shot.zig").outputRemoved(app, o);
         @import("ripple.zig").outputRemoved(app, o);
         @import("wm/wobble.zig").outputRemoved(o);

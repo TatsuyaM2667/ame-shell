@@ -341,6 +341,8 @@ pub const SysWatch = struct {
         if (b.on_ac) {
             self.chg_has_time = false;
             self.chg_tries = 0;
+            // 画面全体の充電のアニメーション(iPhone の MagSafe のように)
+            if (app.charge) |ch| ch.play(b.percent);
             self.postCharging(b);
             // 挿した直後は消費電力の値が落ち着かないので、8 秒後と 30 秒後に読み直して時間を出す
             self.chg_timer.arm(8_000, 22_000);

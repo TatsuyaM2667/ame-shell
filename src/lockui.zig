@@ -91,6 +91,10 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
 
     if (primary) {
         self.time_s += dt;
+        if (self.charge_t >= 0) {
+            self.charge_t += @min(dt, 0.05);
+            if (self.charge_t > @import("chargeanim.zig").DURATION) self.charge_t = -1;
+        }
         if (self.music.step(app, dt) and has_media) animating = true;
         self.media_s.set(if (has_media) 1 else 0);
         self.expand.set(if (self.notif_expanded) 1 else 0);
@@ -498,6 +502,12 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
     }
 
     cv.restore();
+
+    // 充電器をつないだ: 画面全体のアニメーション(iPhone の MagSafe のように。chargeanim.zig)を一番上に
+    if (self.charge_t >= 0) {
+        @import("chargeanim.zig").draw(cv, W, H, self.charge_t, self.charge_pct);
+        animating = true;
+    }
     return animating;
 }
 

@@ -94,6 +94,8 @@ pub const Config = struct {
     /// ホーム画面の曲のウィジェット(musicwidget.zig): 出すか・四隅のどこか(ドラッグで動かすと state に覚える)
     music_widget: bool = true,
     music_corner: Corner = .bottom_right,
+    /// 充電器をつないだときの全画面のアニメーション(chargeanim.zig)
+    charge_anim: bool = true,
     /// 天気の場所(空 = IP アドレスから推定)。例: "Sapporo"、"Osaka"
     weather_location: Str = .{},
     // bar
@@ -337,6 +339,8 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             cfg.super_launcher = boolean(val) orelse true;
         } else if (eq(u8, key, "frame-opacity")) {
             if (num(val)) |n| cfg.frame_opacity = std.math.clamp(n, 0, 1) else ok = false;
+        } else if (eq(u8, key, "charge-animation")) {
+            cfg.charge_anim = boolean(val) orelse true;
         } else ok = false;
     } else if (eq(u8, sec, "hand")) {
         if (eq(u8, key, "enabled")) {

@@ -98,6 +98,9 @@ pub const Lock = struct {
     first_notif_id: u32 = 0,
     cards: [6]lockui.Card = [_]lockui.Card{.{}} ** 6,
     /// 広げた「再生中」(ジャケットを押すと、真ん中に大きなジャケットと、その色の背景。iPhone / iPad のロック画面のように)
+    /// 充電器をつないだときのアニメーション(chargeanim.zig)の経過秒(-1 = 出していない)。ロック中はロック画面の上に描く
+    charge_t: f32 = -1,
+    charge_pct: u8 = 0,
     np_open: bool = false,
     np: Spring = Spring.init(0, 0.46, 0.84),
     /// 広げ始めたときの小さなジャケットの場所(そこから大きくなる)
@@ -737,6 +740,13 @@ pub const Lock = struct {
         self.app.sys.volume = sys.volume();
         self.scheduleAll();
         return true;
+    }
+
+    /// 充電器をつないだ(chargeanim.zig から。ロック中だけ)
+    pub fn playCharge(self: *Lock, pct: u8) void {
+        self.charge_t = 0;
+        self.charge_pct = pct;
+        self.scheduleAll();
     }
 
     /// 広げた「再生中」を開く・閉じる
