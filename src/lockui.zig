@@ -88,30 +88,16 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
     const sub = theme.subtext(app);
     // ログイン画面には曲も通知も出さない
     const has_media = !self.greeter and app.media.status != .none;
-    // 同期した歌詞(lyrics.zig)。曲のカードの下に、前・今・次の行を出す
-    const lcur = if (has_media) app.media.lyrics.current(app.media.position()) else @TypeOf(app.media.lyrics.current(0)){ .idx = null, .frac = 0 };
 
     if (primary) {
         self.time_s += dt;
         if (self.music.step(app, dt) and has_media) animating = true;
         self.media_s.set(if (has_media) 1 else 0);
         self.expand.set(if (self.notif_expanded) 1 else 0);
-        // 同期歌詞があれば出す(前奏・間奏で今の行が無いときは「♪」)
-        self.lyr_s.set(if (has_media and app.media.lyrics.state == .synced) 1 else 0);
-        const new_idx: i32 = if (lcur.idx) |li| @intCast(li) else -1;
-        if (new_idx != self.lyr_idx) {
-            // 1 行進んだときだけ押し上げる(シークで飛んだときは、その場で並べ直す)
-            self.lk_scroll.snap(if (self.lyr_idx >= 0 and new_idx == self.lyr_idx + 1) 1 else 0);
-            self.lk_scroll.set(0);
-            self.lk_pop.snap(0);
-            self.lk_pop.set(1);
-            self.lyr_idx = new_idx;
-        }
-        var springs = [_]*Spring{ &self.auth, &self.media_s, &self.expand, &self.ring, &self.lyr_s, &self.lk_pop, &self.lk_scroll };
+        // 同期歌詞があれば出す(前奏・間奏で今の行が無いときは「♪」。ログイン画面では出さない)
+        if (!self.greeter and self.lyrics.step(app, dt)) animating = true;
+        var springs = [_]*Spring{ &self.auth, &self.media_s, &self.expand, &self.ring };
         if (anim.stepAll(&springs, dt)) animating = true;
-        // 歌詞を出している間は、ダッシュボードと同じく 3 秒おきに本当の再生位置を聞いてずれを直す
-        // (シークを知らせないプレイヤーがあり、そのままだと違う行を指したままになる)
-        if (has_media and app.media.lyrics.state == .synced) app.media.resyncPosition();
         for (&self.cards) |*cd| if (cd.id != 0 and cd.s.step(dt)) {
             animating = true;
         };
@@ -260,64 +246,8 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         self.music.draw(app, cv, px0, cy0, pw, k, acc, if (self.spectrum.running()) &self.spectrum.values else null);
         cv.restore();
 
-        // ---- 歌詞: カードの上に浮かべる。ダッシュボードと同じく、歌い終えた行が 1 行ずつ上へ積み上がり、
-        //      今の行は下でポンと弾んで出る(これから歌う行は見せない)----
-        if (self.lyr_s.x > 0.01 and app.media.lyrics.lines.items.len > 0) {
-            const ls = app.media.lyrics.lines.items;
-            const has_cur = lcur.idx != null;
-            const ci = lcur.idx orelse 0;
-            const big: f32 = 21 * k;
-            const small: f32 = 15 * k;
-            const lgap: f32 = 10 * k;
-            const max_w = pw;
-            const mid = px0 + pw / 2;
-
-            const pop = self.lk_pop.x;
-            const sc = self.lk_scroll.x;
-            const text_of = struct {
-                fn get(l: anytype, i: usize) []const u8 {
-                    if (i >= l.len) return "";
-                    return if (l[i].text.len > 0) l[i].text else "♪";
-                }
-            }.get;
-            const cur_s = if (has_cur) text_of(ls, ci) else "♪";
-            const n0: f32 = @floatFromInt(cv.wrapCount(cur_s, big, max_w, 2));
-            // 今の行の下端をカードの少し上に
-            const cur_bottom = cy0 - 18 * k;
-            const base_y = cur_bottom - (n0 - 1) * big * 1.32 - big * 0.3;
-            const cur_top = base_y - big * 0.9;
-            const shift = (cur_bottom - cur_top) + lgap;
-            const top_limit = H * 0.42; // ここより上は時計・電池の列
-            cv.save();
-            cv.opacity(m_e * self.lyr_s.x);
-            // 壁紙の上でも読めるよう、歌詞の列の後ろにぼんやりした影を敷く
-            cv.shadow(px0 + 10 * k, top_limit + 40 * k, pw - 20 * k, cur_bottom - top_limit - 30 * k, 40 * k, 60 * k, black.alpha(0.42));
-            // 歌い終えた行(新しい順に上へ。古いほど薄く、上の端で消える)
-            var bottom = cur_top - lgap;
-            var kk: usize = 1;
-            while (has_cur and kk <= ci and kk <= 4) : (kk += 1) {
-                const str = text_of(ls, ci - kk);
-                const sz = if (kk == 1) small + (big - small) * sc else small;
-                const lh = sz * 1.32;
-                const nl: f32 = @floatFromInt(cv.wrapCount(str, sz, max_w, 2));
-                const y = bottom - (nl - 1) * lh - sz * 0.3 + sc * shift;
-                const top = y - sz * 0.9;
-                if (top < top_limit - 40) break;
-                const fade = clamp01((top - top_limit) / 50 + 1) * @max(0.2, 1 - @as(f32, @floatFromInt(kk - 1)) * 0.28);
-                const col = if (kk == 1) Color.mix(white.alpha(0.7), white, sc) else white.alpha(0.7);
-                _ = cv.textWrapOpts(mid, y, sz, col.alpha(col.a * fade), str, max_w, 2, lh, .{ .alignment = .center });
-                bottom = top - lgap - sc * shift;
-            }
-            // 今の行: 下からポップ(少し行き過ぎて戻る)。行の進みに合わせてアクセント色へ
-            cv.save();
-            cv.translate(0, sc * shift + (1 - pop) * 14);
-            cv.scaleAbout(mid, base_y, 0.82 + 0.18 * pop);
-            cv.opacity(std.math.clamp(pop * 1.8, 0, 1));
-            const col = Color.mix(white, acc.lighten(0.5), 0.2 + 0.5 * lcur.frac);
-            _ = cv.textWrapOpts(mid, base_y, big, col, cur_s, max_w, 2, big * 1.32, .{ .alignment = .center, .bold = true });
-            cv.restore();
-            cv.restore();
-        }
+        // ---- 歌詞: カードの上に浮かべる(musiccard.Lyrics。ホーム画面のウィジェットと同じ)。上は時計・電池の列の下まで ----
+        self.lyrics.draw(app, cv, px0, pw, cy0 - 18 * k, H * 0.42, k, acc, m_e, 4);
         // 狭い画面(中央に置いたとき)だけ、通知をカードの下へずらす
         if (!corner) y_next += (ch + 20) * self.media_s.x;
     }

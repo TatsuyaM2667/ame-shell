@@ -27,12 +27,16 @@ const log = std.log.scoped(.musicwidget);
 
 /// カードの周りの余白(影がはみ出す分)
 const PAD: f32 = 36;
+/// 歌詞の場所の高さ(k 倍する。今の行 2 行 + 歌い終えた行 2 行ほど)
+const LYR_H: f32 = 132;
 
 pub const MusicWidget = struct {
     app: *App,
     surf: ?*Surface = null,
     out: ?*Output = null,
     card: musiccard.Card = .{},
+    /// カードに添える同期歌詞(下の隅ではカードの上、上の隅ではカードの下)
+    lyrics: musiccard.Lyrics = .{},
     /// 出入り(0 = 消えている / 1 = 出ている)
     show_s: Spring = Spring.init(0, 0.45, 0.85),
     spectrum: framedata.Spectrum,
@@ -103,7 +107,7 @@ pub const MusicWidget = struct {
         const kk = self.k();
         const pw = 400 * kk;
         self.w = @round(pw + PAD * 2);
-        self.h = @round(musiccard.Card.height(kk) + PAD * 2);
+        self.h = @round(musiccard.Card.height(kk) + PAD * 2 + LYR_H * kk);
         self.off_x = 0;
         self.off_y = 0;
         self.snapping = false;
@@ -294,18 +298,30 @@ pub const MusicWidget = struct {
         }
         // 曲が無い間に消えていく途中でも、最後に見えていたカードを描く
         if (app.media.status != .none and self.card.step(app, dt)) animating = true;
+        if (self.lyrics.step(app, dt)) animating = true;
         const kk = self.k();
         const pw = self.w - PAD * 2;
         const ch = musiccard.Card.height(kk);
+        const lyr_h = LYR_H * kk;
+        // 下の隅: 歌詞はカードの上(カードは下端に)。上の隅: 歌詞はカードの下
+        const cy = if (self.corner.top()) PAD else PAD + lyr_h;
+        const acc = theme.accent(app);
         cv.save();
         cv.opacity(e);
-        cv.scaleAbout(PAD + pw / 2, PAD + ch / 2, 0.92 + 0.08 * e);
+        cv.scaleAbout(PAD + pw / 2, cy + ch / 2, 0.92 + 0.08 * e);
         // 持ち上げている間は少し大きく
-        if (self.moving) cv.scaleAbout(PAD + pw / 2, PAD + ch / 2, 1.03);
-        self.card.draw(app, cv, PAD, PAD, pw, kk, theme.accent(app), if (self.spectrum.running()) &self.spectrum.values else null);
+        if (self.moving) cv.scaleAbout(PAD + pw / 2, cy + ch / 2, 1.03);
+        self.card.draw(app, cv, PAD, cy, pw, kk, acc, if (self.spectrum.running()) &self.spectrum.values else null);
         cv.restore();
-        // クリックはカードの上だけ(影の所は下の壁紙へ通す)
-        s.setInputRect(@intFromFloat(PAD), @intFromFloat(PAD), @intFromFloat(pw), @intFromFloat(ch));
+        // 歌詞: 今の行の下端と、古い行を積み上げてよい上の端
+        if (self.corner.top()) {
+            self.lyrics.draw(app, cv, PAD, pw, cy + ch + lyr_h - 4 * kk, cy + ch + 4 * kk, kk, acc, e, 2);
+        } else {
+            self.lyrics.draw(app, cv, PAD, pw, cy - 16 * kk, 6, kk, acc, e, 2);
+        }
+        if (self.lyrics.moving()) animating = true;
+        // クリックはカードの上だけ(影・歌詞の所は下の壁紙へ通す)
+        s.setInputRect(@intFromFloat(PAD), @intFromFloat(cy), @intFromFloat(pw), @intFromFloat(ch));
         return animating or self.show_s.moving();
     }
 

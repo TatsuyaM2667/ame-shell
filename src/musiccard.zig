@@ -288,3 +288,103 @@ pub const Card = struct {
         }
     }
 };
+
+/// 同期した歌詞(lyrics.zig)を曲のカードの上(または指定した場所)に浮かべる。ダッシュボードと同じ見せ方:
+/// 歌い終えた行が 1 行ずつ上へ積み上がり、今の行は下でポンと弾んで出る(これから歌う行は見せない)。
+/// ロック画面とホーム画面のウィジェットで共有する
+pub const Lyrics = struct {
+    /// 出ている割合(同期歌詞があるときだけ 1)
+    show: Spring = Spring.init(0, 0.45, 0.9),
+    /// 今の行のポップと、歌い終えた行の押し上げ
+    pop: Spring = Spring.init(1, 0.38, 0.55),
+    scroll: Spring = Spring.init(0, 0.45, 0.9),
+    idx: i32 = -1,
+
+    pub fn visible(app: *App) bool {
+        return app.media.status != .none and app.media.lyrics.state == .synced;
+    }
+
+    /// 行の進みを見てアニメーションを進める。続くなら true
+    pub fn step(self: *Lyrics, app: *App, dt: f32) bool {
+        const on = visible(app);
+        self.show.set(if (on) 1 else 0);
+        if (app.media.status != .none) {
+            const cur = app.media.lyrics.current(app.media.position());
+            const new_idx: i32 = if (cur.idx) |li| @intCast(li) else -1;
+            if (new_idx != self.idx) {
+                // 1 行進んだときだけ押し上げる(シークで飛んだときは、その場で並べ直す)
+                self.scroll.snap(if (self.idx >= 0 and new_idx == self.idx + 1) 1 else 0);
+                self.scroll.set(0);
+                self.pop.snap(0);
+                self.pop.set(1);
+                self.idx = new_idx;
+            }
+        }
+        // 歌詞を出している間は 3 秒おきに本当の再生位置を聞いてずれを直す
+        // (シークを知らせないプレイヤーがあり、そのままだと違う行を指したままになる)
+        if (on) app.media.resyncPosition();
+        var springs = [_]*Spring{ &self.show, &self.pop, &self.scroll };
+        return anim.stepAll(&springs, dt);
+    }
+
+    /// 横は px0〜px0+pw の中央ぞろえ。今の行の下端を bottom に、古い行は top_limit まで上へ積む。
+    /// shade: 壁紙の上でも読めるよう、後ろにぼんやりした影を敷く
+    pub fn draw(self: *Lyrics, app: *App, cv: *gfx.Canvas, px0: f32, pw: f32, bottom_y: f32, top_limit: f32, k: f32, acc: Color, alpha: f32, max_prev: usize) void {
+        if (self.show.x < 0.01 or app.media.lyrics.lines.items.len == 0) return;
+        const lcur = app.media.lyrics.current(app.media.position());
+        const ls = app.media.lyrics.lines.items;
+        const has_cur = lcur.idx != null;
+        const ci = lcur.idx orelse 0;
+        const big: f32 = 21 * k;
+        const small: f32 = 15 * k;
+        const lgap: f32 = 10 * k;
+        const max_w = pw;
+        const mid = px0 + pw / 2;
+        const pop = self.pop.x;
+        const sc = self.scroll.x;
+        const text_of = struct {
+            fn get(l: anytype, i: usize) []const u8 {
+                if (i >= l.len) return "";
+                return if (l[i].text.len > 0) l[i].text else "♪";
+            }
+        }.get;
+        const cur_s = if (has_cur) text_of(ls, ci) else "♪";
+        const n0: f32 = @floatFromInt(cv.wrapCount(cur_s, big, max_w, 2));
+        const cur_bottom = bottom_y;
+        const base_y = cur_bottom - (n0 - 1) * big * 1.32 - big * 0.3;
+        const cur_top = base_y - big * 0.9;
+        const shift = (cur_bottom - cur_top) + lgap;
+        cv.save();
+        cv.opacity(alpha * self.show.x);
+        cv.shadow(px0 + 10 * k, top_limit + 40 * k, pw - 20 * k, @max(cur_bottom - top_limit - 30 * k, 10), 40 * k, 60 * k, black.alpha(0.42));
+        // 歌い終えた行(新しい順に上へ。古いほど薄く、上の端で消える)
+        var bottom = cur_top - lgap;
+        var kk: usize = 1;
+        while (has_cur and kk <= ci and kk <= max_prev) : (kk += 1) {
+            const str = text_of(ls, ci - kk);
+            const sz = if (kk == 1) small + (big - small) * sc else small;
+            const lh = sz * 1.32;
+            const nl: f32 = @floatFromInt(cv.wrapCount(str, sz, max_w, 2));
+            const y = bottom - (nl - 1) * lh - sz * 0.3 + sc * shift;
+            const top = y - sz * 0.9;
+            if (top < top_limit - 40) break;
+            const fade = clamp01((top - top_limit) / 50 + 1) * @max(0.2, 1 - @as(f32, @floatFromInt(kk - 1)) * 0.28);
+            const col = if (kk == 1) Color.mix(white.alpha(0.7), white, sc) else white.alpha(0.7);
+            _ = cv.textWrapOpts(mid, y, sz, col.alpha(col.a * fade), str, max_w, 2, lh, .{ .alignment = .center });
+            bottom = top - lgap - sc * shift;
+        }
+        // 今の行: 下からポップ(少し行き過ぎて戻る)。行の進みに合わせてアクセント色へ
+        cv.save();
+        cv.translate(0, sc * shift + (1 - pop) * 14);
+        cv.scaleAbout(mid, base_y, 0.82 + 0.18 * pop);
+        cv.opacity(std.math.clamp(pop * 1.8, 0, 1));
+        const col = Color.mix(white, acc.lighten(0.5), 0.2 + 0.5 * lcur.frac);
+        _ = cv.textWrapOpts(mid, base_y, big, col, cur_s, max_w, 2, big * 1.32, .{ .alignment = .center, .bold = true });
+        cv.restore();
+        cv.restore();
+    }
+
+    pub fn moving(self: *const Lyrics) bool {
+        return self.show.moving() or self.pop.moving() or self.scroll.moving();
+    }
+};

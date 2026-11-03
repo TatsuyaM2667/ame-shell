@@ -97,13 +97,8 @@ pub const Lock = struct {
     /// これより新しい ID の通知をロック画面に出す(ロックしてから来たもの)
     first_notif_id: u32 = 0,
     cards: [6]lockui.Card = [_]lockui.Card{.{}} ** 6,
-    /// 歌詞: 出ている割合と、流れる位置(行の番号)
-    lyr_s: Spring = Spring.init(0, 0.45, 0.9),
-    lyr_pos: Spring = Spring.init(0, 0.38, 0.82),
-    /// ロック画面の歌詞(ダッシュボードと同じ見せ方): 今の行のポップと、歌い終えた行の押し上げ
-    lk_pop: Spring = Spring.init(1, 0.38, 0.55),
-    lk_scroll: Spring = Spring.init(0, 0.45, 0.9),
-    lyr_idx: i32 = -1,
+    /// 曲のカードの上に浮かべる同期歌詞(ホーム画面のウィジェットと同じもの。musiccard.zig)
+    lyrics: musiccard.Lyrics = .{},
     hits: lockui.Hits = .{},
     /// 再生中の曲のカード(ホーム画面のウィジェットと同じもの。musiccard.zig)
     music: musiccard.Card = .{},
