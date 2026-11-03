@@ -34,6 +34,8 @@ pub const SysWatch = struct {
     bat_notif: u32 = 0,
     /// 充電器の抜き差しの通知(電源の状態の前回の値・通知の番号・満充電までの時間を出せたか)
     prev_ac: ?bool = null,
+    /// 充電のアニメーション用(電池の通知を切っていても出す)
+    anim_ac: ?bool = null,
     chg_notif: u32 = 0,
     chg_has_time: bool = false,
     chg_tries: u8 = 0,
@@ -307,6 +309,11 @@ pub const SysWatch = struct {
     pub fn checkBattery(self: *SysWatch) void {
         const app = self.app;
         const b = app.sys.battery;
+        // 充電器を挿した: 画面全体の充電のアニメーション(iPhone の MagSafe のように)。電池の通知の設定とは別
+        if (b.present) {
+            if (self.anim_ac) |pa| if (!pa and b.on_ac) if (app.charge) |ch| ch.play(b.percent);
+            self.anim_ac = b.on_ac;
+        }
         if (!app.cfg.notify_battery or !b.present) return;
         // 充電器を挿した・抜いた(状態が変わったときだけ)
         if (self.prev_ac) |pa| if (pa != b.on_ac) self.acChanged(b);
@@ -341,8 +348,6 @@ pub const SysWatch = struct {
         if (b.on_ac) {
             self.chg_has_time = false;
             self.chg_tries = 0;
-            // 画面全体の充電のアニメーション(iPhone の MagSafe のように)
-            if (app.charge) |ch| ch.play(b.percent);
             self.postCharging(b);
             // 挿した直後は消費電力の値が落ち着かないので、8 秒後と 30 秒後に読み直して時間を出す
             self.chg_timer.arm(8_000, 22_000);
