@@ -54,6 +54,7 @@ FreeBSD のインストーラは次のことまで行います。
 - **GPU ドライバ**: drm-kmod を入れ、amdgpu / i915kms などを設定します(NVIDIA は nvidia-drm)。
 - **サービス**: dbus・seatd・sddm を有効にし、video グループへ追加します。
 - **カメラ**(ハンド操作): webcamd を入れて有効にし(cuse を読み込む)、webcamd グループへ追加します。USB カメラが `/dev/video0` になります。
+- **顔認証**: ロック画面の顔認証は Linux と同じように使えます(パスワードの照合は setuid の ame-auth、カメラは webcamd。赤外線カメラが要ります)。ログイン画面での顔認証は greetd のとき(`sh scripts/greeter-setup.sh`)だけで、PAM モジュール `pam_ame_face.so` を OpenPAM に組み込みます(`/etc/pam.d/ame-greetd` と `/usr/local/etc/pam.d/ame-greetd`)。SDDM では使えません。
 - **音質**: PulseAudio のサンプリング周波数の変換を高品質に(`~/.config/pulse/daemon.conf` が無いときだけ)。
 - **ツールチェイン**: Zig 0.13 と Odin をソースからビルドします(FreeBSD のパッケージに無いため)。
 - **タッチパッド**: I2C(ig4・iichid・hmt)と PS/2(psm の Synaptics / Elantech)の設定をします。
@@ -62,6 +63,8 @@ FreeBSD のインストーラは次のことまで行います。
 - **キーボード配列**: rc.conf の keymap から Wayland の配列を決めます。日本語入力(fcitx5 + Mozc)も入れます。
 
 > ame-shell の FreeBSD 版は、Linux の直接のシステムコールを 1 つも含まないことを、逆アセンブルして確認しています(以前 SIGSYS で落ちた原因を断つため)。
+
+> 手の認識([ame-hand](https://github.com/TatsuyaM2667/ame-hand))と顔認証([ame-face](https://github.com/TatsuyaM2667/ame-face))は別のリポジトリです。初めてビルドするときに、Zig が GitHub から取ってきます(どの OS でもネットワークが要ります。2 回目からは `~/.cache/zig` を使います)。
 
 ## 更新 {#update}
 
