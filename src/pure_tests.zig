@@ -13,6 +13,7 @@ test {
     _ = @import("hand/gesture.zig");
     _ = @import("face/face.zig");
     _ = @import("face/onnx.zig");
+    _ = @import("face/core.zig");
 }
 
 test "spring converges and is velocity-continuous" {

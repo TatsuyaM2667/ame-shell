@@ -136,6 +136,22 @@ pub fn build(b: *std.Build) void {
     }
     b.installArtifact(exe);
 
+    // --- ログイン画面(greetd)の顔認証の PAM モジュール(src/pam_face.zig)。Linux のみ ---
+    // greetd の中で root として動くので、最適化しても境界の検査は残す(ReleaseSafe)。
+    // PAM の関数は読み込む側(libpam)が持っているので、リンクしない
+    if (!bsd) {
+        const pam_face = b.addSharedLibrary(.{
+            .name = "pam_ame_face",
+            .root_source_file = b.path("src/pam_face.zig"),
+            .target = target,
+            .optimize = if (optimize == .Debug) .Debug else .ReleaseSafe,
+            .strip = strip,
+        });
+        pam_face.linkLibC();
+        pam_face.linker_allow_shlib_undefined = true;
+        b.installArtifact(pam_face);
+    }
+
     // --- 試験用ツール(zig build tools): 仮想ポインタでホバー等を自動試験する ---
     const vptr = b.addExecutable(.{ .name = "vptr", .root_source_file = b.path("tools/vptr.zig"), .target = target, .optimize = optimize });
     vptr.linkLibC();

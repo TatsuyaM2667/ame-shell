@@ -5,7 +5,12 @@
 // ioctl の番号の作り方だけが OS で違う(Linux の _IOC_WRITE は 1<<30、FreeBSD の IOC_IN は 2<<30。読み書き両方は同じ)。
 const std = @import("std");
 const builtin = @import("builtin");
-const c = @import("../c.zig");
+// 本体の c.zig(Wayland などのヘッダ)に頼らない: 顔認証の PAM モジュール(src/pam_face.zig)からも使う
+const c = @cImport({
+    @cInclude("fcntl.h");
+    @cInclude("unistd.h");
+    @cInclude("sys/ioctl.h");
+});
 
 const is_bsd = builtin.os.tag == .freebsd;
 

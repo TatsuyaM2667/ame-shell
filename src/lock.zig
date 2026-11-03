@@ -26,6 +26,8 @@ const bar = @import("bar.zig");
 const lockui = @import("lockui.zig");
 const framedata = @import("frame/data.zig");
 const faceauth = @import("face/unlock.zig");
+/// 顔認証が続けてこの回数だけ一致しなければ、パスワードで外すまで顔認証を使わない(他人が何度も試せないように)
+const MAX_FACE_FAILS = 3;
 
 // ---- PAM(ヘッダが無くても動くよう ABI を自前で定義し、dlopen で解決する) ----
 const PAM_SUCCESS = 0;
@@ -115,6 +117,14 @@ pub const Lock = struct {
     enroll_req: bool = false,
     /// パスワードが通った: ロックが外れたら顔の登録を始める
     enroll_after: bool = false,
+    /// 顔認証が続けて一致しなかった回数。MAX_FACE_FAILS に達したら、パスワードで外すまで顔認証を使わない
+    face_fails: u8 = 0,
+    /// ログイン画面: 顔でのログインを greetd に頼んでいる子プロセスの結果の fd
+    face_fd: c_int = -1,
+    /// ログイン画面: 顔の確認中に Enter が押された(終わったらパスワードで続ける)
+    auth_pending: bool = false,
+    /// ログイン画面: 顔認証の PAM モジュールが入っていない(もう試さない)
+    greeter_face_off: bool = false,
     spectrum: framedata.Spectrum,
 
     pub fn create(app: *App) !*Lock {
@@ -182,7 +192,6 @@ pub const Lock = struct {
                 self.enroll_req = false;
                 self.enroll_after = false;
                 self.msg_len = 0;
-                faceauth.tryUnlock(self.app);
                 self.scheduleAll();
             }
             return "ok (already locked)";
@@ -277,8 +286,8 @@ pub const Lock = struct {
         // ランチャー等は閉じておく(ロック解除後に開いたままにならないように)
         self.app.launcher.close();
         self.app.dashboard.close();
-        // 顔を登録してあれば、すぐに顔で確かめ始める(パスワードもそのまま使える)
-        if (!self.greeter and !self.enroll_req) faceauth.tryUnlock(self.app);
+        // 顔認証はロックしてすぐには始めない(席を離れてロックした直後に、まだ写っている顔で外れてしまう)。
+        // パスワードと同じく、ロック画面を触ったとき(setAuth)に始める
         return true;
     }
 
@@ -379,6 +388,13 @@ pub const Lock = struct {
 
     fn startAuth(self: *Lock) void {
         if (self.busy or self.pw_len == 0) return;
+        // ログイン画面: greetd は同時に 1 つしか受けないので、顔の確認が終わってからパスワードで
+        if (self.greeter and self.face_fd >= 0) {
+            self.auth_pending = true;
+            self.setMsg("顔の確認が終わるのを待っています…");
+            self.scheduleAll();
+            return;
+        }
         var fds: [2]c_int = undefined;
         if (c.pipe2(&fds, c.O_CLOEXEC) != 0) return;
         const pid = c.fork();
@@ -458,9 +474,96 @@ pub const Lock = struct {
         return r == PAM_SUCCESS;
     }
 
+    /// 顔認証を始める(ロック画面を触った・入力画面をクリックした)。ロック画面は ame-shell の中で、
+    /// ログイン画面は greetd(PAM モジュール)に頼む
+    fn startFace(self: *Lock) void {
+        if (!self.locked or self.unlocking or self.enroll_req or self.busy) return;
+        if (!self.app.cfg.face_enabled) return;
+        if (self.face_fails >= MAX_FACE_FAILS) {
+            faceauth.setStatus(.failed, "顔が続けて一致しなかったため、パスワードを入力してください");
+            self.scheduleAll();
+            return;
+        }
+        if (self.greeter) self.startGreeterFace() else faceauth.tryUnlock(self.app);
+    }
+
+    /// 顔認証で一致しなかった(face/unlock.zig)
+    pub fn faceRejected(self: *Lock) void {
+        self.face_fails +|= 1;
+    }
+
+    fn startGreeterFace(self: *Lock) void {
+        if (self.face_fd >= 0 or self.greeter_face_off) return;
+        var fds: [2]c_int = undefined;
+        if (c.pipe2(&fds, c.O_CLOEXEC) != 0) return;
+        const pid = c.fork();
+        if (pid < 0) {
+            _ = c.close(fds[0]);
+            _ = c.close(fds[1]);
+            return;
+        }
+        if (pid == 0) {
+            _ = c.close(fds[0]);
+            @memset(&self.pw, 0);
+            var m: [160]u8 = undefined;
+            var ml: usize = 0;
+            const r = @import("greeter.zig").authenticateFace(&m, &ml);
+            var out: [161]u8 = undefined;
+            out[0] = r;
+            @memcpy(out[1 .. 1 + ml], m[0..ml]);
+            _ = c.write(fds[1], &out, 1 + ml);
+            c._exit(0);
+        }
+        _ = c.close(fds[1]);
+        self.face_fd = fds[0];
+        self.app.loop.add(fds[0], c.EPOLLIN | c.EPOLLHUP, self, onGreeterFace) catch {};
+        faceauth.setStatus(.scanning, "顔を確認しています…");
+        self.scheduleAll();
+    }
+
+    fn onGreeterFace(ctx: *anyopaque, fd: c_int, _: u32) void {
+        const self: *Lock = @ptrCast(@alignCast(ctx));
+        var buf: [161]u8 = undefined;
+        const n = c.read(fd, &buf, buf.len);
+        self.app.loop.remove(fd);
+        _ = c.close(fd);
+        self.face_fd = -1;
+        const r: u8 = if (n >= 1) buf[0] else 2;
+        const text: []const u8 = if (n > 1) buf[1..@intCast(n)] else "";
+        switch (r) {
+            1 => {
+                @import("greeter.zig").saveLastUser();
+                faceauth.setStatus(.matched, "顔を確認しました");
+                self.face_fails = 0;
+                self.auth_pending = false;
+                @memset(&self.pw, 0);
+                self.pw_len = 0;
+                self.setMsg("ようこそ");
+                self.unlocking = true;
+                self.unlock_s.set(1);
+            },
+            0 => {
+                self.face_fails +|= 1;
+                faceauth.setStatus(.failed, text);
+            },
+            3 => faceauth.setStatus(.idle, ""),
+            4 => {
+                self.greeter_face_off = true;
+                faceauth.setStatus(.idle, "");
+            },
+            else => faceauth.setStatus(.failed, if (text.len > 0) text else "顔認証を使えませんでした"),
+        }
+        if (r != 1 and self.auth_pending) {
+            self.auth_pending = false;
+            self.startAuth();
+        }
+        self.scheduleAll();
+    }
+
     /// 顔認証で本人と分かった(face/unlock.zig): パスワードが通ったときと同じようにロックを外す
     pub fn faceUnlocked(self: *Lock) void {
         if (!self.locked or self.unlocking or self.greeter or self.busy or self.enroll_req) return;
+        self.face_fails = 0;
         self.setMsg("ようこそ");
         self.unlocking = true;
         self.ripple_req = true;
@@ -481,6 +584,7 @@ pub const Lock = struct {
         if (n >= 1 and b == 1) {
             if (self.greeter) @import("greeter.zig").saveLastUser();
             self.setMsg(if (self.enroll_req) "確認できました。顔の登録を始めます" else "ようこそ");
+            self.face_fails = 0; // パスワードで外したら、顔認証をまた使えるように
             self.enroll_after = self.enroll_req;
             self.unlocking = true;
             if (self.greeter) {
@@ -584,7 +688,9 @@ pub const Lock = struct {
                 .uprev, .unext, .session, .reboot, .poweroff => {},
                 .none => self.setAuth(true),
             }
-        } else if (ev.button == 0x111 and self.pw_len == 0) self.setAuth(false); // 右クリックでもどる
+        } else if (ev.button == 0x111 and self.pw_len == 0) {
+            self.setAuth(false); // 右クリックでもどる
+        } else self.startFace(); // 入力画面をもう一度クリック: 顔認証をやり直す
         self.scheduleAll();
     }
 
@@ -696,7 +802,7 @@ pub const Lock = struct {
     fn setAuth(self: *Lock, on: bool) void {
         self.auth_mode = on;
         // 入力画面を開いた(触った): 顔認証が終わっていれば、もう一度試す
-        if (on and !self.greeter and !self.enroll_req and self.locked and !self.unlocking) faceauth.tryUnlock(self.app);
+        if (on) self.startFace();
         self.auth.set(if (on) 1 else 0);
         if (on) self.last_input_ms = @import("platform/loop.zig").nowMs();
         self.updateSpectrum();

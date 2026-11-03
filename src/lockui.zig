@@ -621,7 +621,7 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         const hy = H - 46 + (1 - e) * 16;
         shimmer(cv, W / 2, hy, 14, hint, self.time_s, e);
         // 顔認証の様子(face/unlock.zig): 確かめている間は顔のアイコンがゆっくり明滅する
-        if (!self.greeter) {
+        {
             const fa = @import("face/unlock.zig");
             const fm = fa.message();
             if (fm.len > 0) {

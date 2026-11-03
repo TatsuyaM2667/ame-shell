@@ -224,32 +224,60 @@ pub fn power(reboot: bool) void {
 // greetd との受け答え(認証の子プロセスの中で呼ぶ。ブロックしてよい)
 // ---------------------------------------------------------------------------
 
+/// 顔認証の PAM モジュール(src/pam_face.zig)が最初に出す問い。"face" と答えたときだけカメラで確かめ、
+/// ほかの答え(パスワードでのログイン)では何もしない。結果は "ame-face:<理由>" の案内で届く
+const FACE_PROMPT = "ame-face";
+
+fn connectGreetd(msg: []u8, msg_len: *usize) ?std.posix.fd_t {
+    const sock_path = std.posix.getenv("GREETD_SOCK") orelse {
+        setMsg(msg, msg_len, "greetd に接続できません(GREETD_SOCK がありません)");
+        return null;
+    };
+    const fd = std.posix.socket(std.posix.AF.UNIX, std.posix.SOCK.STREAM | std.posix.SOCK.CLOEXEC, 0) catch return null;
+    var addr = std.posix.sockaddr.un{ .family = std.posix.AF.UNIX, .path = undefined };
+    @memset(&addr.path, 0);
+    if (sock_path.len >= addr.path.len) {
+        std.posix.close(fd);
+        return null;
+    }
+    @memcpy(addr.path[0..sock_path.len], sock_path);
+    std.posix.connect(fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.un)) catch {
+        std.posix.close(fd);
+        setMsg(msg, msg_len, "greetd に接続できません");
+        return null;
+    };
+    return fd;
+}
+
+fn createSession(fd: std.posix.fd_t, resp: []u8) ?[]const u8 {
+    var req: [256]u8 = undefined;
+    var w = std.io.fixedBufferStream(&req);
+    w.writer().writeAll("{\"type\":\"create_session\",\"username\":") catch return null;
+    jsonStr(w.writer(), userName()) catch return null;
+    w.writer().writeAll("}") catch return null;
+    return roundTrip(fd, req[0..w.pos], resp);
+}
+
+/// 問い(auth_message)の文
+fn authText(r: []const u8) []const u8 {
+    const key = "\"auth_message\":\"";
+    const i = std.mem.indexOf(u8, r, key) orelse return "";
+    const rest = r[i + key.len ..];
+    const e = std.mem.indexOfScalar(u8, rest, '"') orelse return "";
+    return rest[0..e];
+}
+
 /// 結果: 1 = 成功(セッションを始めた)、0 = パスワードが違う、2 = その他の失敗(msg に理由)
 pub fn authenticate(pw: []const u8, msg: []u8, msg_len: *usize) u8 {
     msg_len.* = 0;
     if (fake()) return if (std.mem.eql(u8, pw, "ame")) 1 else 0;
-    const sock_path = std.posix.getenv("GREETD_SOCK") orelse {
-        setMsg(msg, msg_len, "greetd に接続できません(GREETD_SOCK がありません)");
-        return 2;
-    };
-    const fd = std.posix.socket(std.posix.AF.UNIX, std.posix.SOCK.STREAM | std.posix.SOCK.CLOEXEC, 0) catch return 2;
+    const fd = connectGreetd(msg, msg_len) orelse return 2;
     defer std.posix.close(fd);
-    var addr = std.posix.sockaddr.un{ .family = std.posix.AF.UNIX, .path = undefined };
-    @memset(&addr.path, 0);
-    if (sock_path.len >= addr.path.len) return 2;
-    @memcpy(addr.path[0..sock_path.len], sock_path);
-    std.posix.connect(fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.un)) catch {
-        setMsg(msg, msg_len, "greetd に接続できません");
-        return 2;
-    };
 
     var req: [1024]u8 = undefined;
     var resp: [4096]u8 = undefined;
     var w = std.io.fixedBufferStream(&req);
-    w.writer().writeAll("{\"type\":\"create_session\",\"username\":") catch return 2;
-    jsonStr(w.writer(), userName()) catch return 2;
-    w.writer().writeAll("}") catch return 2;
-    var r = roundTrip(fd, req[0..w.pos], &resp) orelse return 2;
+    var r = createSession(fd, &resp) orelse return 2;
 
     var rounds: usize = 0;
     while (rounds < 8) : (rounds += 1) {
@@ -261,9 +289,12 @@ pub fn authenticate(pw: []const u8, msg: []u8, msg_len: *usize) u8 {
             return 2;
         }
         if (!has(r, "\"type\":\"auth_message\"")) return 2;
-        // パスワードなど(secret / visible)には答え、案内(info / error)には空で答える
+        // パスワードなど(secret / visible)には答え、案内(info / error)には空で答える。
+        // 顔認証の問いには空で答える(パスワードでログインするので、カメラは使わない)
         w.reset();
-        if (has(r, "\"auth_message_type\":\"secret\"") or has(r, "\"auth_message_type\":\"visible\"")) {
+        if (std.mem.eql(u8, authText(r), FACE_PROMPT)) {
+            w.writer().writeAll("{\"type\":\"post_auth_message_response\",\"response\":\"\"}") catch return 2;
+        } else if (has(r, "\"auth_message_type\":\"secret\"") or has(r, "\"auth_message_type\":\"visible\"")) {
             w.writer().writeAll("{\"type\":\"post_auth_message_response\",\"response\":") catch return 2;
             jsonStr(w.writer(), pw) catch return 2;
             w.writer().writeAll("}") catch return 2;
@@ -274,9 +305,70 @@ pub fn authenticate(pw: []const u8, msg: []u8, msg_len: *usize) u8 {
         @memset(&req, 0); // パスワードを残さない
     }
     if (!has(r, "\"type\":\"success\"")) return 2;
+    return startSession(fd, msg, msg_len);
+}
 
-    // セッションを始めてもらう(Exec= を空白で区切った引数)
-    w.reset();
+/// 顔でログインする。結果: 1 = 成功(セッションを始めた)、0 = 一致しない(msg に理由)、
+/// 2 = その他の失敗、3 = この人は顔を登録していない・使えない(何も出さない)、4 = 顔認証の仕組みが入っていない
+pub fn authenticateFace(msg: []u8, msg_len: *usize) u8 {
+    msg_len.* = 0;
+    if (fake()) return 4;
+    const fd = connectGreetd(msg, msg_len) orelse return 2;
+    defer std.posix.close(fd);
+    var resp: [4096]u8 = undefined;
+    var r = createSession(fd, &resp) orelse return 2;
+    var asked = false;
+    var reason: []const u8 = "";
+    var reason_buf: [48]u8 = undefined;
+    var rounds: usize = 0;
+    while (rounds < 8) : (rounds += 1) {
+        if (has(r, "\"type\":\"success\"")) return startSession(fd, msg, msg_len);
+        if (has(r, "\"type\":\"error\"")) {
+            _ = roundTrip(fd, "{\"type\":\"cancel_session\"}", &resp);
+            setMsg(msg, msg_len, description(r) orelse "ログインできませんでした");
+            return 2;
+        }
+        if (!has(r, "\"type\":\"auth_message\"")) return 2;
+        const text = authText(r);
+        var answer: []const u8 = "{\"type\":\"post_auth_message_response\",\"response\":null}";
+        if (std.mem.eql(u8, text, FACE_PROMPT)) {
+            asked = true;
+            answer = "{\"type\":\"post_auth_message_response\",\"response\":\"face\"}";
+        } else if (std.mem.startsWith(u8, text, FACE_PROMPT ++ ":")) {
+            const s = text[FACE_PROMPT.len + 1 ..];
+            const n = @min(s.len, reason_buf.len);
+            @memcpy(reason_buf[0..n], s[0..n]);
+            reason = reason_buf[0..n];
+        } else if (has(r, "\"auth_message_type\":\"secret\"") or has(r, "\"auth_message_type\":\"visible\"")) {
+            // 顔では通らず、パスワードを聞かれた: やめる(パスワードは入力欄から改めて)
+            _ = roundTrip(fd, "{\"type\":\"cancel_session\"}", &resp);
+            if (!asked) return 4;
+            if (std.mem.eql(u8, reason, "not-enrolled")) return 3;
+            setMsg(msg, msg_len, faceReason(reason));
+            return if (std.mem.eql(u8, reason, "no-match")) 0 else 2;
+        }
+        r = roundTrip(fd, answer, &resp) orelse return 2;
+    }
+    _ = roundTrip(fd, "{\"type\":\"cancel_session\"}", &resp);
+    return 2;
+}
+
+fn faceReason(r: []const u8) []const u8 {
+    const eq = std.mem.eql;
+    if (eq(u8, r, "no-match")) return "顔が一致しませんでした(パスワードを入力してください)";
+    if (eq(u8, r, "no-face")) return "顔が見つかりませんでした(パスワードを入力するか、もう一度クリック)";
+    if (eq(u8, r, "too-dark")) return "顔が暗すぎます(赤外線の照明が点かないか、顔が遠いようです)";
+    if (eq(u8, r, "no-camera")) return "赤外線カメラを開けませんでした";
+    if (eq(u8, r, "ir-required")) return "赤外線カメラで登録した顔だけを使います(登録し直してください)";
+    if (eq(u8, r, "no-model")) return "顔の認識のモデルがありません(一度ログインして顔を登録し直してください)";
+    return "顔認証を使えませんでした";
+}
+
+/// セッションを始めてもらう(Exec= を空白で区切った引数)
+fn startSession(fd: std.posix.fd_t, msg: []u8, msg_len: *usize) u8 {
+    var req: [1024]u8 = undefined;
+    var resp: [4096]u8 = undefined;
+    var w = std.io.fixedBufferStream(&req);
     w.writer().writeAll("{\"type\":\"start_session\",\"cmd\":[") catch return 2;
     const s = st.sessions[st.session];
     var it = std.mem.tokenizeAny(u8, s.exec[0..s.exec_len], " \t");
@@ -288,7 +380,7 @@ pub fn authenticate(pw: []const u8, msg: []u8, msg_len: *usize) u8 {
         first = false;
     }
     w.writer().writeAll("],\"env\":[\"XDG_SESSION_TYPE=wayland\"]}") catch return 2;
-    r = roundTrip(fd, req[0..w.pos], &resp) orelse return 2;
+    const r = roundTrip(fd, req[0..w.pos], &resp) orelse return 2;
     if (!has(r, "\"type\":\"success\"")) {
         setMsg(msg, msg_len, description(r) orelse "セッションを始められませんでした");
         _ = roundTrip(fd, "{\"type\":\"cancel_session\"}", &resp);

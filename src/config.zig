@@ -50,7 +50,9 @@ pub const Config = struct {
     /// 顔認証でロックを外す(face/unlock.zig)。登録した顔があるときだけ使う。カメラ(空 = 赤外線カメラを自動で)・一致とみなす近さ
     face_enabled: bool = true,
     face_camera: Str = .{},
-    face_threshold: f32 = 0.5,
+    face_threshold: f32 = 0.6,
+    /// 赤外線カメラでだけ登録・照合する(画面に映した写真では外れない)。普通のカメラしか無いときだけ off に
+    face_require_ir: bool = true,
     /// 天気の場所(空 = IP アドレスから推定)。例: "Sapporo"、"Osaka"
     weather_location: Str = .{},
     // bar
@@ -309,7 +311,9 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
         } else if (eq(u8, key, "camera")) {
             cfg.face_camera.set(val);
         } else if (eq(u8, key, "threshold")) {
-            if (num(val)) |n| cfg.face_threshold = std.math.clamp(n, 0.3, 0.95) else ok = false;
+            if (num(val)) |n| cfg.face_threshold = std.math.clamp(n, 0.5, 0.95) else ok = false;
+        } else if (eq(u8, key, "require_ir")) {
+            cfg.face_require_ir = boolean(val) orelse true;
         } else ok = false;
     } else if (eq(u8, sec, "bar")) {
         if (eq(u8, key, "height")) {
