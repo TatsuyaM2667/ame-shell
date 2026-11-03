@@ -76,6 +76,10 @@ const BUF_TYPE_CAPTURE = 1;
 const MEMORY_MMAP = 1;
 const FIELD_NONE = 1;
 const FMT_YUYV: u32 = 'Y' | ('U' << 8) | ('Y' << 16) | ('V' << 24);
+const FMT_GREY: u32 = 'G' | ('R' << 8) | ('E' << 16) | ('Y' << 24);
+
+/// 画素の形式: YUYV(普通のカメラ)・GREY(赤外線カメラ。顔認証で使う)
+pub const Fmt = enum { yuyv, grey };
 
 const S_FMT = 5;
 const REQBUFS = 8;
@@ -93,11 +97,17 @@ pub const Camera = struct {
     w: u32,
     h: u32,
     stride: u32,
+    fmt: Fmt = .yuyv,
     maps: [NBUF][]align(std.mem.page_size) u8 = undefined,
     n_maps: usize = 0,
 
     /// 開いて撮り始める。w×h(YUYV)・fps を頼む(カメラが近いものに決める)
     pub fn open(path: [*:0]const u8, w: u32, h: u32, fps: u32) !Camera {
+        return openFmt(path, w, h, fps, .yuyv);
+    }
+
+    /// 形式を選んで開く。GREY を頼んで GREY が返ってこなければ(赤外線カメラでなければ)error.NoFormat
+    pub fn openFmt(path: [*:0]const u8, w: u32, h: u32, fps: u32, fmt: Fmt) !Camera {
         const fd = c.open(path, c.O_RDWR | c.O_NONBLOCK | c.O_CLOEXEC);
         if (fd < 0) return error.OpenFailed;
         errdefer _ = c.close(fd);
@@ -105,11 +115,13 @@ pub const Camera = struct {
         f.type = BUF_TYPE_CAPTURE;
         f.fmt.pix.width = w;
         f.fmt.pix.height = h;
-        f.fmt.pix.pixelformat = FMT_YUYV;
+        const want = if (fmt == .grey) FMT_GREY else FMT_YUYV;
+        f.fmt.pix.pixelformat = want;
         f.fmt.pix.field = FIELD_NONE;
         if (!io(fd, ioc(true, S_FMT, @sizeOf(Format)), &f)) return error.FormatFailed;
-        if (f.fmt.pix.pixelformat != FMT_YUYV) return error.NoYuyv;
-        var self = Camera{ .fd = fd, .w = f.fmt.pix.width, .h = f.fmt.pix.height, .stride = @max(f.fmt.pix.bytesperline, f.fmt.pix.width * 2) };
+        if (f.fmt.pix.pixelformat != want) return error.NoFormat;
+        const bpp: u32 = if (fmt == .grey) 1 else 2;
+        var self = Camera{ .fd = fd, .w = f.fmt.pix.width, .h = f.fmt.pix.height, .stride = @max(f.fmt.pix.bytesperline, f.fmt.pix.width * bpp), .fmt = fmt };
         // 速さ(通らなくてもよい)
         var p = std.mem.zeroes(StreamParm);
         p.type = BUF_TYPE_CAPTURE;
@@ -160,7 +172,10 @@ pub const Camera = struct {
         var l = last orelse return false;
         defer _ = io(self.fd, ioc(true, QBUF, @sizeOf(Buffer)), &l);
         if (l.index >= self.n_maps or l.bytesused < self.stride * self.h) return false;
-        if (out) |o| yuyvToRgb(self.maps[l.index], self.w, self.h, self.stride, o, mirror);
+        if (out) |o| switch (self.fmt) {
+            .yuyv => yuyvToRgb(self.maps[l.index], self.w, self.h, self.stride, o, mirror),
+            .grey => greyToRgb(self.maps[l.index], self.w, self.h, self.stride, o, mirror),
+        };
         return true;
     }
 };
@@ -194,6 +209,16 @@ fn yuyvToRgb(src: []const u8, w: u32, h: u32, stride: u32, out: []u8, mirror: bo
                 d[1] = clamp8(yy - gg);
                 d[2] = clamp8(yy + bb);
             }
+        }
+    }
+}
+
+fn greyToRgb(src: []const u8, w: u32, h: u32, stride: u32, out: []u8, mirror: bool) void {
+    for (0..h) |y| {
+        const row = src[y * stride ..];
+        for (0..w) |x| {
+            const ox = if (mirror) w - 1 - x else x;
+            @memset(out[(y * w + ox) * 3 ..][0..3], row[x]);
         }
     }
 }
