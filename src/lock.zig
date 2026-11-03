@@ -101,6 +101,7 @@ pub const Lock = struct {
     /// 充電器をつないだときのアニメーション(chargeanim.zig)の経過秒(-1 = 出していない)。ロック中はロック画面の上に描く
     charge_t: f32 = -1,
     charge_pct: u8 = 0,
+    charge_kind: @import("chargeanim.zig").Kind = .plug,
     np_open: bool = false,
     np: Spring = Spring.init(0, 0.46, 0.84),
     /// 広げ始めたときの小さなジャケットの場所(そこから大きくなる)
@@ -743,10 +744,11 @@ pub const Lock = struct {
         return true;
     }
 
-    /// 充電器をつないだ(chargeanim.zig から。ロック中だけ)
-    pub fn playCharge(self: *Lock, pct: u8) void {
+    /// 充電器をつないだ・外した(chargeanim.zig から。ロック中だけ)
+    pub fn playCharge(self: *Lock, pct: u8, kind: @import("chargeanim.zig").Kind) void {
         self.charge_t = 0;
         self.charge_pct = pct;
+        self.charge_kind = kind;
         self.scheduleAll();
     }
 

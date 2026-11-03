@@ -309,9 +309,9 @@ pub const SysWatch = struct {
     pub fn checkBattery(self: *SysWatch) void {
         const app = self.app;
         const b = app.sys.battery;
-        // 充電器を挿した: 画面全体の充電のアニメーション(iPhone の MagSafe のように)。電池の通知の設定とは別
+        // 充電器を挿した・外した: 画面全体のアニメーション(iPhone の MagSafe のように)。電池の通知の設定とは別
         if (b.present) {
-            if (self.anim_ac) |pa| if (!pa and b.on_ac) if (app.charge) |ch| ch.play(b.percent);
+            if (self.anim_ac) |pa| if (pa != b.on_ac) if (app.charge) |ch| ch.play(b.percent, if (b.on_ac) .plug else .unplug);
             self.anim_ac = b.on_ac;
         }
         if (!app.cfg.notify_battery or !b.present) return;
@@ -345,6 +345,13 @@ pub const SysWatch = struct {
 
     fn acChanged(self: *SysWatch, b: sys.Battery) void {
         const app = self.app;
+        // 画面全体のアニメーションで知らせるときは、抜き差しの通知は出さない(前の通知が残っていれば消す)
+        if (app.cfg.charge_anim) {
+            self.chg_timer.disarm();
+            if (self.chg_notif != 0) app.notifs.dismiss(self.chg_notif, 3);
+            self.chg_notif = 0;
+            return;
+        }
         if (b.on_ac) {
             self.chg_has_time = false;
             self.chg_tries = 0;
