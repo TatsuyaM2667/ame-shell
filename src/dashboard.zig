@@ -334,6 +334,7 @@ pub const Dashboard = struct {
     }
 
     pub fn dataChanged(self: *Dashboard) void {
+        if (self.app.musicw) |m| m.update(); // ホーム画面の曲のウィジェットも
         if (self.surf) |s| s.schedule();
         if (self.app.cfg.layout == .caelestia) self.app.redrawBars();
     }

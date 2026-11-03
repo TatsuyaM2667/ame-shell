@@ -84,3 +84,10 @@ face {
   require_ir on           // 赤外線カメラでだけ使う(スマホの画面の写真では外れない)。普通のカメラしか無いときだけ off
   // camera "/dev/video2" // 使うカメラ(省略すると赤外線カメラを自動で選ぶ)
 }
+
+// ホーム画面の曲のウィジェット: ロック画面と同じ曲のカードを、デスクトップの四隅のどこかに置く(窓の下。曲が無いときは出さない)。
+// カードの何もない所をつかんでドラッグすると、近い隅へ動かせる(覚える)。ame-ctl widget music <隅|on|off>
+music-widget {
+  enabled on
+  corner bottom-right     // top-left / top-right / bottom-left / bottom-right
+}

@@ -15,6 +15,44 @@ const std = @import("std");
 
 pub const WallMode = enum(c_int) { aurora = 0, rain = 1, image = 2, video = 3 };
 pub const BarPos = enum { top, bottom };
+
+/// 画面の四隅(ホーム画面のウィジェットの置き場所)
+pub const Corner = enum {
+    top_left,
+    top_right,
+    bottom_left,
+    bottom_right,
+
+    pub fn parse(s: []const u8) ?Corner {
+        const eq = std.mem.eql;
+        if (eq(u8, s, "top-left")) return .top_left;
+        if (eq(u8, s, "top-right")) return .top_right;
+        if (eq(u8, s, "bottom-left")) return .bottom_left;
+        if (eq(u8, s, "bottom-right")) return .bottom_right;
+        return null;
+    }
+
+    pub fn name(c: Corner) []const u8 {
+        return switch (c) {
+            .top_left => "top-left",
+            .top_right => "top-right",
+            .bottom_left => "bottom-left",
+            .bottom_right => "bottom-right",
+        };
+    }
+
+    pub fn left(c: Corner) bool {
+        return c == .top_left or c == .bottom_left;
+    }
+
+    pub fn top(c: Corner) bool {
+        return c == .top_left or c == .top_right;
+    }
+
+    pub fn of(is_left: bool, is_top: bool) Corner {
+        return if (is_top) (if (is_left) .top_left else .top_right) else (if (is_left) .bottom_left else .bottom_right);
+    }
+};
 pub const Layout = enum { caelestia, classic };
 
 pub const Config = struct {
@@ -53,6 +91,9 @@ pub const Config = struct {
     face_threshold: f32 = 0.6,
     /// 赤外線カメラでだけ登録・照合する(画面に映した写真では外れない)。普通のカメラしか無いときだけ off に
     face_require_ir: bool = true,
+    /// ホーム画面の曲のウィジェット(musicwidget.zig): 出すか・四隅のどこか(ドラッグで動かすと state に覚える)
+    music_widget: bool = true,
+    music_corner: Corner = .bottom_right,
     /// 天気の場所(空 = IP アドレスから推定)。例: "Sapporo"、"Osaka"
     weather_location: Str = .{},
     // bar
@@ -314,6 +355,15 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             if (num(val)) |n| cfg.face_threshold = std.math.clamp(n, 0.5, 0.95) else ok = false;
         } else if (eq(u8, key, "require_ir")) {
             cfg.face_require_ir = boolean(val) orelse true;
+        } else ok = false;
+    } else if (eq(u8, sec, "music-widget")) {
+        if (eq(u8, key, "enabled")) {
+            cfg.music_widget = boolean(val) orelse true;
+        } else if (eq(u8, key, "corner")) {
+            cfg.music_corner = Corner.parse(val) orelse blk: {
+                ok = false;
+                break :blk cfg.music_corner;
+            };
         } else ok = false;
     } else if (eq(u8, sec, "bar")) {
         if (eq(u8, key, "height")) {

@@ -16,6 +16,7 @@ const gfx = @import("gfx.zig");
 const ipc = @import("ipc.zig");
 const Launcher = @import("launcher.zig").Launcher;
 const Lock = @import("lock.zig").Lock;
+const MusicWidget = @import("musicwidget.zig").MusicWidget;
 const Media = @import("media.zig").Media;
 const Notifs = @import("notify.zig").Notifs;
 const Osd = @import("osd.zig").Osd;
@@ -195,6 +196,8 @@ pub const App = struct {
     dashboard: *Dashboard = undefined,
     notifs: *Notifs = undefined,
     lock: *Lock = undefined,
+    /// ホーム画面の曲のウィジェット(Media より後に作るので、それまでは null)
+    musicw: ?*MusicWidget = null,
     media: *Media = undefined,
     syswatch: *SysWatch = undefined,
     wallpick: *WallPick = undefined,
@@ -279,6 +282,7 @@ pub const App = struct {
         app.notifs = try Notifs.create(app);
         app.lock = try Lock.create(app);
         app.media = try Media.create(app);
+        app.musicw = MusicWidget.create(app) catch null;
         app.wallpick = try WallPick.create(app);
         app.avatar = try Avatar.create(app);
         app.syswatch = try SysWatch.create(app);
@@ -332,6 +336,7 @@ pub const App = struct {
                 self.dashboard.reap();
                 self.notifs.reap();
                 self.lock.reap();
+                if (self.musicw) |m| m.reap();
                 self.wallpick.reap();
                 @import("shot.zig").reap(self);
                 @import("ripple.zig").reap(self);
@@ -429,6 +434,7 @@ pub const App = struct {
     }
 
     pub fn redrawBars(self: *App) void {
+        if (self.musicw) |m| m.schedule(); // 音量などの表示
         for (self.outputs.items) |o| {
             if (o.bar) |b| b.surf.schedule();
             if (o.frame) |f| f.schedule();
@@ -498,6 +504,7 @@ pub const App = struct {
                 for (self.outputs.items) |o| if (o.bar) |b| b.applyGeometry();
             }
             for (self.outputs.items) |o| if (o.wall) |w| w.configChanged(&old);
+            if (self.musicw) |m| m.configChanged(&old);
             self.redrawBars();
             self.armClock();
             if (self.initialized) self.supertap.enabled = cfg.super_launcher;
@@ -858,6 +865,7 @@ fn onGlobalRemove(data: ?*anyopaque, _: ?*c.struct_wl_registry, name: u32) callc
         app.notifs.outputRemoved(o);
         app.wallpick.outputRemoved(o);
         app.lock.outputRemoved(o);
+        if (app.musicw) |m| m.outputRemoved(o);
         @import("shot.zig").outputRemoved(app, o);
         @import("ripple.zig").outputRemoved(app, o);
         @import("wm/wobble.zig").outputRemoved(o);

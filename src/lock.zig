@@ -26,6 +26,7 @@ const bar = @import("bar.zig");
 const lockui = @import("lockui.zig");
 const framedata = @import("frame/data.zig");
 const faceauth = @import("face/unlock.zig");
+const musiccard = @import("musiccard.zig");
 /// 顔認証が続けてこの回数だけ一致しなければ、パスワードで外すまで顔認証を使わない(他人が何度も試せないように)
 const MAX_FACE_FAILS = 3;
 
@@ -89,9 +90,7 @@ pub const Lock = struct {
     auth_mode: bool = false,
     last_input_ms: u64 = 0,
     time_s: f32 = 0,
-    vinyl: f32 = 0,
     media_s: Spring = Spring.init(0, 0.5, 0.85),
-    play_s: Spring = Spring.init(0, 0.3, 0.8),
     expand: Spring = Spring.init(0, 0.4, 0.85),
     ring: Spring = Spring.init(0, 0.4, 0.85),
     notif_expanded: bool = false,
@@ -106,12 +105,8 @@ pub const Lock = struct {
     lk_scroll: Spring = Spring.init(0, 0.45, 0.9),
     lyr_idx: i32 = -1,
     hits: lockui.Hits = .{},
-    /// 曲のカードの音量・再生位置のつまみをドラッグ中(0 = なし / 1 = 音量 / 2 = 再生位置)
-    drag: u8 = 0,
-    /// ドラッグ中に見せる値(0〜1)。音量は wpctl を呼ぶ回数を減らすため、少し動いたときだけ反映する
-    drag_v: f32 = 0,
-    vol_sent: f32 = -1,
-    vol_sent_ms: u64 = 0,
+    /// 再生中の曲のカード(ホーム画面のウィジェットと同じもの。musiccard.zig)
+    music: musiccard.Card = .{},
     /// 顔の登録の前の本人確認として出したロック(lockForEnroll)。パスワードが通ったら登録を始める。
     /// 鍵の掛かっていない状態から始めたものなので、Esc で何もせず外してよい
     enroll_req: bool = false,
@@ -267,12 +262,11 @@ pub const Lock = struct {
         self.auth.snap(0);
         self.auth_mode = false;
         self.notif_expanded = false;
-        self.drag = 0;
         // 曲のカードに出す音量を今の値にしておく
         self.app.sys.volume = @import("platform/sys.zig").volume();
         self.expand.snap(0);
         self.media_s.snap(0);
-        self.play_s.snap(if (self.app.media.status == .playing) 1 else 0);
+        self.music.reset(self.app);
         self.first_notif_id = self.app.notifs.next_id;
         for (&self.cards) |*cd| cd.* = .{};
         self.updateSpectrum();
@@ -283,6 +277,7 @@ pub const Lock = struct {
             s.output = o;
             self.views[i] = .{ .lock = self, .out = o, .surf = s };
         }
+        if (self.app.musicw) |m| m.update(); // ホーム画面の曲のウィジェットの音を止める
         // ランチャー等は閉じておく(ロック解除後に開いたままにならないように)
         self.app.launcher.close();
         self.app.dashboard.close();
@@ -334,6 +329,7 @@ pub const Lock = struct {
         }
         self.session = null;
         self.locked = false;
+        if (self.app.musicw) |m| m.update();
         @memset(&self.pw, 0); // パスワードはメモリに残さない
         self.pw_len = 0;
         _ = c.wl_display_flush(self.app.display);
@@ -681,9 +677,6 @@ pub const Lock = struct {
         }
         if (!self.auth_mode) {
             switch (self.hits.which(ev.x, ev.y)) {
-                .prev => self.app.media.prev(),
-                .play => self.app.media.toggle(),
-                .next => self.app.media.next(),
                 .stack => self.notif_expanded = !self.notif_expanded,
                 .uprev, .unext, .session, .reboot, .poweroff => {},
                 .none => self.setAuth(true),
@@ -694,83 +687,12 @@ pub const Lock = struct {
         self.scheduleAll();
     }
 
-    /// 曲のカードの操作: 音量(つまみのドラッグ・クリック・カードの上でホイール)、スピーカーのアイコンで消音、
-    /// 再生位置のバーをクリック・ドラッグで移動。扱ったら true
+    /// 曲のカードの操作(musiccard.zig): 前へ・再生・次へ、音量・再生位置のつまみ、消音、ホイールで音量。扱ったら true
     fn mediaPointer(self: *Lock, ev: surface.PointerEvent) bool {
-        const sys = @import("platform/sys.zig");
-        const now = @import("platform/loop.zig").nowMs();
-        const h = &self.hits;
-        switch (ev.kind) {
-            .press => {
-                if (ev.button != 0x110) return false;
-                if (inRectPad(h.vol, ev.x, ev.y, 8)) {
-                    self.drag = 1;
-                } else if (inRectPad(h.seek, ev.x, ev.y, 7) and self.app.media.length_s > 0) {
-                    self.drag = 2;
-                } else if (inRectPad(h.mute, ev.x, ev.y, 4)) {
-                    sys.toggleMute();
-                    self.app.sys.volume = sys.volume();
-                    self.last_input_ms = now;
-                    self.scheduleAll();
-                    return true;
-                } else return false;
-                self.last_input_ms = now;
-                self.dragTo(ev.x, now, false);
-                return true;
-            },
-            .motion => {
-                if (self.drag == 0) return false;
-                self.dragTo(ev.x, now, false);
-                return true;
-            },
-            .release, .leave => {
-                if (self.drag == 0) return false;
-                self.dragTo(ev.x, now, true);
-                self.drag = 0;
-                self.scheduleAll();
-                return true;
-            },
-            .scroll => {
-                if (!inRectPad(h.card, ev.x, ev.y, 0) or ev.scroll == 0) return false;
-                // タッチパッドは細かい値が続けて来るので、wpctl は 60ms に 1 回まで
-                if (now -% self.vol_sent_ms < 60) return true;
-                self.vol_sent_ms = now;
-                // 下へ回すと小さく(wl_pointer の値は下が正)
-                sys.setVolumeDelta(if (ev.scroll > 0) -5 else 5);
-                self.app.sys.volume = sys.volume();
-                self.last_input_ms = now;
-                self.scheduleAll();
-                return true;
-            },
-            else => return false,
-        }
-    }
-
-    fn dragTo(self: *Lock, x: f32, now: u64, final: bool) void {
-        const sys = @import("platform/sys.zig");
-        const r = if (self.drag == 1) self.hits.vol else self.hits.seek;
-        if (r[2] <= 0) return;
-        const v = std.math.clamp((x - r[0]) / r[2], 0, 1);
-        self.drag_v = v;
-        if (self.drag == 1) {
-            // wpctl を呼ぶのは 1% 以上動いて 40ms たったとき(と、離したとき)だけ
-            if (final or (@abs(v - self.vol_sent) >= 0.01 and now -% self.vol_sent_ms >= 40)) {
-                sys.setVolume(v);
-                if (self.app.sys.volume.muted and v > 0) sys.toggleMute();
-                self.vol_sent = v;
-                self.vol_sent_ms = now;
-                self.app.sys.volume.level = v;
-                self.app.sys.volume.muted = false;
-                self.app.sys.volume.known = true;
-            }
-        } else if (final) {
-            @import("media.zig").seekTo(self.app.media, v * self.app.media.length_s);
-        }
+        if (!self.music.pointer(self.app, ev)) return false;
+        self.last_input_ms = @import("platform/loop.zig").nowMs();
         self.scheduleAll();
-    }
-
-    fn inRectPad(r: [4]f32, x: f32, y: f32, pad: f32) bool {
-        return r[2] > 0 and x >= r[0] - pad and x <= r[0] + r[2] + pad and y >= r[1] - pad and y <= r[1] + r[3] + pad;
+        return true;
     }
 
     /// 眺める画面でのメディアキー(River の割り当てが届かないとき用)。扱ったら true

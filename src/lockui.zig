@@ -20,25 +20,16 @@ const lockmod = @import("lock.zig");
 const Lock = lockmod.Lock;
 const App = @import("app.zig").App;
 const Surface = @import("surface.zig").Surface;
+const musiccard = @import("musiccard.zig");
 
 const white = Color.hex(0xffffff);
 const black = Color.hex(0x000000);
 
 const I_LOCK = "\u{F033E}";
 const I_UNLOCK = "\u{F0FC6}";
-const I_PLAY = "\u{F040A}";
-const I_PAUSE = "\u{F03E4}";
-const I_PREV = "\u{F04AE}";
-const I_NEXT = "\u{F04AD}";
 const I_BELL = "\u{F009A}";
 const I_BOLT = "\u{F140B}";
-const I_MUSIC = "\u{F075A}";
 const I_FACE = "\u{F0C7B}";
-const I_VOL_HI = "\u{F057E}";
-const I_VOL_MID = "\u{F0580}";
-const I_VOL_LO = "\u{F057F}";
-const I_VOL_OFF = "\u{F0581}";
-const I_VOL_MUTE = "\u{F075F}";
 
 fn clamp01(x: f32) f32 {
     return std.math.clamp(x, 0, 1);
@@ -60,15 +51,7 @@ fn inRect(r: [4]f32, x: f32, y: f32) bool {
 
 /// クリックできる場所(描くたびに作り直す。座標は surface の論理 px)
 pub const Hits = struct {
-    prev: [4]f32 = .{ 0, 0, 0, 0 },
-    play: [4]f32 = .{ 0, 0, 0, 0 },
-    next: [4]f32 = .{ 0, 0, 0, 0 },
     stack: [4]f32 = .{ 0, 0, 0, 0 },
-    // 曲のカード: カード全体(ホイールで音量)・音量のバー・スピーカー(消音)・再生位置のバー
-    card: [4]f32 = .{ 0, 0, 0, 0 },
-    vol: [4]f32 = .{ 0, 0, 0, 0 },
-    mute: [4]f32 = .{ 0, 0, 0, 0 },
-    seek: [4]f32 = .{ 0, 0, 0, 0 },
     // ログイン画面だけ: ユーザーの切り替え・セッション・再起動・電源オフ
     uprev: [4]f32 = .{ 0, 0, 0, 0 },
     unext: [4]f32 = .{ 0, 0, 0, 0 },
@@ -76,16 +59,13 @@ pub const Hits = struct {
     reboot: [4]f32 = .{ 0, 0, 0, 0 },
     poweroff: [4]f32 = .{ 0, 0, 0, 0 },
 
-    pub const Hit = enum { none, prev, play, next, stack, uprev, unext, session, reboot, poweroff };
+    pub const Hit = enum { none, stack, uprev, unext, session, reboot, poweroff };
     pub fn which(self: *const Hits, x: f32, y: f32) Hit {
         if (inRect(self.uprev, x, y)) return .uprev;
         if (inRect(self.unext, x, y)) return .unext;
         if (inRect(self.session, x, y)) return .session;
         if (inRect(self.reboot, x, y)) return .reboot;
         if (inRect(self.poweroff, x, y)) return .poweroff;
-        if (inRect(self.prev, x, y)) return .prev;
-        if (inRect(self.play, x, y)) return .play;
-        if (inRect(self.next, x, y)) return .next;
         if (inRect(self.stack, x, y)) return .stack;
         return .none;
     }
@@ -106,7 +86,6 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
     const acc = theme.accent(app);
     const txt = theme.text(app);
     const sub = theme.subtext(app);
-    const playing = app.media.status == .playing;
     // ログイン画面には曲も通知も出さない
     const has_media = !self.greeter and app.media.status != .none;
     // 同期した歌詞(lyrics.zig)。曲のカードの下に、前・今・次の行を出す
@@ -114,12 +93,8 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
 
     if (primary) {
         self.time_s += dt;
-        if (playing) {
-            self.vinyl += dt * std.math.tau / 8.0;
-            if (self.vinyl > std.math.tau) self.vinyl -= std.math.tau;
-        }
+        if (self.music.step(app, dt) and has_media) animating = true;
         self.media_s.set(if (has_media) 1 else 0);
-        self.play_s.set(if (playing) 1 else 0);
         self.expand.set(if (self.notif_expanded) 1 else 0);
         // 同期歌詞があれば出す(前奏・間奏で今の行が無いときは「♪」)
         self.lyr_s.set(if (has_media and app.media.lyrics.state == .synced) 1 else 0);
@@ -132,7 +107,7 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
             self.lk_pop.set(1);
             self.lyr_idx = new_idx;
         }
-        var springs = [_]*Spring{ &self.auth, &self.media_s, &self.play_s, &self.expand, &self.ring, &self.lyr_s, &self.lk_pop, &self.lk_scroll };
+        var springs = [_]*Spring{ &self.auth, &self.media_s, &self.expand, &self.ring, &self.lyr_s, &self.lk_pop, &self.lk_scroll };
         if (anim.stepAll(&springs, dt)) animating = true;
         // 歌詞を出している間は、ダッシュボードと同じく 3 秒おきに本当の再生位置を聞いてずれを直す
         // (シークを知らせないプレイヤーがあり、そのままだと違う行を指したままになる)
@@ -141,7 +116,7 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
             animating = true;
         };
     } else {
-        animating = self.auth.moving() or self.media_s.moving() or self.play_s.moving() or self.expand.moving();
+        animating = self.auth.moving() or self.media_s.moving() or self.music.play_s.moving() or self.expand.moving();
     }
     // 光が流れる文字・レコードは動き続ける(眺める画面のときだけ)
     if (self.auth.x < 0.99) animating = true;
@@ -275,136 +250,14 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         const side_w = W / 2 - card_w / 2 - margin - 24;
         const corner = side_w >= 300 * k;
         const pw: f32 = if (corner) @min(400 * k, side_w) else @min(400 * k, W - 40);
-        const art: f32 = 84 * k;
-        const pad: f32 = 16 * k;
-        // 下に音量の行
-        const vrow: f32 = 30 * k;
-        const ch: f32 = art + pad * 2 + vrow;
-        const rad: f32 = 24 * k;
+        const ch: f32 = musiccard.Card.height(k);
         const px0 = if (corner) W - margin - pw else W / 2 - pw / 2;
         const cy_base = if (corner) H - 64 * k - ch else y_next;
         const cy0 = cy_base + (1 - m_e) * 30;
-        const ps = self.play_s.x;
         cv.save();
         cv.opacity(m_e);
         cv.scaleAbout(px0 + pw / 2, cy0 + ch / 2, lerp(0.92, 1, m_e));
-        cv.shadow(px0, cy0 + 10, pw, ch, rad, 30, black.alpha(0.4));
-        cv.shadow(px0, cy0 + 14, pw, ch, rad, 46, acc.alpha(0.32 * ps));
-        if (app.media.art_tex != 0) {
-            cv.imageEx(app.media.art_tex, px0, cy0, pw, ch, rad, .{ 0, 0.25, 1, 0.75 }, 7, 0, 0.45, 0.97);
-            cv.rect(px0, cy0, pw, ch, rad, Color.hex(0x05070f).alpha(0.32));
-        } else {
-            cv.glass(px0, cy0, pw, ch, rad, theme.glassStrong(app));
-        }
-        cv.rectBorder(px0, cy0, pw, ch, rad, .{ .a = 0 }, white.alpha(0.15), 1);
-
-        // レコード(ジャケットの後ろから、再生中だけ滑り出て回る)と液体のビジュアライザー
-        const ax = px0 + pad;
-        const ay = cy0 + pad;
-        const R: f32 = art * 0.47;
-        const slide = art * 0.34 * ps;
-        const dcx = ax + art / 2 + slide;
-        const dcy = ay + art / 2;
-        if (ps > 0.02) {
-            cv.save();
-            cv.opacity(ps);
-            const zeros = [_]f32{0} ** data.BARS;
-            const vals: []const f32 = if (self.spectrum.running()) &self.spectrum.values else &zeros;
-            cv.liquid(dcx, dcy, R + 1.5 * k, 16 * k, vals, acc, acc.lighten(0.3), self.vinyl / std.math.tau * 0.25);
-            cv.restore();
-        }
-        cv.rect(dcx - R, dcy - R, R * 2, R * 2, R, Color.hex(0x0c0c11));
-        var gr: f32 = R - 3;
-        while (gr > R * 0.45) : (gr -= 2.4) cv.arc(dcx, dcy, gr, 0.7, 1, white.alpha(0.045), .{ .a = 0 });
-        const lr: f32 = R * 0.38;
-        if (app.media.art_tex != 0) {
-            cv.imageEx(app.media.art_tex, dcx - lr, dcy - lr, lr * 2, lr * 2, lr, .{ 0, 0, 1, 1 }, 0, self.vinyl, 1, 1);
-        } else cv.rect(dcx - lr, dcy - lr, lr * 2, lr * 2, lr, acc.alpha(0.8));
-        cv.rect(dcx - 2, dcy - 2, 4, 4, 2, Color.hex(0x0c0c11));
-        // ジャケット(手前)
-        cv.save();
-        cv.scaleAbout(ax + art / 2, ay + art / 2, lerp(0.92, 1, ps));
-        cv.shadow(ax, ay + 6, art, art, 14 * k, 16, black.alpha(0.5));
-        if (app.media.art_tex != 0) {
-            cv.image(app.media.art_tex, ax, ay, art, art, 14 * k);
-        } else {
-            cv.rectGrad(ax, ay, art, art, 14 * k, acc.lighten(0.25), Color.mix(acc, Color.hex(0x101425), 0.45));
-            _ = cv.text(ax + art / 2, ay + art / 2 + 12 * k, 32 * k, white, I_MUSIC, .{ .alignment = .center });
-        }
-        cv.rectBorder(ax, ay, art, art, 14 * k, .{ .a = 0 }, white.alpha(0.16), 1);
-        cv.restore();
-
-        // 曲名・アーティスト・進み具合・操作
-        const tx = ax + art + art * 0.34 + R * 0.5 + 14 * k;
-        const tw = px0 + pw - pad - tx;
-        const m = app.media;
-        // 動画サイトの書き方(【MV】アーティスト「曲名」など)は、歌詞の検索で整えた名前で出す
-        const show_t = if (m.lyrics.qTitle().len > 0) m.lyrics.qTitle() else m.title[0..m.title_len];
-        const show_a = if (m.lyrics.qArtist().len > 0) m.lyrics.qArtist() else m.artist[0..m.artist_len];
-        _ = cv.text(tx, ay + 18 * k, 16 * k, white.alpha(0.97), show_t, .{ .bold = true, .max_w = tw });
-        _ = cv.text(tx, ay + 37 * k, 12.5 * k, white.alpha(0.72), show_a, .{ .max_w = tw });
-        self.hits.card = .{ px0, cy0, pw, ch };
-        if (m.length_s > 0) {
-            const pos = m.position();
-            // 再生位置のバー: クリック・ドラッグで移動(ドラッグ中はつまみの位置を見せる)
-            const seeking = self.drag == 2;
-            const f = if (seeking) self.drag_v else clamp01(pos / m.length_s);
-            const py = ay + 49 * k;
-            const bh: f32 = @as(f32, if (seeking) 5.5 else 3.5) * k;
-            cv.rect(tx, py, tw, bh, bh / 2, white.alpha(0.18));
-            cv.rect(tx, py, tw * f, bh, bh / 2, white.alpha(0.9));
-            if (seeking) {
-                cv.rect(tx + tw * f - 6 * k, py + bh / 2 - 6 * k, 12 * k, 12 * k, 6 * k, white);
-                var tb: [16]u8 = undefined;
-                const sec: u32 = @intFromFloat(f * m.length_s);
-                const ts = std.fmt.bufPrint(&tb, "{d}:{d:0>2}", .{ sec / 60, sec % 60 }) catch "";
-                _ = cv.text(tx + tw, py - 4 * k, 11 * k, white.alpha(0.85), ts, .{ .alignment = .right });
-            }
-            self.hits.seek = .{ tx, py - 2 * k, tw, bh + 4 * k };
-        }
-        const by = ay + art - 4 * k;
-        const bmid = tx + tw / 2;
-        const gap: f32 = 46 * k;
-        const bs: f32 = 34 * k;
-        self.hits.prev = .{ bmid - gap - bs / 2, by - bs / 2 - 7 * k, bs, bs };
-        self.hits.play = .{ bmid - bs / 2, by - bs / 2 - 7 * k, bs, bs };
-        self.hits.next = .{ bmid + gap - bs / 2, by - bs / 2 - 7 * k, bs, bs };
-        _ = cv.text(bmid - gap, by, 20 * k, white.alpha(0.9), I_PREV, .{ .alignment = .center });
-        cv.save();
-        cv.scaleAbout(bmid, by - 8 * k, 0.6 + 0.4 * ps);
-        cv.opacity(ps);
-        _ = cv.text(bmid, by + 2 * k, 27 * k, white, I_PAUSE, .{ .alignment = .center });
-        cv.restore();
-        cv.save();
-        cv.scaleAbout(bmid, by - 8 * k, 1 - 0.4 * ps);
-        cv.opacity(1 - ps);
-        _ = cv.text(bmid, by + 2 * k, 27 * k, white, I_PLAY, .{ .alignment = .center });
-        cv.restore();
-        _ = cv.text(bmid + gap, by, 20 * k, white.alpha(0.9), I_NEXT, .{ .alignment = .center });
-
-        // 音量: スピーカー(押すと消音)・バー(クリック・ドラッグ)・数字。カードの上でホイールを回しても変わる
-        {
-            const vol = app.sys.volume;
-            const lvl = if (self.drag == 1) self.drag_v else if (vol.known) clamp01(vol.level) else 0;
-            const muted = vol.muted and self.drag != 1;
-            const vy = cy0 + pad + art + vrow * 0.5 + 2 * k;
-            const icon: []const u8 = if (!vol.known) I_VOL_OFF else if (muted) I_VOL_MUTE else if (lvl > 0.6) I_VOL_HI else if (lvl > 0.25) I_VOL_MID else I_VOL_LO;
-            const ix = ax + 10 * k;
-            _ = cv.text(ix, vy + 6.5 * k, 18 * k, white.alpha(if (muted) 0.55 else 0.9), icon, .{ .alignment = .center });
-            self.hits.mute = .{ ix - 13 * k, vy - 13 * k, 26 * k, 26 * k };
-            const bx = ax + 30 * k;
-            const bw = px0 + pw - pad - 44 * k - bx;
-            const bh: f32 = @as(f32, if (self.drag == 1) 6 else 4.5) * k;
-            cv.rect(bx, vy - bh / 2, bw, bh, bh / 2, white.alpha(0.18));
-            cv.rect(bx, vy - bh / 2, bw * lvl, bh, bh / 2, (if (muted) white.alpha(0.35) else white.alpha(0.9)));
-            const kr: f32 = @as(f32, if (self.drag == 1) 8 else 6) * k;
-            cv.shadow(bx + bw * lvl - kr, vy - kr + 1, kr * 2, kr * 2, kr, 6, black.alpha(0.35));
-            cv.rect(bx + bw * lvl - kr, vy - kr, kr * 2, kr * 2, kr, white);
-            self.hits.vol = .{ bx, vy - 8 * k, bw, 16 * k };
-            var pb: [8]u8 = undefined;
-            const pct = std.fmt.bufPrint(&pb, "{d}", .{@as(u32, @intFromFloat(@round(lvl * 100)))}) catch "";
-            _ = cv.text(px0 + pw - pad, vy + 4.5 * k, 12.5 * k, white.alpha(0.75), if (muted) "消音" else pct, .{ .alignment = .right });
-        }
+        self.music.draw(app, cv, px0, cy0, pw, k, acc, if (self.spectrum.running()) &self.spectrum.values else null);
         cv.restore();
 
         // ---- 歌詞: カードの上に浮かべる。ダッシュボードと同じく、歌い終えた行が 1 行ずつ上へ積み上がり、

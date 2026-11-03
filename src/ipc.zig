@@ -85,6 +85,7 @@ const help =
     \\  net wifi|saved|radio|ssid|bt|bt-devices   (Wi-Fi・Bluetooth の状態。NetworkManager / BlueZ に D-Bus で聞く)
     \\  hand on|off|toggle|status   (ハンド操作: カメラで手の動きを見てカーソル・窓を操作する)
     \\  face enroll|clear|status     (顔認証: 顔を登録・消す。登録するとロック画面で顔を見てロックを外す)
+    \\  widget music <隅|on|off>     (ホーム画面の曲のウィジェット: top-left / top-right / bottom-left / bottom-right に置く・出す・消す)
     \\  lock
     \\  reload                 (設定の再読込)
     \\  widgets reload
@@ -111,6 +112,11 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
             const q = std.mem.trim(u8, rest[@min(rest.len, arg.len)..], " ");
             if (q.len > 0) app.launcher.setQuery(q);
         } else if (eq(u8, arg, "close")) app.launcher.close() else app.launcher.toggle();
+    } else if (eq(u8, cmd, "widget")) {
+        // ホーム画面のウィジェット: widget music top-left|top-right|bottom-left|bottom-right|on|off|toggle|status
+        if (!eq(u8, arg, "music")) return "error: widget music <corner|on|off|toggle|status>";
+        const m = app.musicw orelse return "error: unavailable";
+        return m.command(std.mem.trim(u8, rest[@min(rest.len, arg.len)..], " "));
     } else if (eq(u8, cmd, "dashboard")) {
         // caelestia: dashboard dashboard|media|performance|workspaces で、そのタブを開く
         const tabs = [_][]const u8{ "dashboard", "media", "performance", "workspaces" };
