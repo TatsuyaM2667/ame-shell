@@ -82,6 +82,8 @@ pub const Config = struct {
     tap_to_click: bool = true,
     /// ハンド操作(hand/hand.zig): 起動時にオンにするか・使うカメラ(空 = /dev/video* から自動)
     hand_enabled: bool = false,
+    /// ハンド操作の動き方: false = 全部(カーソル・クリック・ポーズ)/ true = ポーズだけ(割り当てたポーズでアプリの起動など)
+    hand_poses_only: bool = false,
     hand_camera: Str = .{},
     /// 指の軌跡に波を立てる
     hand_trail: bool = true,
@@ -355,6 +357,8 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
     } else if (eq(u8, sec, "hand")) {
         if (eq(u8, key, "enabled")) {
             cfg.hand_enabled = boolean(val) orelse false;
+        } else if (eq(u8, key, "mode")) {
+            cfg.hand_poses_only = eq(u8, val, "poses");
         } else if (eq(u8, key, "trail")) {
             cfg.hand_trail = boolean(val) orelse true;
         } else if (eq(u8, key, "camera")) {

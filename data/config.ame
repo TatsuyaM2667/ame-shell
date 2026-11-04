@@ -74,6 +74,7 @@ lyrics {
 // ハンド操作: カメラに映った手の動きでカーソルと窓を操作する(ユーティリティのボタン・ame-ctl hand toggle でも切り替え)
 hand {
   enabled off             // on なら起動したときからオン
+  mode full               // full = カーソル・クリック・ポーズ全部 / poses = ポーズだけ(割り当てたポーズでアプリの起動など。カーソルは動かさない)
   trail on                // 指の軌跡に光る波を立てる
   // camera "/dev/video0" // 使うカメラ(省略すると /dev/video* から自動で選ぶ)
 }

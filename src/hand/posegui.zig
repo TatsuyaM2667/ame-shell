@@ -28,7 +28,7 @@ const white = Color.hex(0xffffff);
 const black = Color.hex(0x000000);
 
 const Tab = enum { action, app, command };
-const HitKind = enum { close, del, preset, which_a, which_b, two, use_live, tab, op, app, add, cmdbox, custom_pose, cdel, add_custom, rec_start, rec_cancel };
+const HitKind = enum { close, del, preset, which_a, which_b, two, use_live, tab, op, app, add, cmdbox, custom_pose, cdel, add_custom, rec_start, rec_cancel, mode_full, mode_poses };
 const Hit = struct { r: [4]f32, kind: HitKind, i: usize = 0 };
 
 var st: struct {
@@ -57,6 +57,8 @@ var st: struct {
     hover: i32 = -1,
     hits: [320]Hit = undefined,
     n_hits: usize = 0,
+    /// 「カメラに映っている手のポーズを使う」を押した時刻(0 = 数えていない)
+    live_t0: u64 = 0,
     // ---- 自分のポーズの登録 ----
     rec: enum { off, naming, countdown, capture } = .off,
     rec_name: [48]u8 = undefined,
@@ -217,19 +219,67 @@ fn draw(_: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
     cv.rect(cr[0], cr[1], cr[2], cr[3], 16, white.alpha(if (isHover(.close, 0)) 0.2 else 0.08));
     _ = cv.text(cr[0] + 16, cr[1] + 22, 16, txt, "\u{F0156}", .{ .alignment = .center });
     addHit(cr, .close, 0);
+    // ハンド操作の動き方: 全部(カーソル・クリック・ポーズ)/ ポーズだけ(割り当てたポーズでアプリの起動など)
+    {
+        const hand = @import("hand.zig");
+        const po = if (hand.enabled()) hand.posesOnly() else app.cfg.hand_poses_only;
+        const mx = x0 + pw - 340;
+        _ = cv.text(mx - 8, y0 + 43, 12, sub, if (hand.enabled()) "ハンド操作(オン)" else "ハンド操作(オフ)", .{ .alignment = .right });
+        const segs = [_]struct { k: HitKind, label: []const u8, on: bool }{
+            .{ .k = .mode_full, .label = "全部", .on = !po },
+            .{ .k = .mode_poses, .label = "ポーズだけ", .on = po },
+        };
+        for (segs, 0..) |sg, k| {
+            const r = [4]f32{ mx + @as(f32, @floatFromInt(k)) * 132, y0 + 22, 128, 32 };
+            cv.rect(r[0], r[1], r[2], r[3], 16, if (sg.on) acc.alpha(0.5) else white.alpha(if (isHover(sg.k, 0)) 0.14 else 0.07));
+            _ = cv.text(r[0] + r[2] / 2, r[1] + 21, 12.5, txt, sg.label, .{ .alignment = .center, .bold = sg.on });
+            addHit(r, sg.k, 0);
+        }
+    }
 
     const top = y0 + 92;
     const lw = pw * 0.4;
     drawList(app, cv, x0 + 24, top, lw - 24, y0 + ph - 24 - top, acc, txt, sub);
     drawEditor(app, cv, x0 + lw + 16, top, pw - lw - 40, y0 + ph - 24 - top, acc, txt, sub);
     const rec_anim = drawRecord(app, cv, x0, y0, pw, ph, acc, txt, sub);
+    const live_anim = tickLive();
     cv.restore();
-    return moving or e < 0.999 or rec_anim;
+    return moving or e < 0.999 or rec_anim or live_anim;
 }
 
 // ---- 自分のポーズの登録: 名前 → 3 秒数える → 1.5 秒撮る ----
 
 const COUNT_MS = 3000;
+const LIVE_MS = 3000;
+
+/// 「カメラに映っている手のポーズを使う」: 3 秒数えてから取り込む(ハンド操作がオフならオンにする)
+fn startLive(app: *App) void {
+    const hand = @import("hand.zig");
+    if (!hand.enabled()) hand.enableMode(app, app.cfg.hand_poses_only);
+    st.live_t0 = loop.nowMs();
+    setMsg("3 秒後に、カメラに映っている手のポーズを取り込みます");
+}
+
+/// 数え終わったら取り込む(描くたびに呼ぶ)。数えている間は true
+fn tickLive() bool {
+    if (st.live_t0 == 0) return false;
+    if (loop.nowMs() -| st.live_t0 < LIVE_MS) return true;
+    st.live_t0 = 0;
+    const cp = @import("hand.zig").currentPose() orelse {
+        setMsg("手が見えませんでした(カメラの前で、もう一度)");
+        return false;
+    };
+    st.a = cp[0];
+    st.b = cp[1];
+    st.two = cp[1] != poses.NONE;
+    st.editing_b = false;
+    var mb: [160]u8 = undefined;
+    setMsg(if (st.two)
+        (std.fmt.bufPrint(&mb, "取り込みました: {s} + {s}", .{ poses.poseName(st.a), poses.poseName(st.b) }) catch "取り込みました")
+    else
+        (std.fmt.bufPrint(&mb, "取り込みました: {s}", .{poses.poseName(st.a)}) catch "取り込みました"));
+    return false;
+}
 const CAPTURE_MS = 1500;
 
 fn startRecord(app: *App) void {
@@ -457,18 +507,23 @@ fn drawEditor(app: *App, cv: *gfx.Canvas, x: f32, y: f32, w: f32, h: f32, acc: C
     }
     const rows_used: f32 = @floatFromInt((n_tiles + cols - 1) / cols);
     var yy = gy + rows_used * (th + gap) + 2;
-    // 今の手のポーズを使う(ハンド操作がオンで手が見えているとき)
-    if (@import("hand.zig").currentPose()) |cp| {
+    // カメラに映した手のポーズを使う: 押してから 3 秒後に取り込む(両手でポーズしていても、押してから作ればよい)
+    {
         const r = [4]f32{ x, yy, w, 34 };
-        cv.rect(r[0], r[1], r[2], r[3], 12, white.alpha(if (isHover(.use_live, 0)) 0.16 else 0.07));
-        drawHand(cv, r[0] + 8, r[1] + 2, 30, cp[0], acc.lighten(0.3));
-        if (cp[1] != poses.NONE) drawHand(cv, r[0] + 40, r[1] + 2, 30, cp[1], acc.lighten(0.3));
-        _ = cv.text(r[0] + 80, r[1] + 22, 12.5, txt, "今カメラに映っている手のポーズを使う", .{ .max_w = w - 90 });
+        const counting = st.live_t0 != 0;
+        cv.rect(r[0], r[1], r[2], r[3], 12, if (counting) acc.alpha(0.3) else white.alpha(if (isHover(.use_live, 0)) 0.16 else 0.07));
+        if (@import("hand.zig").currentPose()) |cp| {
+            drawHand(cv, r[0] + 8, r[1] + 2, 30, cp[0], acc.lighten(0.3));
+            if (cp[1] != poses.NONE) drawHand(cv, r[0] + 40, r[1] + 2, 30, cp[1], acc.lighten(0.3));
+        } else _ = cv.text(r[0] + 22, r[1] + 23, 16, sub, "\u{F1821}", .{ .alignment = .center });
+        var lb: [96]u8 = undefined;
+        const label = if (counting)
+            (std.fmt.bufPrint(&lb, "あと {d} 秒で取り込みます。ポーズを作ってください(両手でも)", .{(LIVE_MS -| (loop.nowMs() -| st.live_t0) + 999) / 1000}) catch "")
+        else
+            "3 秒後に、カメラに映っている手のポーズを使う(スペースでも)";
+        _ = cv.text(r[0] + 80, r[1] + 22, 12.5, txt, label, .{ .max_w = w - 90 });
         addHit(r, .use_live, 0);
         yy += 42;
-    } else {
-        _ = cv.text(x, yy + 18, 11.5, sub, "ハンド操作をオンにすると、カメラに映した手のポーズをそのまま使えます", .{ .max_w = w });
-        yy += 30;
     }
 
     // ---- 2. 操作 ----
@@ -660,13 +715,9 @@ fn pointer(_: *anyopaque, s: *Surface, ev: surface.PointerEvent) void {
                     st.editing_b = st.two and st.a != poses.NONE;
                     if (!st.two) st.b = poses.NONE;
                 },
-                .use_live => if (@import("hand.zig").currentPose()) |cp| {
-                    st.a = cp[0];
-                    st.b = cp[1];
-                    st.two = cp[1] != poses.NONE;
-                    st.editing_b = false;
-                    setMsg("今の手のポーズにしました");
-                },
+                .use_live => startLive(st.app.?),
+                .mode_full => @import("hand.zig").enableMode(st.app.?, false),
+                .mode_poses => @import("hand.zig").enableMode(st.app.?, true),
                 .tab => st.tab = @enumFromInt(h.i),
                 .op => st.op = @enumFromInt(h.i),
                 .app => st.app_idx = h.i,
@@ -696,6 +747,12 @@ fn key(_: *anyopaque, s: *Surface, ev: surface.KeyEvent) void {
                 }
             },
         }
+        s.schedule();
+        return;
+    }
+    // スペース(操作のタブ): 3 秒後に、カメラに映っている手のポーズを取り込む
+    if (ev.sym == c.XKB_KEY_space and st.tab == .action) {
+        startLive(st.app.?);
         s.schedule();
         return;
     }

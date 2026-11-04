@@ -212,6 +212,9 @@ const State = struct {
     pose_p0: [2]f32 = .{ 0, 0 },
     pose_done: bool = false,
     pose_bind: ?*const poses.Binding = null,
+    /// ポーズだけ: カーソルを動かさず、クリック・元からある動き(メニュー・閉じる・ワークスペース)も使わない。
+    /// 割り当てたポーズ(アプリの起動など)だけを見る
+    poses_only: bool = false,
     /// 最新の手の形と、その番号(届くたびに増える。ポーズの登録で使う)
     shape: custom.Shape = [_]f32{0} ** custom.DIM,
     shape_seq: u32 = 0,
@@ -223,7 +226,32 @@ pub fn enabled() bool {
 }
 
 pub fn toggle(app: *App) void {
-    if (st.on) disable() else enable(app);
+    if (st.on) disable() else enableMode(app, app.cfg.hand_poses_only);
+}
+
+/// ポーズだけ(アプリの起動など、割り当てたポーズだけを見る)か
+pub fn posesOnly() bool {
+    return st.poses_only;
+}
+
+/// 動き方を決めてオンにする(すでにオンなら切り替えるだけ)。poses_only = カーソル・クリックを使わず、割り当てたポーズだけ
+pub fn enableMode(app: *App, poses_only: bool) void {
+    if (st.on and st.poses_only != poses_only) {
+        // 切り替え: つかんでいる・メニューを開いているなら、いったん手放す
+        if (st.pinching) {
+            st.pinching = false;
+            st.press.set(0);
+            endDrag();
+        }
+        st.menu = false;
+        st.menu_s.set(0);
+        st.alt_btn = 0;
+        st.scrolling = false;
+    }
+    st.poses_only = poses_only;
+    if (!st.on) enable(app);
+    setBanner(if (poses_only) "ポーズだけ(カーソルは動かしません)" else "ハンド操作");
+    if (st.surf) |s| s.schedule();
 }
 
 pub fn enable(app: *App) void {
@@ -453,15 +481,6 @@ fn frame(app: *App, m: Msg) void {
     }
     const settled = now -| st.seen_since >= 500;
 
-    movePointer(st.cur);
-    wakeAdd(app, st.cur, now);
-
-    if (st.menu) {
-        menuFrame(app, m, now);
-        sf.schedule();
-        return;
-    }
-
     // ---- 伸びている指(ポーズ)・もう一方の手: 3 コマ続いたら確定 ----
     // 自分のポーズ(登録した形)に近ければその値、でなければ伸びている指
     const id1: u8 = if (custom.match(&m.shape)) |i| custom.BASE + @as(u8, @intCast(i)) else m.ext;
@@ -477,6 +496,22 @@ fn frame(app: *App, m: Msg) void {
     if (st.cand_ext_n >= 3) {
         st.ext = st.cand_ext;
         st.ext2 = st.cand_ext2;
+    }
+
+    // ---- ポーズだけ(カーソル・クリック・元からある動きは使わず、割り当てたポーズだけ見る)----
+    if (st.poses_only) {
+        _ = checkBinding(app, now, settled);
+        sf.schedule();
+        return;
+    }
+
+    movePointer(st.cur);
+    wakeAdd(app, st.cur, now);
+
+    if (st.menu) {
+        menuFrame(app, m, now);
+        sf.schedule();
+        return;
     }
 
     // ---- 親指と中指 = 右クリック、親指と薬指 = 真ん中のクリック(人差し指はつままない)----
@@ -580,29 +615,7 @@ fn frame(app: *App, m: Msg) void {
         scroll(dx * 1.6, dy * 1.6);
     }
 
-    // ---- ポーズの割り当て(設定画面で決めたもの): 0.7 秒止めると動く ----
-    const bind: ?*const poses.Binding = if (st.pinching or st.alt_btn != 0 or !settled or st.scrolling or
-        (st.ext == poses.POINT and st.ext2 == poses.NONE)) null else poses.find(st.ext, st.ext2);
-    if (bind) |b| {
-        if (st.pose_a != st.ext or st.pose_b != st.ext2 or dist2(st.cur, st.pose_p0) > 50 * 50) {
-            st.pose_a = st.ext;
-            st.pose_b = st.ext2;
-            st.pose_t0 = now;
-            st.pose_p0 = st.cur;
-            st.pose_done = false;
-        } else if (!st.pose_done and now -| st.pose_t0 >= POSE_MS) {
-            st.pose_done = true;
-            poses.run(app, b);
-            var db: [160]u8 = undefined;
-            setBanner(poses.describe(app, b, &db));
-            addRipple(st.cur, theme.accent(app).lighten(0.15), 150, 1200);
-        }
-        st.pose_bind = b;
-    } else {
-        st.pose_bind = null;
-        st.pose_a = poses.NONE;
-        st.pose_b = poses.NONE;
-    }
+    const bind = checkBinding(app, now, settled);
     // 割り当てたポーズ・両手のときは、元からある動き(メニュー・閉じる・本数)を使わない
     const overriding = bind != null or st.ext2 != poses.NONE or custom.isId(st.ext);
 
@@ -676,6 +689,34 @@ fn frame(app: *App, m: Msg) void {
         }
     }
     sf.schedule();
+}
+
+/// ポーズの割り当て(設定画面で決めたもの): 0.7 秒止めると動く。今のポーズに割り当てがあれば返す
+fn checkBinding(app: *App, now: u64, settled: bool) ?*const poses.Binding {
+    // 設定画面を開いている間は動かさない(取り込もうとして作ったポーズで、割り当てが動いてしまわないように)
+    const bind: ?*const poses.Binding = if (@import("posegui.zig").isOpen() or st.pinching or st.alt_btn != 0 or !settled or st.scrolling or
+        (!st.poses_only and st.ext == poses.POINT and st.ext2 == poses.NONE)) null else poses.find(st.ext, st.ext2);
+    if (bind) |b| {
+        if (st.pose_a != st.ext or st.pose_b != st.ext2 or dist2(st.cur, st.pose_p0) > 50 * 50) {
+            st.pose_a = st.ext;
+            st.pose_b = st.ext2;
+            st.pose_t0 = now;
+            st.pose_p0 = st.cur;
+            st.pose_done = false;
+        } else if (!st.pose_done and now -| st.pose_t0 >= POSE_MS) {
+            st.pose_done = true;
+            poses.run(app, b);
+            var db: [160]u8 = undefined;
+            setBanner(poses.describe(app, b, &db));
+            addRipple(st.cur, theme.accent(app).lighten(0.15), 150, 1200);
+        }
+        st.pose_bind = b;
+    } else {
+        st.pose_bind = null;
+        st.pose_a = poses.NONE;
+        st.pose_b = poses.NONE;
+    }
+    return bind;
 }
 
 fn gotoWorkspace(app: *App, n: u8) void {
@@ -1037,11 +1078,16 @@ fn draw(_: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
         const x = st.cur[0];
         const y = st.cur[1];
         const pr = st.press.x;
-        const ring_r = 17 - 5 * pr;
-        cv.shadow(x - ring_r, y - ring_r, ring_r * 2, ring_r * 2, ring_r, 10, Color.hex(0x000000).alpha(0.25 * a));
-        cv.arc(x, y, ring_r, 2.4, 1, acc.lighten(0.25).alpha(0.95 * a), .{ .a = 0 });
-        const dot = 3.5 + 7 * pr;
-        cv.rect(x - dot, y - dot, dot * 2, dot * 2, dot, Color.hex(0xffffff).alpha(0.9 * a));
+        if (st.poses_only) {
+            // ポーズだけ: カーソルではないので、手の場所にうすい印だけ
+            cv.arc(x, y, 9, 1.6, 1, acc.lighten(0.3).alpha(0.45 * a), .{ .a = 0 });
+        } else {
+            const ring_r = 17 - 5 * pr;
+            cv.shadow(x - ring_r, y - ring_r, ring_r * 2, ring_r * 2, ring_r, 10, Color.hex(0x000000).alpha(0.25 * a));
+            cv.arc(x, y, ring_r, 2.4, 1, acc.lighten(0.25).alpha(0.95 * a), .{ .a = 0 });
+            const dot = 3.5 + 7 * pr;
+            cv.rect(x - dot, y - dot, dot * 2, dot * 2, dot, Color.hex(0xffffff).alpha(0.9 * a));
+        }
         // 長押しの進み具合(閉じる・メニュー)
         if (st.hold != .none and !st.hold_done and !st.menu) {
             const need: f32 = if (st.hold == .fist) HOLD_FIST_MS else HOLD_MENU_MS;
