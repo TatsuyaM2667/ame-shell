@@ -21,12 +21,14 @@ const theme = @import("../theme.zig");
 const surface = @import("../surface.zig");
 const Surface = surface.Surface;
 const poses = @import("poses.zig");
+const custom = @import("custom.zig");
+const loop = @import("../platform/loop.zig");
 
 const white = Color.hex(0xffffff);
 const black = Color.hex(0x000000);
 
 const Tab = enum { action, app, command };
-const HitKind = enum { close, del, preset, which_a, which_b, two, use_live, tab, op, app, add, cmdbox };
+const HitKind = enum { close, del, preset, which_a, which_b, two, use_live, tab, op, app, add, cmdbox, custom_pose, cdel, add_custom, rec_start, rec_cancel };
 const Hit = struct { r: [4]f32, kind: HitKind, i: usize = 0 };
 
 var st: struct {
@@ -55,6 +57,14 @@ var st: struct {
     hover: i32 = -1,
     hits: [320]Hit = undefined,
     n_hits: usize = 0,
+    // ---- 自分のポーズの登録 ----
+    rec: enum { off, naming, countdown, capture } = .off,
+    rec_name: [48]u8 = undefined,
+    rec_name_len: usize = 0,
+    rec_t0: u64 = 0,
+    rec_samples: [48]custom.Shape = undefined,
+    rec_n: usize = 0,
+    rec_seq: u32 = 0,
 } = .{};
 
 pub fn isOpen() bool {
@@ -144,6 +154,11 @@ fn hoverIdx(x: f32, y: f32) i32 {
 
 /// 手の絵: 手のひらと 5 本の指。伸びている指は長く明るく、曲げている指は短く暗く
 pub fn drawHand(cv: *gfx.Canvas, x: f32, y: f32, s: f32, mask: u8, col: Color) void {
+    // 自分のポーズ: 星の色の手の印
+    if (custom.isId(mask)) {
+        _ = cv.text(x + s / 2, y + s * 0.72, s * 0.62, Color.hex(0xffd36b), "\u{F1821}", .{ .alignment = .center });
+        return;
+    }
     if (mask == poses.NONE) {
         _ = cv.text(x + s / 2, y + s * 0.62, s * 0.4, col.alpha(0.4), "–", .{ .alignment = .center });
         return;
@@ -207,8 +222,110 @@ fn draw(_: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
     const lw = pw * 0.4;
     drawList(app, cv, x0 + 24, top, lw - 24, y0 + ph - 24 - top, acc, txt, sub);
     drawEditor(app, cv, x0 + lw + 16, top, pw - lw - 40, y0 + ph - 24 - top, acc, txt, sub);
+    const rec_anim = drawRecord(app, cv, x0, y0, pw, ph, acc, txt, sub);
     cv.restore();
-    return moving or e < 0.999;
+    return moving or e < 0.999 or rec_anim;
+}
+
+// ---- 自分のポーズの登録: 名前 → 3 秒数える → 1.5 秒撮る ----
+
+const COUNT_MS = 3000;
+const CAPTURE_MS = 1500;
+
+fn startRecord(app: *App) void {
+    if (st.rec_name_len == 0) {
+        setMsg("名前を打ってください");
+        return;
+    }
+    const hand = @import("hand.zig");
+    if (!hand.enabled()) hand.enable(app);
+    st.rec = .countdown;
+    st.rec_t0 = loop.nowMs();
+    st.rec_n = 0;
+}
+
+fn finishRecord() void {
+    st.rec = .off;
+    if (st.rec_n < 6) {
+        setMsg("手がよく見えなかったので、登録できませんでした(カメラの前で、もう一度)");
+        return;
+    }
+    const idx = custom.add(st.rec_name[0..st.rec_name_len], st.rec_samples[0..st.rec_n]) orelse {
+        setMsg("登録できませんでした(多すぎます。使わないポーズを消してください)");
+        return;
+    };
+    poses.reload();
+    const id = custom.BASE + @as(u8, @intCast(idx));
+    if (st.editing_b) st.b = id else st.a = id;
+    var mb: [160]u8 = undefined;
+    setMsg(std.fmt.bufPrint(&mb, "「{s}」を登録しました({d} コマ)。操作を選んで「追加」してください", .{ custom.poses()[idx].nameStr(), st.rec_n }) catch "登録しました");
+}
+
+fn drawRecord(app: *App, cv: *gfx.Canvas, x0: f32, y0: f32, pw: f32, ph: f32, acc: Color, txt: Color, sub: Color) bool {
+    if (st.rec == .off) return false;
+    const now = loop.nowMs();
+    const live = @import("hand.zig").latestShape();
+    // 時間で進める
+    if (st.rec == .countdown and now -| st.rec_t0 >= COUNT_MS) {
+        st.rec = .capture;
+        st.rec_t0 = now;
+        st.rec_n = 0;
+    }
+    if (st.rec == .capture) {
+        if (live) |l| if (l.seq != st.rec_seq and st.rec_n < st.rec_samples.len) {
+            st.rec_seq = l.seq;
+            st.rec_samples[st.rec_n] = l.shape;
+            st.rec_n += 1;
+        };
+        if (now -| st.rec_t0 >= CAPTURE_MS) {
+            finishRecord();
+            return true;
+        }
+    }
+    // 画面: 設定画面を暗くして、真ん中にカード
+    cv.rect(x0, y0, pw, ph, 30, black.alpha(0.5));
+    const cw: f32 = 460;
+    const ch: f32 = 250;
+    const cx = x0 + (pw - cw) / 2;
+    const cy = y0 + (ph - ch) / 2;
+    cv.shadow(cx, cy + 10, cw, ch, 24, 40, black.alpha(0.5));
+    cv.glass(cx, cy, cw, ch, 24, theme.glassStrong(app));
+    cv.rectBorder(cx, cy, cw, ch, 24, .{ .a = 0 }, white.alpha(0.16), 1);
+    _ = cv.text(cx + 24, cy + 38, 18, txt, "自分のポーズを登録", .{ .bold = true });
+    switch (st.rec) {
+        .naming => {
+            const fr = [4]f32{ cx + 24, cy + 58, cw - 48, 38 };
+            cv.rect(fr[0], fr[1], fr[2], fr[3], 12, white.alpha(0.1));
+            _ = cv.text(fr[0] + 12, fr[1] + 25, 14, if (st.rec_name_len > 0) txt else sub, if (st.rec_name_len > 0) st.rec_name[0..st.rec_name_len] else "名前を打つ(例: OK サイン)", .{ .max_w = fr[2] - 24 });
+            _ = cv.text(cx + 24, cy + 122, 12, sub, "「撮影を始める」の 3 秒後から 1.5 秒撮ります。カメラの前で形を作り、", .{ .max_w = cw - 48 });
+            _ = cv.text(cx + 24, cy + 140, 12, sub, "撮っている間に少しずつ向きを変えると、見分けやすくなります。", .{ .max_w = cw - 48 });
+            const cr = [4]f32{ cx + cw - 300, cy + ch - 58, 120, 38 };
+            cv.rect(cr[0], cr[1], cr[2], cr[3], 19, white.alpha(if (isHover(.rec_cancel, 0)) 0.16 else 0.08));
+            _ = cv.text(cr[0] + cr[2] / 2, cr[1] + 25, 13, txt, "やめる", .{ .alignment = .center });
+            addHit(cr, .rec_cancel, 0);
+            const sr = [4]f32{ cx + cw - 168, cy + ch - 58, 144, 38 };
+            const ok = st.rec_name_len > 0;
+            cv.rect(sr[0], sr[1], sr[2], sr[3], 19, if (ok) acc else white.alpha(0.08));
+            _ = cv.text(sr[0] + sr[2] / 2, sr[1] + 25, 13, if (ok) Color.hex(0x08101e) else sub, "撮影を始める", .{ .alignment = .center, .bold = true });
+            addHit(sr, .rec_start, 0);
+        },
+        .countdown => {
+            const left: u64 = (COUNT_MS -| (now -| st.rec_t0) + 999) / 1000;
+            var nb: [8]u8 = undefined;
+            _ = cv.text(cx + cw / 2, cy + 150, 72, acc.lighten(0.3), std.fmt.bufPrint(&nb, "{d}", .{left}) catch "", .{ .alignment = .center, .bold = true });
+            _ = cv.text(cx + cw / 2, cy + 200, 13, if (live != null) txt else theme.danger(app).lighten(0.3), if (live != null) "カメラの前で形を作ってください" else "手が見えません(カメラの前に手を出してください)", .{ .alignment = .center, .max_w = cw - 40 });
+        },
+        .capture => {
+            const p = std.math.clamp(@as(f32, @floatFromInt(now -| st.rec_t0)) / CAPTURE_MS, 0, 1);
+            cv.rect(cx + 24, cy + 120, cw - 48, 10, 5, white.alpha(0.15));
+            cv.rect(cx + 24, cy + 120, (cw - 48) * p, 10, 5, acc);
+            var mb: [64]u8 = undefined;
+            _ = cv.text(cx + cw / 2, cy + 170, 14, txt, std.fmt.bufPrint(&mb, "撮っています… {d} コマ", .{st.rec_n}) catch "", .{ .alignment = .center });
+            _ = cv.text(cx + cw / 2, cy + 196, 12, sub, "形を保ったまま、少しずつ向きを変えてください", .{ .alignment = .center });
+        },
+        .off => {},
+    }
+    return st.rec != .naming;
 }
 
 fn isHover(kind: HitKind, i: usize) bool {
@@ -295,23 +412,51 @@ fn drawEditor(app: *App, cv: *gfx.Canvas, x: f32, y: f32, w: f32, h: f32, acc: C
         _ = cv.text(r[0] + r[2] / 2, r[1] + 19, 12, txt, std.fmt.bufPrint(&b2, "手 2: {s}", .{if (st.b == poses.NONE) "未選択" else poses.poseName(st.b)}) catch "", .{ .alignment = .center, .max_w = r[2] - 10 });
         addHit(r, .which_b, 0);
     }
-    // ポーズの一覧(6 列 × 2 段)
+    // ポーズの一覧(8 列 × 3 段): よく使う形 → 自分のポーズ → 「+ 自分のポーズ」
     const gy = y + 36;
-    const cols: usize = 6;
-    const tw = (w - @as(f32, @floatFromInt(cols - 1)) * 8) / @as(f32, @floatFromInt(cols));
-    const th: f32 = 84;
+    const cols: usize = 8;
+    const gap: f32 = 6;
+    const tw = (w - @as(f32, @floatFromInt(cols - 1)) * gap) / @as(f32, @floatFromInt(cols));
+    const th: f32 = 66;
     const cur = if (st.editing_b) st.b else st.a;
-    for (poses.presets, 0..) |p, i| {
+    const mine = custom.poses();
+    const n_tiles = @min(poses.presets.len + mine.len + 1, cols * 3);
+    for (0..n_tiles) |i| {
         const col: f32 = @floatFromInt(i % cols);
         const row: f32 = @floatFromInt(i / cols);
-        const r = [4]f32{ x + col * (tw + 8), gy + row * (th + 8), tw, th };
-        const sel = p.mask == cur;
-        cv.rect(r[0], r[1], r[2], r[3], 14, if (sel) acc.alpha(0.45) else white.alpha(if (isHover(.preset, i)) 0.14 else 0.06));
-        drawHand(cv, r[0] + r[2] / 2 - 24, r[1] + 6, 48, p.mask, txt);
-        _ = cv.text(r[0] + r[2] / 2, r[1] + th - 10, 11.5, txt, p.name, .{ .alignment = .center, .max_w = r[2] - 6 });
-        addHit(r, .preset, i);
+        const r = [4]f32{ x + col * (tw + gap), gy + row * (th + gap), tw, th };
+        if (i < poses.presets.len) {
+            const p = poses.presets[i];
+            const sel = p.mask == cur;
+            cv.rect(r[0], r[1], r[2], r[3], 12, if (sel) acc.alpha(0.45) else white.alpha(if (isHover(.preset, i)) 0.14 else 0.06));
+            drawHand(cv, r[0] + r[2] / 2 - 19, r[1] + 4, 38, p.mask, txt);
+            _ = cv.text(r[0] + r[2] / 2, r[1] + th - 8, 10.5, txt, p.name, .{ .alignment = .center, .max_w = r[2] - 4 });
+            addHit(r, .preset, i);
+        } else if (i - poses.presets.len < mine.len) {
+            // 自分のポーズ(星の付いた手。右上の × で消す)
+            const k = i - poses.presets.len;
+            const id = custom.BASE + @as(u8, @intCast(k));
+            const sel = id == cur;
+            cv.rect(r[0], r[1], r[2], r[3], 12, if (sel) acc.alpha(0.45) else white.alpha(if (isHover(.custom_pose, k)) 0.14 else 0.06));
+            _ = cv.text(r[0] + r[2] / 2, r[1] + 34, 26, Color.hex(0xffd36b), "\u{F1821}", .{ .alignment = .center });
+            _ = cv.text(r[0] + r[2] / 2, r[1] + th - 8, 10.5, txt, mine[k].nameStr(), .{ .alignment = .center, .max_w = r[2] - 4 });
+            addHit(r, .custom_pose, k);
+            const dr = [4]f32{ r[0] + r[2] - 20, r[1] + 3, 17, 17 };
+            if (isHover(.custom_pose, k) or isHover(.cdel, k)) {
+                cv.rect(dr[0], dr[1], dr[2], dr[3], 8.5, if (isHover(.cdel, k)) theme.danger(app).alpha(0.7) else white.alpha(0.15));
+                _ = cv.text(dr[0] + 8.5, dr[1] + 12.5, 10, txt, "\u{F0156}", .{ .alignment = .center });
+            }
+            addHit(dr, .cdel, k);
+        } else {
+            // 自分のポーズを登録する
+            cv.rectBorder(r[0], r[1], r[2], r[3], 12, white.alpha(if (isHover(.add_custom, 0)) 0.12 else 0.03), acc.alpha(0.6), 1.2);
+            _ = cv.text(r[0] + r[2] / 2, r[1] + 32, 22, acc.lighten(0.3), "+", .{ .alignment = .center, .bold = true });
+            _ = cv.text(r[0] + r[2] / 2, r[1] + th - 8, 10.5, txt, "自分のポーズ", .{ .alignment = .center, .max_w = r[2] - 4 });
+            addHit(r, .add_custom, 0);
+        }
     }
-    var yy = gy + 2 * (th + 8) + 4;
+    const rows_used: f32 = @floatFromInt((n_tiles + cols - 1) / cols);
+    var yy = gy + rows_used * (th + gap) + 2;
     // 今の手のポーズを使う(ハンド操作がオンで手が見えているとき)
     if (@import("hand.zig").currentPose()) |cp| {
         const r = [4]f32{ x, yy, w, 34 };
@@ -328,15 +473,15 @@ fn drawEditor(app: *App, cv: *gfx.Canvas, x: f32, y: f32, w: f32, h: f32, acc: C
 
     // ---- 2. 操作 ----
     _ = cv.text(x, yy + 16, 14, txt, "2. 割り当てる操作", .{ .bold = true });
-    const tabs = [_][]const u8{ "操作", "アプリ", "コマンド" };
+    const tabs = [_][]const u8{ "操作", "アプリを起動", "コマンド" };
     var tx = x + 150;
     for (tabs, 0..) |t, i| {
-        const r = [4]f32{ tx, yy, 84, 26 };
+        const r = [4]f32{ tx, yy, 104, 26 };
         const on = @intFromEnum(st.tab) == i;
         cv.rect(r[0], r[1], r[2], r[3], 13, if (on) acc.alpha(0.45) else white.alpha(0.07));
         _ = cv.text(r[0] + r[2] / 2, r[1] + 18, 12, txt, t, .{ .alignment = .center });
         addHit(r, .tab, i);
-        tx += 90;
+        tx += 110;
     }
     yy += 36;
     const area_h = y + h - 56 - yy;
@@ -478,7 +623,28 @@ fn pointer(_: *anyopaque, s: *Surface, ev: surface.PointerEvent) void {
         },
         .press => {
             const h = hitAt(ev.x, ev.y) orelse return;
+            // 登録のカードが出ている間は、カードのボタンだけ
+            if (st.rec != .off and h.kind != .rec_start and h.kind != .rec_cancel) return;
             switch (h.kind) {
+                .custom_pose => {
+                    const id = custom.BASE + @as(u8, @intCast(h.i));
+                    if (st.editing_b) st.b = id else st.a = id;
+                    if (st.two and !st.editing_b and st.b == poses.NONE) st.editing_b = true;
+                },
+                .cdel => {
+                    custom.remove(h.i);
+                    // 番号がずれるので、割り当てを名前から読み直す(消したポーズの割り当ては使われなくなる)
+                    poses.reload();
+                    st.a = poses.NONE;
+                    st.b = poses.NONE;
+                    setMsg("自分のポーズを消しました");
+                },
+                .add_custom => {
+                    st.rec = .naming;
+                    st.rec_name_len = 0;
+                },
+                .rec_start => if (st.rec == .naming) startRecord(st.app.?),
+                .rec_cancel => st.rec = .off,
                 .close => close(),
                 .del => poses.remove(h.i),
                 .preset => {
@@ -515,6 +681,24 @@ fn pointer(_: *anyopaque, s: *Surface, ev: surface.PointerEvent) void {
 
 fn key(_: *anyopaque, s: *Surface, ev: surface.KeyEvent) void {
     if (!st.open) return;
+    // 登録のカード: 名前を打つ / Enter で撮影 / Esc でやめる
+    if (st.rec != .off) {
+        switch (ev.sym) {
+            c.XKB_KEY_Escape => st.rec = .off,
+            c.XKB_KEY_Return, c.XKB_KEY_KP_Enter => if (st.rec == .naming) startRecord(st.app.?),
+            c.XKB_KEY_BackSpace => if (st.rec == .naming) {
+                st.rec_name_len = backspace(st.rec_name[0..st.rec_name_len]);
+            },
+            else => if (st.rec == .naming and ev.utf8.len > 0 and ev.utf8[0] >= 0x20 and !ev.ctrl) {
+                if (st.rec_name_len + ev.utf8.len <= st.rec_name.len) {
+                    @memcpy(st.rec_name[st.rec_name_len .. st.rec_name_len + ev.utf8.len], ev.utf8);
+                    st.rec_name_len += ev.utf8.len;
+                }
+            },
+        }
+        s.schedule();
+        return;
+    }
     switch (ev.sym) {
         c.XKB_KEY_Escape => close(),
         c.XKB_KEY_Return, c.XKB_KEY_KP_Enter => doAdd(),

@@ -8,11 +8,13 @@
 //
 // ファイルの 1 行: <手 1> <手 2 か .> <種類> <引数>
 //   手は指の文字の並び(t 親指 / i 人差し指 / m 中指 / r 薬指 / p 小指)、握りこぶしは 0
+//   自分のポーズ(custom.zig で登録した形)は c:名前
 //   例: ip . app firefox.desktop      … 人差し指と小指(キツネ)で Firefox
 //       tp tp action screenshot        … 両手で電話の形でスクリーンショット
 //       0 0 command ame-ctl lock       … 両手の握りこぶしでコマンド
 const std = @import("std");
 const App = @import("../app.zig").App;
+const custom = @import("custom.zig");
 
 pub const NONE: u8 = 0xff;
 pub const MAX = 32;
@@ -42,7 +44,17 @@ pub const presets = [_]Named{
     .{ .mask = THUMB | INDEX | MIDDLE, .name = "親指と 2 本" },
 };
 
+/// 自分のポーズ(custom.zig)か
+pub fn isCustom(id: u8) bool {
+    return id != NONE and id >= custom.BASE and id < custom.BASE + custom.MAX;
+}
+
 pub fn poseName(mask: u8) []const u8 {
+    if (isCustom(mask)) {
+        const ps = custom.poses();
+        const i = mask - custom.BASE;
+        return if (i < ps.len) ps[i].nameStr() else "(消したポーズ)";
+    }
     for (presets) |p| if (p.mask == mask) return p.name;
     if (mask == POINT) return "指さし";
     return "そのほか";
@@ -187,6 +199,8 @@ pub fn remove(i: usize) void {
 const letters = "timrp";
 
 pub fn maskToStr(mask: u8, buf: []u8) []const u8 {
+    // 自分のポーズは "c:名前"
+    if (isCustom(mask)) return std.fmt.bufPrint(buf, "c:{s}", .{poseName(mask)}) catch "?";
     if (mask == NONE) return ".";
     if (mask == 0) return "0";
     var k: usize = 0;
@@ -198,6 +212,10 @@ pub fn maskToStr(mask: u8, buf: []u8) []const u8 {
 }
 
 pub fn strToMask(s: []const u8) ?u8 {
+    if (std.mem.startsWith(u8, s, "c:")) {
+        const i = custom.find(s[2..]) orelse return null;
+        return custom.BASE + @as(u8, @intCast(i));
+    }
     if (std.mem.eql(u8, s, ".")) return NONE;
     if (std.mem.eql(u8, s, "0")) return 0;
     var m: u8 = 0;
@@ -235,8 +253,8 @@ pub fn parseLine(line: []const u8) ?Binding {
 }
 
 pub fn formatLine(bn: *const Binding, w: anytype) !void {
-    var b1: [8]u8 = undefined;
-    var b2: [8]u8 = undefined;
+    var b1: [64]u8 = undefined;
+    var b2: [64]u8 = undefined;
     try w.print("{s} {s} ", .{ maskToStr(bn.a, &b1), maskToStr(bn.b, &b2) });
     switch (bn.kind) {
         .action => try w.print("action {s}\n", .{@tagName(bn.op)}),

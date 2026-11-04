@@ -43,6 +43,7 @@ const nn = handlib.nn;
 const zip = handlib.zip;
 const gesture = handlib.gesture;
 const poses = @import("poses.zig");
+const custom = @import("custom.zig");
 
 const log = std.log.scoped(.hand);
 
@@ -76,6 +77,9 @@ const Msg = extern struct {
     has2: u8 = 0,
     ext2: u8 = 0,
     _r2: u8 = 0,
+    /// 手の形(custom.zig の正規化した 21 点)。自分のポーズを見分ける・登録するのに使う
+    shape: custom.Shape = [_]f32{0} ** custom.DIM,
+    shape2: custom.Shape = [_]f32{0} ** custom.DIM,
 };
 
 /// ポーズを止めて割り当ての操作が動くまで(ms)
@@ -208,6 +212,9 @@ const State = struct {
     pose_p0: [2]f32 = .{ 0, 0 },
     pose_done: bool = false,
     pose_bind: ?*const poses.Binding = null,
+    /// 最新の手の形と、その番号(届くたびに増える。ポーズの登録で使う)
+    shape: custom.Shape = [_]f32{0} ** custom.DIM,
+    shape_seq: u32 = 0,
 };
 var st: State = .{};
 
@@ -456,9 +463,14 @@ fn frame(app: *App, m: Msg) void {
     }
 
     // ---- 伸びている指(ポーズ)・もう一方の手: 3 コマ続いたら確定 ----
-    const e2: u8 = if (m.has2 != 0) m.ext2 else poses.NONE;
-    if (m.ext == st.cand_ext and e2 == st.cand_ext2) st.cand_ext_n +|= 1 else {
-        st.cand_ext = m.ext;
+    // 自分のポーズ(登録した形)に近ければその値、でなければ伸びている指
+    const id1: u8 = if (custom.match(&m.shape)) |i| custom.BASE + @as(u8, @intCast(i)) else m.ext;
+    const e2: u8 = if (m.has2 == 0) poses.NONE else if (custom.match(&m.shape2)) |i| custom.BASE + @as(u8, @intCast(i)) else m.ext2;
+    // 登録の画面が撮れるように、最新の形を残す
+    st.shape = m.shape;
+    st.shape_seq +%= 1;
+    if (id1 == st.cand_ext and e2 == st.cand_ext2) st.cand_ext_n +|= 1 else {
+        st.cand_ext = id1;
         st.cand_ext2 = e2;
         st.cand_ext_n = 1;
     }
@@ -592,10 +604,10 @@ fn frame(app: *App, m: Msg) void {
         st.pose_b = poses.NONE;
     }
     // 割り当てたポーズ・両手のときは、元からある動き(メニュー・閉じる・本数)を使わない
-    const custom = bind != null or st.ext2 != poses.NONE;
+    const overriding = bind != null or st.ext2 != poses.NONE or custom.isId(st.ext);
 
     // ---- 払う: 手のひらが速く横に動いた(指さし・つまみ・握りこぶし以外の形で)----
-    const swipeable = !custom and !st.pinching and (st.gesture == .open or st.gesture == .other or (st.gesture == .number and st.fingers >= 3));
+    const swipeable = !overriding and !st.pinching and (st.gesture == .open or st.gesture == .other or (st.gesture == .number and st.fingers >= 3));
     if (swipeable) {
         if (st.n_hist == st.hist.len) {
             std.mem.copyForwards(@TypeOf(st.hist[0]), st.hist[0 .. st.hist.len - 1], st.hist[1..]);
@@ -624,7 +636,7 @@ fn frame(app: *App, m: Msg) void {
 
     // ---- 保つ: 握りこぶし = 閉じる、開いた手 = メニュー ----
     if (st.gesture != .open) st.open_blocked = false;
-    const holdable = !custom and settled and (st.gesture == .fist or (st.gesture == .open and !st.open_blocked)) and !st.pinching;
+    const holdable = !overriding and settled and (st.gesture == .fist or (st.gesture == .open and !st.open_blocked)) and !st.pinching;
     if (!holdable) {
         st.hold = .none;
     } else {
@@ -647,7 +659,7 @@ fn frame(app: *App, m: Msg) void {
     }
 
     // ---- 指の本数を示して止める: そのワークスペースへ ----
-    if (custom or st.gesture != .number or st.pinching or !settled) {
+    if (overriding or st.gesture != .number or st.pinching or !settled) {
         st.num = 0;
         if (!st.scrolling) st.num_done = false;
     } else if (st.scrolling) {
@@ -1226,6 +1238,8 @@ fn worker() void {
                 .ext = f.ext,
                 .has2 = @intFromBool(o != null),
                 .ext2 = if (o) |of| of.ext else 0,
+                .shape = custom.normalize(hands[primary].?.pts, hands[primary].?.right),
+                .shape2 = if (hands[1 - primary]) |h2| custom.normalize(h2.pts, h2.right) else [_]f32{0} ** custom.DIM,
             });
         } else send(.{ .kind = 0, .has = 0 });
     }
@@ -1423,4 +1437,10 @@ fn grabStart(app: *App) bool {
 pub fn currentPose() ?[2]u8 {
     if (!st.on or !st.visible) return null;
     return .{ st.ext, st.ext2 };
+}
+
+/// 最新の手の形(自分のポーズの登録で撮る)。seq は届くたびに増える。手が見えていなければ null
+pub fn latestShape() ?struct { seq: u32, shape: custom.Shape } {
+    if (!st.on or !st.visible) return null;
+    return .{ .seq = st.shape_seq, .shape = st.shape };
 }
