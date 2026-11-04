@@ -18,6 +18,7 @@
 | Super+Ctrl+1〜9 | ワークスペースの表示を足す |
 | Super+P / Super+Shift+P | スクラッチパッド |
 | Super+ドラッグ(左 / 右)/ Super+中クリック | 移動 / 大きさの変更 / 浮かせる |
+| Super+Alt+ドラッグ | タイルのまま動かす(重ねたタイルと入れ替え・別の画面へ) |
 | Print / Shift+Print | 範囲 / 全画面のスクリーンショット(`~/Pictures/Screenshots` とクリップボード) |
 | 音量・明るさ・メディアキー | OSD つき |
 | Super+Shift+E | セッションを終了 |
