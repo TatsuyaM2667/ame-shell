@@ -82,7 +82,7 @@ const actions = [_]struct { a: Action, icon: []const u8, name: []const u8, desc:
     .{ .a = .lock, .icon = "\u{F033E}", .name = "ロック", .desc = "画面をロックする", .keys = "lock rokku" },
     .{ .a = .face_enroll, .icon = "\u{F0C7B}", .name = "顔を登録", .desc = "パスワードで本人を確かめてから、顔認証用にカメラで顔を登録する", .keys = "face kao touroku faceid ninshou" },
     .{ .a = .hand_poses, .icon = "\u{F1821}", .name = "ハンドのポーズ", .desc = "手のポーズ(両手の組み合わせも)を、アプリの起動や操作に割り当てる", .keys = "hand pose gesture te po-zu jesucha" },
-    .{ .a = .hand_poses_only, .icon = "\u{F1821}", .name = "ポーズだけオン / オフ", .desc = "カーソルは動かさず、割り当てた手のポーズでアプリの起動などだけ使う", .keys = "hand pose only app launch po-zu dake" },
+    .{ .a = .hand_poses_only, .icon = "\u{F1821}", .name = "ポーズでアプリ起動だけ", .desc = "カーソルは動かさず、手のポーズでアプリを起動するだけにする(もう一度でオフ)", .keys = "hand pose only app launch po-zu dake" },
     .{ .a = .logout, .icon = "\u{F0343}", .name = "ログアウト", .desc = "River を終了する", .keys = "logout exit" },
     .{ .a = .sleep, .icon = "\u{F04B2}", .name = "スリープ", .desc = "ロックしてサスペンド", .keys = "sleep suspend" },
     .{ .a = .reboot, .icon = "\u{F0709}", .name = "再起動", .desc = "コンピュータを再起動する", .keys = "reboot restart" },

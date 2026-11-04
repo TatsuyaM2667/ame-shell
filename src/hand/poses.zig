@@ -171,6 +171,12 @@ pub fn find(a: u8, b: u8) ?*const Binding {
     return null;
 }
 
+/// アプリの起動の割り当てだけ(ハンド操作が「アプリ起動だけ」のとき)
+pub fn findApp(a: u8, b: u8) ?*const Binding {
+    const x = find(a, b) orelse return null;
+    return if (x.kind == .app) x else null;
+}
+
 pub fn add(bn: Binding) bool {
     ensureLoaded();
     if (bn.a == POINT and bn.b == NONE) return false;

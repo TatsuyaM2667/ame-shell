@@ -123,7 +123,7 @@ fn utilButtons(f: *Frame) [N_UTIL]struct { b: UtilBtn, icon: []const u8, label: 
         .{ .b = .record, .icon = if (f.sidev.recording) "\u{F04DB}" else "\u{F044A}", .label = if (f.sidev.recording) "録画停止" else "録画", .on = f.sidev.recording },
         .{ .b = .screenshot, .icon = "\u{F0100}", .label = "スクショ", .on = false },
         // 手を振る形(F0A79 はゴミ箱だった)
-        .{ .b = .hand, .icon = "\u{F1821}", .label = if (hand_on and @import("../hand/hand.zig").posesOnly()) "ポーズだけ" else "ハンド操作", .on = hand_on },
+        .{ .b = .hand, .icon = "\u{F1821}", .label = if (hand_on and @import("../hand/hand.zig").posesOnly()) "アプリ起動だけ" else "ハンド操作", .on = hand_on },
         // 左右のイヤホンの形。AirPods の頭の動きで操作する(airpods.zig)
         .{ .b = .airpods, .icon = "\u{F184F}", .label = "AirPods 操作", .on = ap_on },
         .{ .b = .saver, .icon = "\u{F032A}", .label = "省電力", .on = f.sidev.profile == .saver },

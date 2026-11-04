@@ -215,8 +215,8 @@ const State = struct {
     pose_p0: [2]f32 = .{ 0, 0 },
     pose_done: bool = false,
     pose_bind: ?*const poses.Binding = null,
-    /// ポーズだけ: カーソルを動かさず、クリック・元からある動き(メニュー・閉じる・ワークスペース)も使わない。
-    /// 割り当てたポーズ(アプリの起動など)だけを見る
+    /// アプリ起動だけ: カーソルを動かさず、クリック・元からある動き(メニュー・閉じる・ワークスペース)も、
+    /// アプリの起動以外の割り当て(スクリーンショットなど)も使わない。ポーズでアプリを起動するだけ
     poses_only: bool = false,
     /// 最新の手の形と、その番号(届くたびに増える。ポーズの登録で使う)
     shape: custom.Shape = [_]f32{0} ** custom.DIM,
@@ -235,12 +235,12 @@ pub fn toggle(app: *App) void {
     if (st.on) disable() else enableMode(app, app.cfg.hand_poses_only);
 }
 
-/// ポーズだけ(アプリの起動など、割り当てたポーズだけを見る)か
+/// アプリ起動だけ(ポーズでアプリを起動するだけ)か
 pub fn posesOnly() bool {
     return st.poses_only;
 }
 
-/// 動き方を決めてオンにする(すでにオンなら切り替えるだけ)。poses_only = カーソル・クリックを使わず、割り当てたポーズだけ
+/// 動き方を決めてオンにする(すでにオンなら切り替えるだけ)。poses_only = カーソル・クリックを使わず、ポーズでアプリを起動するだけ
 pub fn enableMode(app: *App, poses_only: bool) void {
     if (st.on and st.poses_only != poses_only) {
         // 切り替え: つかんでいる・メニューを開いているなら、いったん手放す
@@ -256,7 +256,7 @@ pub fn enableMode(app: *App, poses_only: bool) void {
     }
     st.poses_only = poses_only;
     if (!st.on) enable(app);
-    setBanner(if (poses_only) "ポーズだけ(カーソルは動かしません)" else "ハンド操作");
+    setBanner(if (poses_only) "アプリ起動だけ(ポーズでアプリを起動します)" else "ハンド操作");
     if (st.surf) |s| s.schedule();
 }
 
@@ -509,7 +509,7 @@ fn frame(app: *App, m: Msg) void {
         st.ext2 = st.cand_ext2;
     }
 
-    // ---- ポーズだけ(カーソル・クリック・元からある動きは使わず、割り当てたポーズだけ見る)----
+    // ---- アプリ起動だけ(カーソル・クリック・元からある動きは使わず、アプリの起動の割り当てだけ見る)----
     if (st.poses_only) {
         _ = checkBinding(app, now, settled);
         sf.schedule();
@@ -706,7 +706,7 @@ fn frame(app: *App, m: Msg) void {
 fn checkBinding(app: *App, now: u64, settled: bool) ?*const poses.Binding {
     // 設定画面を開いている間は動かさない(取り込もうとして作ったポーズで、割り当てが動いてしまわないように)
     const bind: ?*const poses.Binding = if (@import("posegui.zig").isOpen() or st.pinching or st.alt_btn != 0 or !settled or st.scrolling or
-        (!st.poses_only and st.ext == poses.POINT and st.ext2 == poses.NONE)) null else poses.find(st.ext, st.ext2);
+        (!st.poses_only and st.ext == poses.POINT and st.ext2 == poses.NONE)) null else if (st.poses_only) poses.findApp(st.ext, st.ext2) else poses.find(st.ext, st.ext2);
     if (bind) |b| {
         if (st.pose_a != st.ext or st.pose_b != st.ext2 or dist2(st.cur, st.pose_p0) > 50 * 50) {
             st.pose_a = st.ext;
@@ -1090,7 +1090,7 @@ fn draw(_: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
         const y = st.cur[1];
         const pr = st.press.x;
         if (st.poses_only) {
-            // ポーズだけ: カーソルではないので、手の場所にうすい印だけ
+            // アプリ起動だけ: カーソルではないので、手の場所にうすい印だけ
             cv.arc(x, y, 9, 1.6, 1, acc.lighten(0.3).alpha(0.45 * a), .{ .a = 0 });
         } else {
             const ring_r = 17 - 5 * pr;

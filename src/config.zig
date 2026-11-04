@@ -82,7 +82,7 @@ pub const Config = struct {
     tap_to_click: bool = true,
     /// ハンド操作(hand/hand.zig): 起動時にオンにするか・使うカメラ(空 = /dev/video* から自動)
     hand_enabled: bool = false,
-    /// ハンド操作の動き方: false = 全部(カーソル・クリック・ポーズ)/ true = ポーズだけ(割り当てたポーズでアプリの起動など)
+    /// ハンド操作の動き方: false = 全部(カーソル・クリック・ポーズ)/ true = アプリ起動だけ(ポーズでアプリを起動するだけ)
     hand_poses_only: bool = false,
     hand_camera: Str = .{},
     /// 指の軌跡に波を立てる

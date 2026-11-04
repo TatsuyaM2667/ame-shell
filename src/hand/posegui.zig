@@ -225,7 +225,7 @@ fn draw(_: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
     cv.rect(cr[0], cr[1], cr[2], cr[3], 16, white.alpha(if (isHover(.close, 0)) 0.2 else 0.08));
     _ = cv.text(cr[0] + 16, cr[1] + 22, 16, txt, "\u{F0156}", .{ .alignment = .center });
     addHit(cr, .close, 0);
-    // ハンド操作の動き方: 全部(カーソル・クリック・ポーズ)/ ポーズだけ(割り当てたポーズでアプリの起動など)
+    // ハンド操作の動き方: 全部(カーソル・クリック・ポーズ)/ アプリ起動だけ(ポーズでアプリを起動するだけ)
     {
         const hand = @import("hand.zig");
         const po = if (hand.enabled()) hand.posesOnly() else app.cfg.hand_poses_only;
@@ -233,7 +233,7 @@ fn draw(_: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
         _ = cv.text(mx - 8, y0 + 43, 12, sub, if (hand.enabled()) "ハンド操作(オン)" else "ハンド操作(オフ)", .{ .alignment = .right });
         const segs = [_]struct { k: HitKind, label: []const u8, on: bool }{
             .{ .k = .mode_full, .label = "全部", .on = !po },
-            .{ .k = .mode_poses, .label = "ポーズだけ", .on = po },
+            .{ .k = .mode_poses, .label = "アプリ起動だけ", .on = po },
         };
         for (segs, 0..) |sg, k| {
             const r = [4]f32{ mx + @as(f32, @floatFromInt(k)) * 132, y0 + 22, 128, 32 };
