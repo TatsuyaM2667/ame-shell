@@ -79,6 +79,15 @@ hand {
   // camera "/dev/video0" // 使うカメラ(省略すると /dev/video* から自動で選ぶ)
 }
 
+// AI チャット(Super+C・ランチャーの「AI チャット」。右から生えるパネル)。会社とモデルはパネルの上の名前を押して選ぶ。
+// API キーはパネルから貼り付けて保存(~/.config/ame-shell/ai-keys、自分だけ読める)するか、環境変数(OPENAI_API_KEY など)
+ai {
+  // provider openrouter              // 初めて使うときの会社: openai anthropic gemini mistral deepseek opencode openrouter kimi xai groq qwen zai perplexity together cerebras ollama custom
+  // custom-url "http://127.0.0.1:1234/v1"  // custom: OpenAI 互換のサーバ(LM Studio・vLLM など)
+  // custom-model "local-model"
+  // system "日本語で簡潔に答えてください"   // 毎回最初に渡す指示
+}
+
 // AirPods の頭の動きで操作する(AirPods Pro 2 など。Linux のみ。ame-ctl airpods on|off、ユーティリティの「AirPods 操作」)
 //   頭を右/左へ振って戻す → 右/左のワークスペース、上を向いて戻す → ランチャー、下を向いて戻す → ダッシュボード
 //   振ったまま・向いたまま(よそ見・キーボードを見る)では何もしない。AirPods 本来の操作(軸を押す・つまむ)もそのまま使える

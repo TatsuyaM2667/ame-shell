@@ -87,6 +87,11 @@ pub const Config = struct {
     hand_camera: Str = .{},
     /// 指の軌跡に波を立てる
     hand_trail: bool = true,
+    /// AI チャット(ai.zig): 初めて使うときの会社(パネルで選び直したものが優先)・カスタムの OpenAI 互換サーバ・最初の指示
+    ai_provider: Str = .{},
+    ai_custom_url: Str = .{},
+    ai_custom_model: Str = .{},
+    ai_system: Str = .{},
     /// 顔認証でロックを外す(face/unlock.zig)。登録した顔があるときだけ使う。カメラ(空 = 赤外線カメラを自動で)・一致とみなす近さ
     face_enabled: bool = true,
     face_camera: Str = .{},
@@ -363,6 +368,16 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             cfg.hand_trail = boolean(val) orelse true;
         } else if (eq(u8, key, "camera")) {
             cfg.hand_camera.set(val);
+        } else ok = false;
+    } else if (eq(u8, sec, "ai")) {
+        if (eq(u8, key, "provider")) {
+            cfg.ai_provider.set(val);
+        } else if (eq(u8, key, "custom-url")) {
+            cfg.ai_custom_url.set(std.mem.trimRight(u8, val, "/"));
+        } else if (eq(u8, key, "custom-model")) {
+            cfg.ai_custom_model.set(val);
+        } else if (eq(u8, key, "system")) {
+            cfg.ai_system.set(val);
         } else ok = false;
     } else if (eq(u8, sec, "face")) {
         if (eq(u8, key, "enabled")) {

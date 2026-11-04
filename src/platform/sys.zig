@@ -446,3 +446,44 @@ pub fn spawnReaderAll(argv: []const ?[*:0]const u8, out_pid: *c_int) ?c_int {
     out_pid.* = pid;
     return fds[0];
 }
+
+/// spawnReaderAll と同じ(標準出力と標準エラーを読む fd を返す)だが、標準入力に input を渡す。
+/// 秘密(API キーなど)をコマンドライン(/proc/<pid>/cmdline で誰でも読める)に出さずに渡すため。
+/// input は fork した後に書き込む(子が読むので、pipe の容量を超えても詰まらない)
+pub fn spawnPiped(argv: []const ?[*:0]const u8, input: []const u8, out_pid: *c_int) ?c_int {
+    var out: [2]c_int = undefined;
+    var in: [2]c_int = undefined;
+    if (c.pipe2(&out, c.O_CLOEXEC) != 0) return null;
+    if (c.pipe2(&in, c.O_CLOEXEC) != 0) {
+        _ = c.close(out[0]);
+        _ = c.close(out[1]);
+        return null;
+    }
+    var args: [24:null]?[*:0]const u8 = .{null} ** 24;
+    for (argv, 0..) |a, i| args[i] = a;
+    const pid = c.fork();
+    if (pid < 0) {
+        for ([_]c_int{ out[0], out[1], in[0], in[1] }) |fd| _ = c.close(fd);
+        return null;
+    }
+    if (pid == 0) {
+        _ = c.dup2(in[0], 0);
+        _ = c.dup2(out[1], 1);
+        _ = c.dup2(out[1], 2);
+        childDefaults();
+        _ = c.execvp(args[0].?, @ptrCast(&args));
+        c._exit(127);
+    }
+    _ = c.close(out[1]);
+    _ = c.close(in[0]);
+    var off: usize = 0;
+    while (off < input.len) {
+        const n = c.write(in[1], input.ptr + off, input.len - off);
+        if (n <= 0) break; // 子が先に終わった(SIGPIPE は無視しているので EPIPE になる)
+        off += @intCast(n);
+    }
+    _ = c.close(in[1]);
+    _ = c.fcntl(out[0], c.F_SETFL, c.O_NONBLOCK);
+    out_pid.* = pid;
+    return out[0];
+}
