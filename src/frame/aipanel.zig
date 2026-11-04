@@ -32,7 +32,7 @@ const TLH: f32 = 18;
 
 const Mode = enum { chat, providers, models, key, folder, sessions, mcp };
 
-const HitId = enum { pick, new_chat, close, send, stop, copy, prov, back, model, use_typed, key_edit, key_save, key_delete, refresh, agent, folder, use_folder, session, mcp_open, mcp_toggle, mcp_reload, perm };
+const HitId = enum { pick, new_chat, close, send, stop, copy, prov, back, model, use_typed, key_edit, key_save, key_delete, refresh, agent, folder, use_folder, session, mcp_open, mcp_toggle, mcp_reload, perm, new_project };
 const Hit = struct { x: f32, y: f32, w: f32, h: f32, id: HitId, arg: usize = 0 };
 
 const State = struct {
@@ -72,6 +72,9 @@ const State = struct {
     /// フォルダの入力欄(filter とは別に持つ)
     path: [1024]u8 = undefined,
     path_len: usize = 0,
+    /// 入力から作れる新しいプロジェクトのフォルダ(空 = 作れない / もうある)
+    newproj: [1100]u8 = undefined,
+    newproj_len: usize = 0,
     /// 選んでいる途中のフォルダ
     folder: [1024]u8 = undefined,
     folder_len: usize = 0,
@@ -81,6 +84,8 @@ var st: State = .{};
 
 pub fn onOpen(f: *Frame) void {
     ai.ensure(f.app);
+    agent.ensure(f.app);
+    mcp.ensure(f.app);
     @import("../clipboard.zig").prepare(f.app);
     @import("../ime.zig").update(f.app);
     st.frame = f;
@@ -703,6 +708,7 @@ fn rebuildFolders() void {
     st.folders = std.ArrayList([]const u8).init(st.list_arena.allocator());
     const a = st.list_arena.allocator();
     var eb: [1100]u8 = undefined;
+    defer computeNewProject();
     const typed = expandPath(std.mem.trim(u8, pathText(), " "), &eb);
     if (std.mem.indexOfScalar(u8, typed, '/') != null) {
         // 親フォルダの中で、名前が前方一致するフォルダ
@@ -739,13 +745,14 @@ fn rebuildFolders() void {
 
 fn drawFolder(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32, acc: Color, txt: Color, sub: Color) void {
     _ = f;
-    _ = cv.text(PAD, 76, 12, sub, "フォルダのパスを入れる(~/ と Tab で補完)か、下から選ぶ", .{ .max_w = w - 2 * PAD });
-    drawField(cv, PAD - 4, 88, w - 2 * PAD + 8, pathText(), "~/projects/…", acc, txt, sub);
+    _ = cv.text(PAD, 76, 12, sub, "パスか名前を入れる(名前だけなら新しいプロジェクト)", .{ .max_w = w - 2 * PAD });
+    drawField(cv, PAD - 4, 88, w - 2 * PAD + 8, pathText(), "フォルダのパス / 新しいプロジェクトの名前", acc, txt, sub);
     const top: f32 = 136;
     const row: f32 = 36;
     const list_h = h - top - 16;
     const n = st.folders.items.len;
-    const total = row * @as(f32, @floatFromInt(n));
+    const np: usize = @intFromBool(st.newproj_len > 0);
+    const total = row * @as(f32, @floatFromInt(n + np));
     const sel_y = @as(f32, @floatFromInt(st.sel)) * row;
     if (st.follow) {
         if (sel_y < st.list_scroll) st.list_scroll = sel_y;
@@ -753,7 +760,17 @@ fn drawFolder(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32, acc: Color, txt: Color
     }
     st.list_scroll = std.math.clamp(st.list_scroll, 0, @max(0, total - list_h));
     cv.setClip(0, top, w, list_h);
-    if (n == 0) _ = cv.text(w / 2, top + 30, 12.5, sub, "見つかりません(Enter で入力したフォルダを使う)", .{ .alignment = .center, .max_w = w - 40 });
+    if (n + np == 0) _ = cv.text(w / 2, top + 30, 12.5, sub, "見つかりません", .{ .alignment = .center, .max_w = w - 40 });
+    // 新しいプロジェクト(一覧の最後。一覧が空なら最初の行)
+    if (np == 1) {
+        const y = top + @as(f32, @floatFromInt(n)) * row - st.list_scroll;
+        const hv = hovered(.new_project, 0) or st.sel == n;
+        cv.rect(PAD - 8, y + 2, w - 2 * PAD + 16, row - 4, 12, acc.alpha(if (hv) 0.3 else 0.14));
+        var pb: [1100]u8 = undefined;
+        var lb: [1300]u8 = undefined;
+        _ = cv.text(PAD + 4, y + 23, 13, txt, std.fmt.bufPrint(&lb, "\u{F0415}  新しいプロジェクトを作る: {s}", .{agent.displayPath(newProject(), &pb)}) catch "", .{ .bold = true, .max_w = w - 2 * PAD - 8 });
+        addHit(PAD - 8, y + 2, w - 2 * PAD + 16, row - 4, .new_project, 0);
+    }
     for (st.folders.items, 0..) |p, i| {
         const y = top + @as(f32, @floatFromInt(i)) * row - st.list_scroll;
         if (y + row < top or y > top + list_h) continue;
@@ -1265,8 +1282,9 @@ pub fn key(f: *Frame, ev: surface.KeyEvent) void {
             else => {},
         },
         .folder => switch (sym) {
-            c.XKB_KEY_Down => if (st.folders.items.len > 0) {
-                st.sel = @min(st.sel + 1, st.folders.items.len - 1);
+            c.XKB_KEY_Down => {
+                const rows = st.folders.items.len + @intFromBool(st.newproj_len > 0);
+                if (rows > 0) st.sel = @min(st.sel + 1, rows - 1);
             },
             c.XKB_KEY_Up => st.sel -|= 1,
             c.XKB_KEY_Tab => if (st.sel < st.folders.items.len) {
@@ -1352,6 +1370,7 @@ fn pickAgent(k: usize) void {
 
 /// 入力欄のフォルダ(あれば)か、選んでいる行のフォルダを使う
 fn useFolderInput() void {
+    if (st.newproj_len > 0 and st.sel == st.folders.items.len) return createNewProject();
     var eb: [1100]u8 = undefined;
     const typed = std.mem.trimRight(u8, expandPath(std.mem.trim(u8, pathText(), " "), &eb), "/");
     if (typed.len > 0) {
@@ -1451,6 +1470,7 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
         .agent => pickAgent(h.arg),
         .folder => if (h.arg < st.folders.items.len) chooseFolder(st.folders.items[h.arg]),
         .use_folder => useFolderInput(),
+        .new_project => createNewProject(),
         .session => pickSession(h.arg),
         .mcp_open => goMode(.mcp),
         .mcp_toggle => mcp.toggle(h.arg),
@@ -1478,4 +1498,49 @@ fn busy() bool {
 
 fn statusText() []const u8 {
     return if (usingAgent()) agent.status() else ai.status();
+}
+
+// ---------------------------------------------------------------------------
+// 新しいプロジェクト(作業フォルダを選ぶ画面で、まだ無いフォルダの名前・パスを入れたとき)
+// ---------------------------------------------------------------------------
+
+fn newProject() []const u8 {
+    return st.newproj[0..st.newproj_len];
+}
+
+/// 入力から、作れる新しいプロジェクトのフォルダを決める(名前だけなら置き場の下に)
+fn computeNewProject() void {
+    st.newproj_len = 0;
+    const typed = std.mem.trim(u8, pathText(), " ");
+    if (typed.len == 0) return;
+    var eb: [1100]u8 = undefined;
+    var bb: [1100]u8 = undefined;
+    const p = if (std.mem.indexOfScalar(u8, typed, '/') == null and typed[0] != '~') blk: {
+        if (!agent.validProjectName(typed)) return;
+        break :blk std.fmt.bufPrint(&eb, "{s}/{s}", .{ agent.projectsBase(&bb), typed }) catch return;
+    } else std.mem.trimRight(u8, expandPath(typed, &eb), "/");
+    if (p.len == 0 or p.len > st.newproj.len) return;
+    // もうあるフォルダは作らない(一覧から選ぶ)
+    if (std.fs.cwd().openDir(p, .{})) |d| {
+        var dd = d;
+        dd.close();
+        return;
+    } else |_| {}
+    @memcpy(st.newproj[0..p.len], p);
+    st.newproj_len = p.len;
+}
+
+/// 作って、そのフォルダで新しい会話を始める
+fn createNewProject() void {
+    if (st.newproj_len == 0) return;
+    var rb: [std.fs.max_path_bytes]u8 = undefined;
+    const real = agent.createProject(newProject(), &rb) orelse {
+        setStatus("フォルダを作れませんでした");
+        return;
+    };
+    agent.start(st.pick, real, .new);
+    var pb: [1100]u8 = undefined;
+    agent.setNote("新しいプロジェクトを作りました: ", agent.displayPath(real, &pb));
+    st.scroll = 0;
+    goMode(.chat);
 }

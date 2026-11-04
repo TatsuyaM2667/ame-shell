@@ -92,6 +92,8 @@ pub const Config = struct {
     ai_custom_url: Str = .{},
     ai_custom_model: Str = .{},
     ai_system: Str = .{},
+    /// コーディング CLI の新しいプロジェクトを作る場所(名前だけ入れたとき。空 = ~/projects、無ければホーム)
+    ai_projects_dir: Str = .{},
     /// 顔認証でロックを外す(face/unlock.zig)。登録した顔があるときだけ使う。カメラ(空 = 赤外線カメラを自動で)・一致とみなす近さ
     face_enabled: bool = true,
     face_camera: Str = .{},
@@ -378,6 +380,8 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             cfg.ai_custom_model.set(val);
         } else if (eq(u8, key, "system")) {
             cfg.ai_system.set(val);
+        } else if (eq(u8, key, "projects-dir")) {
+            cfg.ai_projects_dir.set(std.mem.trimRight(u8, val, "/"));
         } else ok = false;
     } else if (eq(u8, sec, "face")) {
         if (eq(u8, key, "enabled")) {

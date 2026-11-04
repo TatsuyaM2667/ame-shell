@@ -1389,3 +1389,60 @@ test "custom agents and ansi" {
     try std.testing.expectEqualStrings("Antigravity", name(builtin.len));
     try std.testing.expectEqualStrings("ok", stripAnsiInPlace("\x1b[1;32mok\x1b[0m\r"));
 }
+
+// ---------------------------------------------------------------------------
+// 新しいプロジェクト
+// ---------------------------------------------------------------------------
+
+/// 名前だけで作るときの置き場: 設定の ai { projects-dir } → ~/projects(あれば)→ ホーム
+pub fn projectsBase(buf: []u8) []const u8 {
+    const home = std.posix.getenv("HOME") orelse "/tmp";
+    if (getApp()) |app| {
+        const d = app.cfg.ai_projects_dir.get();
+        if (d.len > 0) {
+            if (std.mem.eql(u8, d, "~")) return home;
+            if (std.mem.startsWith(u8, d, "~/")) return std.fmt.bufPrint(buf, "{s}{s}", .{ home, d[1..] }) catch d;
+            return d;
+        }
+    }
+    const p = std.fmt.bufPrint(buf, "{s}/projects", .{home}) catch return home;
+    var dir = std.fs.cwd().openDir(p, .{}) catch return home;
+    dir.close();
+    return p;
+}
+
+/// プロジェクトの名前として使えるか(フォルダの名前 1 つ分)
+pub fn validProjectName(n: []const u8) bool {
+    if (n.len == 0 or n.len > 120 or n[0] == '.' or n[0] == '-') return false;
+    for (n) |ch| if (ch == '/' or ch < 0x20) return false;
+    return true;
+}
+
+/// フォルダを作り(親も)、git があれば git init する。作ったフォルダの絶対パスを buf に返す
+pub fn createProject(path: []const u8, buf: []u8) ?[]const u8 {
+    std.fs.cwd().makePath(path) catch return null;
+    const real = std.fs.cwd().realpath(path, buf) catch return null;
+    var gb: [std.fs.max_path_bytes + 8]u8 = undefined;
+    const gpath = std.fmt.bufPrint(&gb, "{s}/.git", .{real}) catch return real;
+    const has_git = if (std.fs.cwd().access(gpath, .{})) |_| true else |_| false;
+    if (!has_git and hasBin("git")) {
+        var zb: [std.fs.max_path_bytes + 1]u8 = undefined;
+        const z = std.fmt.bufPrintZ(&zb, "{s}", .{real}) catch return real;
+        var out: [256]u8 = undefined;
+        _ = sys.run(&.{ "git", "-C", z.ptr, "init", "-q" }, &out);
+    }
+    return real;
+}
+
+test "project names" {
+    try std.testing.expect(validProjectName("my-app"));
+    try std.testing.expect(validProjectName("日本語のアプリ"));
+    try std.testing.expect(!validProjectName(".hidden"));
+    try std.testing.expect(!validProjectName("a/b"));
+    try std.testing.expect(!validProjectName(""));
+}
+
+/// パネルの下に出す一言(「新しいプロジェクトを作りました」など)
+pub fn setNote(prefix: []const u8, s: []const u8) void {
+    setStatus("{s}{s}", .{ prefix, s });
+}
