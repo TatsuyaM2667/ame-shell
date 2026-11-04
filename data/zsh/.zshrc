@@ -1,4 +1,4 @@
-# ame-shell の zsh の設定(ame-term-shell が、自分の ~/.zshrc が無いときに ZDOTDIR でこれを読ませる)。
+# ame-shell の zsh の設定(ame-term-shell が、自分の ~/.zshrc が無いとき・PATH を足すだけのときに ZDOTDIR でこれを読ませる)。
 # 自分で書き換えたいときは: cp この ファイル ~/.zshrc(以後は ~/.zshrc だけが使われる)
 #
 #  - プロンプト: 2 行。場所・git のブランチと状態・実行にかかった時間・終了コード・時刻
@@ -132,3 +132,7 @@ unfunction _ame_source_first
 
 # 自分で足したい設定は ~/.config/ame-shell/zshrc.local に(この設定を使ったまま追加できる)
 [[ -r "${XDG_CONFIG_HOME:-$HOME/.config}/ame-shell/zshrc.local" ]] && source "${XDG_CONFIG_HOME:-$HOME/.config}/ame-shell/zshrc.local"
+
+# ~/.zshrc がプロンプトなどを決めていない(PATH を足すだけ、など)ときは、それも読む(ame-term-shell が決める)
+[[ -n "$AME_ZSH_USER_RC" && -r "$HOME/.zshrc" ]] && source "$HOME/.zshrc"
+unset AME_ZSH_USER_RC

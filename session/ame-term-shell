@@ -47,9 +47,16 @@ if [ -z "$sh_cmd" ] && command -v zsh >/dev/null 2>&1; then sh_cmd=$(command -v 
 case "$sh_cmd" in
     */zsh|zsh)
         export SHELL="$sh_cmd"
-        # 自分の設定が無ければ ame-shell の設定で(ZDOTDIR は zsh が .zshrc を探す場所)
-        if [ -z "${ZDOTDIR:-}" ] && [ ! -f "$HOME/.zshrc" ] && [ -f "$ZSHDIR/.zshrc" ]; then
-            export ZDOTDIR="$ZSHDIR"
+        # 自分の設定が無ければ ame-shell の設定で(ZDOTDIR は zsh が .zshrc を探す場所)。
+        # ~/.zshrc があっても、プロンプトなどを自分で決めていない(ツールが PATH を足しただけ、など)ときは
+        # ame-shell の設定で起動し、最後に ~/.zshrc も読む(AME_ZSH_USER_RC)
+        if [ -z "${ZDOTDIR:-}" ] && [ -f "$ZSHDIR/.zshrc" ]; then
+            if [ ! -f "$HOME/.zshrc" ]; then
+                export ZDOTDIR="$ZSHDIR"
+            elif ! grep -Eqs 'PROMPT=|PS1=|promptinit|prompt |starship|oh-my-zsh|ZSH_THEME|zinit|antigen|zplug|prezto|p10k|powerlevel' "$HOME/.zshrc"; then
+                export ZDOTDIR="$ZSHDIR"
+                export AME_ZSH_USER_RC=1
+            fi
         fi
         exec "$sh_cmd" -l
         ;;
