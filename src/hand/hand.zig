@@ -1,8 +1,12 @@
 // ハンド操作: カメラに映った手の動きで、カーソルと窓を操作する(オン/オフできる。既定はオフ)。
 //
 //   指さす(人差し指だけ伸ばす)… カーソルが指先に付いて動く(窓のフォーカスもカーソルに付いて移る)
-//   つまむ(親指と人差し指)     … 短く: クリック / つまんだまま動かす: カーソルの下の窓をつかんで動かす。
-//                                  つかんだまま手をカメラに近づける・遠ざけると、窓が大きく・小さくなる(ズーム)
+//   つまむ(親指と人差し指)     … 短く: クリック(2 回でダブルクリック)/ つまんですぐ動かす: ドラッグ(左ボタンを
+//                                  押したまま。文字の選択・ファイルを運ぶ)/ つまんで 0.45 秒止めてから動かす: 窓をつかんで
+//                                  動かす。つかんだまま手をカメラに近づける・遠ざけると、窓が大きく・小さくなる(ズーム)
+//   親指と中指でつまむ           … 右クリック   / 親指と薬指でつまむ … 真ん中のクリック
+//   ピース(人差し指と中指)を上下・左右に動かす … スクロール
+//   ポーズの割り当て(poses.zig・設定画面 posegui.zig)… 片手・両手のポーズを 0.7 秒止めると、割り当てた操作・アプリ
 //   手を左右に払う               … 隣のワークスペースへ(左へ払う = 次、右へ = 前)
 //   指の本数を示して止める       … その番号のワークスペース(親指だけ = 1、ピース = 2、3 本 = 3、親指を曲げて 4 本 = 4)
 //   開いた手を止める(0.8 秒)   … 手のメニュー: ランチャー・ダッシュボード・全画面・浮かせる・大きく・小さく・
@@ -38,6 +42,7 @@ const track = handlib.track;
 const nn = handlib.nn;
 const zip = handlib.zip;
 const gesture = handlib.gesture;
+const poses = @import("poses.zig");
 
 const log = std.log.scoped(.hand);
 
@@ -63,7 +68,20 @@ const Msg = extern struct {
     py: f32 = 0,
     pinch: f32 = 9,
     size: f32 = 0.2,
+    /// 親指と中指・薬指の近さ(右クリック・真ん中のクリック)
+    pinch_mid: f32 = 9,
+    pinch_ring: f32 = 9,
+    /// 伸びている指(poses.zig のビット)。has2 = もう一方の手が映っている、ext2 = その手の指
+    ext: u8 = 0,
+    has2: u8 = 0,
+    ext2: u8 = 0,
+    _r2: u8 = 0,
 };
+
+/// ポーズを止めて割り当ての操作が動くまで(ms)
+const POSE_MS = 700;
+/// つまんでから止めたまま、この時間がたったら窓をつかむ(その前に動かせばアプリの中のドラッグ)
+const GRAB_MS = 450;
 
 /// 波紋: 広がりきる半径(px)と時間(ms)
 const Ripple = struct { x: f32, y: f32, t0: u64, col: Color, size: f32, dur: f32 };
@@ -77,7 +95,7 @@ const HOLD_NUM_MS = 650;
 const DWELL_MS = 650;
 
 // ---- 手のメニュー ----
-const Item = enum { launcher, dashboard, fullscreen, float, bigger, smaller, screenshot, close };
+const Item = enum { launcher, dashboard, fullscreen, float, bigger, smaller, screenshot, close, poses };
 const items = [_]struct { it: Item, icon: []const u8, label: []const u8 }{
     .{ .it = .launcher, .icon = "\u{F003B}", .label = "ランチャー" },
     .{ .it = .dashboard, .icon = "\u{F056E}", .label = "ダッシュボード" },
@@ -87,8 +105,9 @@ const items = [_]struct { it: Item, icon: []const u8, label: []const u8 }{
     .{ .it = .smaller, .icon = "\u{F034A}", .label = "小さく" },
     .{ .it = .screenshot, .icon = "\u{F0100}", .label = "スクショ" },
     .{ .it = .close, .icon = "\u{F0156}", .label = "閉じる" },
+    .{ .it = .poses, .icon = "\u{F1821}", .label = "ポーズの設定" },
 };
-const MENU_R: f32 = 122;
+const MENU_R: f32 = 142;
 const ITEM_R: f32 = 30;
 const WS_GAP: f32 = 40;
 
@@ -167,6 +186,28 @@ const State = struct {
     debug_until: u64 = 0,
     debug_log: bool = false,
     last_logged: Gesture = .none,
+    // ---- クリック・ドラッグ・スクロール(マウスの代わりに全部できるように)----
+    /// 親指と中指・薬指でつまんでいる(0 = なし / 右 0x111 / 真ん中 0x112)
+    alt_btn: u32 = 0,
+    alt_t0: u64 = 0,
+    /// つまんで動かしたのが、アプリの中のドラッグ(左ボタンを押したまま)か。false なら窓をつかんでいる
+    app_drag: bool = false,
+    /// ピースを動かしてスクロールしている
+    scrolling: bool = false,
+    scroll_p0: [2]f32 = .{ 0, 0 },
+    scroll_last: [2]f32 = .{ 0, 0 },
+    // ---- ポーズの割り当て ----
+    ext: u8 = 0,
+    ext2: u8 = poses.NONE,
+    cand_ext: u8 = 0,
+    cand_ext2: u8 = poses.NONE,
+    cand_ext_n: u8 = 0,
+    pose_a: u8 = poses.NONE,
+    pose_b: u8 = poses.NONE,
+    pose_t0: u64 = 0,
+    pose_p0: [2]f32 = .{ 0, 0 },
+    pose_done: bool = false,
+    pose_bind: ?*const poses.Binding = null,
 };
 var st: State = .{};
 
@@ -357,6 +398,12 @@ fn lost(app: *App) void {
     st.n_hist = 0;
     st.menu = false;
     st.menu_s.set(0);
+    st.alt_btn = 0;
+    if (st.scrolling) scrollStop();
+    st.scrolling = false;
+    st.pose_bind = null;
+    st.pose_a = poses.NONE;
+    st.ext2 = poses.NONE;
 }
 
 fn frame(app: *App, m: Msg) void {
@@ -408,26 +455,81 @@ fn frame(app: *App, m: Msg) void {
         return;
     }
 
-    // ---- つまむ: 短くでクリック、動かすと窓をつかむ(つかんだまま近づける・遠ざけるとズーム)----
-    const pinch_now = if (st.pinching) m.pinch < 0.48 and st.gesture != .open else st.gesture == .pinch;
+    // ---- 伸びている指(ポーズ)・もう一方の手: 3 コマ続いたら確定 ----
+    const e2: u8 = if (m.has2 != 0) m.ext2 else poses.NONE;
+    if (m.ext == st.cand_ext and e2 == st.cand_ext2) st.cand_ext_n +|= 1 else {
+        st.cand_ext = m.ext;
+        st.cand_ext2 = e2;
+        st.cand_ext_n = 1;
+    }
+    if (st.cand_ext_n >= 3) {
+        st.ext = st.cand_ext;
+        st.ext2 = st.cand_ext2;
+    }
+
+    // ---- 親指と中指 = 右クリック、親指と薬指 = 真ん中のクリック(人差し指はつままない)----
+    if (!st.pinching) {
+        const want: u32 = if (st.alt_btn == 0x111)
+            (if (m.pinch_mid < 0.45 and m.pinch > 0.4) 0x111 else 0)
+        else if (st.alt_btn == 0x112)
+            (if (m.pinch_ring < 0.45 and m.pinch > 0.4) 0x112 else 0)
+        else if (m.pinch_mid < 0.3 and m.pinch > 0.45)
+            0x111
+        else if (m.pinch_ring < 0.3 and m.pinch > 0.45 and m.pinch_mid > 0.45)
+            0x112
+        else
+            0;
+        if (want != 0 and st.alt_btn == 0) {
+            st.alt_btn = want;
+            st.alt_t0 = now;
+            st.press.set(1);
+            addRipple(st.cur, theme.accent(app).lighten(0.4), 50, 800);
+        } else if (want == 0 and st.alt_btn != 0) {
+            const b = st.alt_btn;
+            st.alt_btn = 0;
+            st.press.set(0);
+            if (now -| st.alt_t0 < 900) {
+                clickButton(b);
+                addRipple(st.cur, Color.hex(0xffb86b), 100, 1000);
+                setBanner(if (b == 0x111) "右クリック" else "真ん中のクリック");
+            }
+        }
+    }
+
+    // ---- つまむ: 短くでクリック。すぐ動かすとドラッグ、止めてから動かすと窓をつかむ ----
+    const pinch_now = st.alt_btn == 0 and (if (st.pinching) m.pinch < 0.48 and st.gesture != .open else st.gesture == .pinch);
     if (pinch_now and !st.pinching) {
         st.pinching = true;
         st.pinch_t0 = now;
         st.pinch_p0 = st.cur;
         st.dragging = false;
+        st.app_drag = false;
         st.press.set(1);
         addRipple(st.cur, theme.accent(app), 60, 900);
     } else if (pinch_now and st.pinching) {
         const dx = st.cur[0] - st.pinch_p0[0];
         const dy = st.cur[1] - st.pinch_p0[1];
-        if (!st.dragging and (dx * dx + dy * dy > 30 * 30 or now -| st.pinch_t0 > 420)) {
-            if (grabStart(app)) {
-                st.dragging = true;
-                st.drag_size0 = st.size;
+        const moved = dx * dx + dy * dy > 30 * 30;
+        if (!st.dragging) {
+            if (moved and now -| st.pinch_t0 < GRAB_MS) {
+                // すぐ動かした: アプリの中のドラッグ(つまんだ所で左ボタンを押し、押したまま動かす)
+                if (appDragStart()) {
+                    st.dragging = true;
+                    st.app_drag = true;
+                    setBanner("ドラッグ");
+                }
+            } else if (!moved and now -| st.pinch_t0 >= GRAB_MS) {
+                // 止めていた: 窓をつかむ
+                if (grabStart(app)) {
+                    st.dragging = true;
+                    st.app_drag = false;
+                    st.drag_size0 = st.size;
+                    addRipple(st.cur, theme.accent(app).lighten(0.1), 80, 900);
+                }
             }
         }
         // 旧 River では、押したままのカーソルの動き(movePointer)がそのままドラッグになる
-        if (st.dragging) if (app.wm) |w| {
+        if (st.dragging and !st.app_drag) if (app.wm) |w| {
             // 手の大きさの変わり方 = ズーム(少しの揺れは無視する)
             var scale = st.size / @max(st.drag_size0, 0.01);
             if (@abs(scale - 1) < 0.07) scale = 1 else scale = std.math.clamp(1 + (scale - 1) * 1.4, 0.45, 2.4);
@@ -445,8 +547,55 @@ fn frame(app: *App, m: Msg) void {
         }
     }
 
+    // ---- ピース(人差し指と中指)を動かす: スクロール。止めていればワークスペース 2(下の「本数」)----
+    const peace = st.gesture == .number and st.fingers == 2 and !st.pinching;
+    if (!peace) {
+        if (st.scrolling) scrollStop();
+        st.scrolling = false;
+        st.scroll_p0 = st.cur;
+    } else if (!st.scrolling) {
+        if (dist2(st.cur, st.scroll_p0) > 22 * 22) {
+            st.scrolling = true;
+            st.scroll_last = st.cur;
+            st.num = 0;
+            st.num_done = true; // スクロールしたら、ワークスペース 2 には移らない
+        }
+    } else {
+        const dx = st.cur[0] - st.scroll_last[0];
+        const dy = st.cur[1] - st.scroll_last[1];
+        st.scroll_last = st.cur;
+        // 手を下げると下へ(ホイールを手前に回すのと同じ向き)
+        scroll(dx * 1.6, dy * 1.6);
+    }
+
+    // ---- ポーズの割り当て(設定画面で決めたもの): 0.7 秒止めると動く ----
+    const bind: ?*const poses.Binding = if (st.pinching or st.alt_btn != 0 or !settled or st.scrolling or
+        (st.ext == poses.POINT and st.ext2 == poses.NONE)) null else poses.find(st.ext, st.ext2);
+    if (bind) |b| {
+        if (st.pose_a != st.ext or st.pose_b != st.ext2 or dist2(st.cur, st.pose_p0) > 50 * 50) {
+            st.pose_a = st.ext;
+            st.pose_b = st.ext2;
+            st.pose_t0 = now;
+            st.pose_p0 = st.cur;
+            st.pose_done = false;
+        } else if (!st.pose_done and now -| st.pose_t0 >= POSE_MS) {
+            st.pose_done = true;
+            poses.run(app, b);
+            var db: [160]u8 = undefined;
+            setBanner(poses.describe(app, b, &db));
+            addRipple(st.cur, theme.accent(app).lighten(0.15), 150, 1200);
+        }
+        st.pose_bind = b;
+    } else {
+        st.pose_bind = null;
+        st.pose_a = poses.NONE;
+        st.pose_b = poses.NONE;
+    }
+    // 割り当てたポーズ・両手のときは、元からある動き(メニュー・閉じる・本数)を使わない
+    const custom = bind != null or st.ext2 != poses.NONE;
+
     // ---- 払う: 手のひらが速く横に動いた(指さし・つまみ・握りこぶし以外の形で)----
-    const swipeable = !st.pinching and (st.gesture == .open or st.gesture == .other or (st.gesture == .number and st.fingers >= 3));
+    const swipeable = !custom and !st.pinching and (st.gesture == .open or st.gesture == .other or (st.gesture == .number and st.fingers >= 3));
     if (swipeable) {
         if (st.n_hist == st.hist.len) {
             std.mem.copyForwards(@TypeOf(st.hist[0]), st.hist[0 .. st.hist.len - 1], st.hist[1..]);
@@ -475,7 +624,7 @@ fn frame(app: *App, m: Msg) void {
 
     // ---- 保つ: 握りこぶし = 閉じる、開いた手 = メニュー ----
     if (st.gesture != .open) st.open_blocked = false;
-    const holdable = settled and (st.gesture == .fist or (st.gesture == .open and !st.open_blocked)) and !st.pinching;
+    const holdable = !custom and settled and (st.gesture == .fist or (st.gesture == .open and !st.open_blocked)) and !st.pinching;
     if (!holdable) {
         st.hold = .none;
     } else {
@@ -498,9 +647,11 @@ fn frame(app: *App, m: Msg) void {
     }
 
     // ---- 指の本数を示して止める: そのワークスペースへ ----
-    if (st.gesture != .number or st.pinching or !settled) {
+    if (custom or st.gesture != .number or st.pinching or !settled) {
         st.num = 0;
-        st.num_done = false;
+        if (!st.scrolling) st.num_done = false;
+    } else if (st.scrolling) {
+        st.num = 0;
     } else {
         if (st.num != st.fingers or dist2(st.cur, st.num_p0) > 60 * 60) {
             if (st.num != st.fingers) st.num_done = false;
@@ -598,6 +749,7 @@ fn choose(app: *App, h: i32) void {
         .smaller => winScale(app, 1.0 / 1.2),
         .screenshot => @import("../shot.zig").take(app, .full, 450),
         .close => winOp(app, .close),
+        .poses => @import("posegui.zig").open(app),
     }
     setBanner(items[@intCast(h)].label);
 }
@@ -618,10 +770,59 @@ fn wakeAdd(app: *App, p: [2]f32, now: u64) void {
     st.n_wake += 1;
 }
 
+/// 手のメニューを開く(ポーズの割り当てから)
+pub fn openMenuPublic(app: *App) void {
+    if (!st.on or !st.visible) return;
+    openMenu(app);
+}
+
+/// 左ボタン以外のクリック(右 0x111・真ん中 0x112)
+fn clickButton(btn: u32) void {
+    const vp = st.vptr orelse return;
+    const t: u32 = @truncate(loop.nowMs());
+    c.zwlr_virtual_pointer_v1_button(vp, t, btn, 1);
+    c.zwlr_virtual_pointer_v1_frame(vp);
+    c.zwlr_virtual_pointer_v1_button(vp, t + 8, btn, 0);
+    c.zwlr_virtual_pointer_v1_frame(vp);
+}
+
+/// アプリの中のドラッグを始める: つまみ始めた所で左ボタンを押し、今の場所へ動かす(押したまま)
+fn appDragStart() bool {
+    const vp = st.vptr orelse return false;
+    movePointer(st.pinch_p0);
+    c.zwlr_virtual_pointer_v1_button(vp, @truncate(loop.nowMs()), 0x110, 1);
+    c.zwlr_virtual_pointer_v1_frame(vp);
+    st.vbutton = true;
+    movePointer(st.cur);
+    return true;
+}
+
+/// スクロール(論理 px。指で滑らせたのと同じ「なめらか」な量で送る)
+fn scroll(dx: f32, dy: f32) void {
+    const vp = st.vptr orelse return;
+    if (@abs(dx) < 0.5 and @abs(dy) < 0.5) return;
+    const t: u32 = @truncate(loop.nowMs());
+    c.zwlr_virtual_pointer_v1_axis_source(vp, c.WL_POINTER_AXIS_SOURCE_FINGER);
+    if (@abs(dy) >= 0.5) c.zwlr_virtual_pointer_v1_axis(vp, t, c.WL_POINTER_AXIS_VERTICAL_SCROLL, @intFromFloat(dy * 256));
+    if (@abs(dx) >= 0.5) c.zwlr_virtual_pointer_v1_axis(vp, t, c.WL_POINTER_AXIS_HORIZONTAL_SCROLL, @intFromFloat(dx * 256));
+    c.zwlr_virtual_pointer_v1_frame(vp);
+}
+
+fn scrollStop() void {
+    const vp = st.vptr orelse return;
+    const t: u32 = @truncate(loop.nowMs());
+    c.zwlr_virtual_pointer_v1_axis_source(vp, c.WL_POINTER_AXIS_SOURCE_FINGER);
+    c.zwlr_virtual_pointer_v1_axis_stop(vp, t, c.WL_POINTER_AXIS_VERTICAL_SCROLL);
+    c.zwlr_virtual_pointer_v1_axis_stop(vp, t, c.WL_POINTER_AXIS_HORIZONTAL_SCROLL);
+    c.zwlr_virtual_pointer_v1_frame(vp);
+}
+
 fn endDrag() void {
     if (!st.dragging) return;
     st.dragging = false;
-    if (st.app) |app| if (app.wm) |w| w.push(.hand_release);
+    // アプリの中のドラッグは左ボタンを離すだけ(内蔵 WM の「つかむ」は使っていない)
+    if (!st.app_drag) if (st.app) |app| if (app.wm) |w| w.push(.hand_release);
+    st.app_drag = false;
     if (st.vbutton) {
         st.vbutton = false;
         if (st.vptr) |vp| {
@@ -851,7 +1052,24 @@ fn draw(_: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
             }
             animating = true;
         }
-        if (st.dragging) {
+        // ポーズの割り当て: 輪が満ちたら動く。下に何が動くか
+        if (st.pose_bind) |b| if (!st.pose_done) {
+            const p = std.math.clamp(@as(f32, @floatFromInt(now -| st.pose_t0)) / POSE_MS, 0, 1);
+            if (p > 0.12) {
+                cv.arc(x, y, 30, 3.5, (p - 0.12) / 0.88, Color.hex(0x9be37a).alpha(a), Color.hex(0xffffff).alpha(0.12 * a));
+                var db: [160]u8 = undefined;
+                const label = poses.describe(app, b, &db);
+                const tw = cv.measure(label, 12, true) + 24;
+                cv.glass(x - tw / 2, y + 40, tw, 26, 13, theme.glass(app));
+                _ = cv.text(x, y + 58, 12, Color.hex(0xffffff).alpha(0.92 * a), label, .{ .alignment = .center, .bold = true });
+            }
+            animating = true;
+        };
+        // 両手: もう一方の手が見えている印
+        if (st.ext2 != poses.NONE) _ = cv.text(x + 24, y - 20, 12, acc.lighten(0.3).alpha(0.9 * a), "\u{F1821}\u{F1821}", .{ .bold = true });
+        if (st.dragging and st.app_drag) {
+            _ = cv.text(x, y + 36, 11, Color.hex(0xffffff).alpha(0.85 * a), "ドラッグ(離すと落とす)", .{ .alignment = .center });
+        } else if (st.dragging) {
             const scale = st.size / @max(st.drag_size0, 0.01);
             var lb: [32]u8 = undefined;
             const label = if (@abs(scale - 1) >= 0.07) (std.fmt.bufPrint(&lb, "移動・ズーム {d:.0}%", .{std.math.clamp(1 + (scale - 1) * 1.4, 0.45, 2.4) * 100}) catch "移動") else "移動(近づける・遠ざけるとズーム)";
@@ -928,8 +1146,9 @@ fn worker() void {
     };
     defer lmk.deinit();
     fa.free(bytes); // 重みは f32 に変換済み。ファイルの中身はもう要らない
-    var tr = track.Tracker.init(&det, &lmk);
-    tr.det_signed = false;
+    // 両手まで追う(もう一方の手は、ポーズの組み合わせに使う)
+    var mt = track.MultiTracker.init(&det, &lmk);
+    mt.det_signed = false;
 
     var cam = openCamera() orelse {
         sendStatus(.no_camera);
@@ -941,9 +1160,11 @@ fn worker() void {
     sendStatus(.running);
     log.info("ハンド操作: カメラ {d}x{d}", .{ cam.w, cam.h });
 
-    var an = gesture.Analyzer{};
+    var ans = [_]gesture.Analyzer{ .{}, .{} };
+    var had = [_]bool{ false, false };
+    // カーソルを動かす手(先に見つかった方。消えたらもう一方)
+    var primary: usize = 0;
     var lut: [256]u8 = undefined;
-    var had_hand = false;
     var last_run: i64 = 0;
     var logged_dark = false;
     while (!st.quit.load(.acquire)) {
@@ -951,7 +1172,7 @@ fn worker() void {
         _ = std.posix.poll(&pfd, 150) catch break;
         // 手を追っている間は 1 秒に 30 回まで、見つかっていない間は検出を 1 秒に 4 回まで(軽くするため)
         const now = std.time.milliTimestamp();
-        const gap: i64 = if (tr.roi == null) 250 else 30;
+        const gap: i64 = if (mt.count() == 0) 250 else 30;
         if (now - last_run < gap) {
             _ = cam.grab(null, true); // 処理しないコマは変換せずに捨てる
             continue;
@@ -975,17 +1196,38 @@ fn worker() void {
             }
         }
         const img = track.Image{ .rgb = rgb, .w = cam.w, .h = cam.h };
-        const hand = tr.step(img) catch null;
-        if (hand) |hd| {
-            if (!had_hand) an.reset();
-            had_hand = true;
-            const t = @as(f32, @floatFromInt(now)) / 1000;
-            const f = an.step(hd.pts, @floatFromInt(cam.w), @floatFromInt(cam.h), t);
-            send(.{ .kind = 0, .has = 1, .gesture = @intFromEnum(f.gesture), .fingers = f.fingers, .cx = f.cx, .cy = f.cy, .px = f.px, .py = f.py, .pinch = f.pinch, .size = f.size });
-        } else {
-            had_hand = false;
-            send(.{ .kind = 0, .has = 0 });
+        var hands: [track.MAX_HANDS]?track.Hand = .{ null, null };
+        mt.step(img, &hands) catch {};
+        const t = @as(f32, @floatFromInt(now)) / 1000;
+        var feats: [2]?gesture.Features = .{ null, null };
+        for (0..2) |k| {
+            if (hands[k]) |hd| {
+                if (!had[k]) ans[k].reset();
+                had[k] = true;
+                feats[k] = ans[k].step(hd.pts, @floatFromInt(cam.w), @floatFromInt(cam.h), t);
+            } else had[k] = false;
         }
+        if (feats[primary] == null and feats[1 - primary] != null) primary = 1 - primary;
+        if (feats[primary]) |f| {
+            const o = feats[1 - primary];
+            send(.{
+                .kind = 0,
+                .has = 1,
+                .gesture = @intFromEnum(f.gesture),
+                .fingers = f.fingers,
+                .cx = f.cx,
+                .cy = f.cy,
+                .px = f.px,
+                .py = f.py,
+                .pinch = f.pinch,
+                .size = f.size,
+                .pinch_mid = f.pinch_mid,
+                .pinch_ring = f.pinch_ring,
+                .ext = f.ext,
+                .has2 = @intFromBool(o != null),
+                .ext2 = if (o) |of| of.ext else 0,
+            });
+        } else send(.{ .kind = 0, .has = 0 });
     }
 }
 
@@ -1081,7 +1323,38 @@ pub fn debugInject(app: *App, args: []const u8) void {
         frame(app, .{ .kind = 0, .has = 0 });
         return;
     }
-    frame(app, .{ .kind = 0, .has = 1, .gesture = @intFromEnum(g), .fingers = fingers, .cx = x, .cy = y, .px = x, .py = y, .pinch = if (g == .pinch) 0.15 else 1.0, .size = size });
+    var m = Msg{ .kind = 0, .has = 1, .gesture = @intFromEnum(g), .fingers = fingers, .cx = x, .cy = y, .px = x, .py = y, .pinch = if (g == .pinch) 0.15 else 1.0, .size = size };
+    // 残り: ext=<指> ext2=<指>(もう一方の手)mid=<親指と中指> ring=<親指と薬指>(poses.zig の指の文字。0 = 握りこぶし)
+    m.ext = switch (g) {
+        .point => poses.POINT,
+        .open => 31,
+        .fist => 0,
+        .number => switch (fingers) {
+            1 => poses.THUMB,
+            2 => poses.INDEX | poses.MIDDLE,
+            3 => poses.INDEX | poses.MIDDLE | poses.RING,
+            else => poses.INDEX | poses.MIDDLE | poses.RING | poses.PINKY,
+        },
+        else => poses.POINT,
+    };
+    while (it.next()) |kv| {
+        const eqi = std.mem.indexOfScalar(u8, kv, '=') orelse continue;
+        const k = kv[0..eqi];
+        const v = kv[eqi + 1 ..];
+        if (std.mem.eql(u8, k, "ext")) {
+            if (poses.strToMask(v)) |e| m.ext = e;
+        } else if (std.mem.eql(u8, k, "ext2")) {
+            if (poses.strToMask(v)) |e| {
+                m.has2 = 1;
+                m.ext2 = e;
+            }
+        } else if (std.mem.eql(u8, k, "mid")) {
+            m.pinch_mid = std.fmt.parseFloat(f32, v) catch 9;
+        } else if (std.mem.eql(u8, k, "ring")) {
+            m.pinch_ring = std.fmt.parseFloat(f32, v) catch 9;
+        }
+    }
+    frame(app, m);
 }
 
 // ---- 窓の操作: River 0.5(ame-shell が WM を兼ねる)は内蔵 WM へ、River 0.3/0.4 は river-control(riverctl と同じ命令)へ ----
@@ -1144,4 +1417,10 @@ fn grabStart(app: *App) bool {
     c.zwlr_virtual_pointer_v1_frame(vp);
     st.vbutton = true;
     return true;
+}
+
+/// 今の手のポーズ(ポーズの設定画面の「今の手を使う」)。手が見えていなければ null。[手 1, 手 2 か NONE]
+pub fn currentPose() ?[2]u8 {
+    if (!st.on or !st.visible) return null;
+    return .{ st.ext, st.ext2 };
 }

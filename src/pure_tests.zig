@@ -11,6 +11,7 @@ test {
     _ = @import("airpods.zig");
     _ = @import("airpodspopup.zig");
     _ = @import("btresume.zig");
+    _ = @import("hand/poses.zig");
 }
 
 test "spring converges and is velocity-continuous" {

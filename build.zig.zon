@@ -5,12 +5,12 @@
     // 手の認識(ハンド操作)と顔認証は別のリポジトリ(初めてビルドするときに GitHub から取ってくる)
     .dependencies = .{
         .ame_hand = .{
-            .url = "https://github.com/TatsuyaM2667/ame-hand/archive/759c5b988ea4a94833e7f18b3dacb24323342dfb.tar.gz",
-            .hash = "1220f58bb3099e597c97d6c70e85ad3d3163933f69431acf75d3924ecfaef1c89628",
+            .url = "https://github.com/TatsuyaM2667/ame-hand/archive/cc31453eee6c24b7a99dec670f06334b4f47d111.tar.gz",
+            .hash = "12205c717f391532a8cb22885bac03817aa98afa49efa4acbe69e7cd9a1eb62213a4",
         },
         .ame_face = .{
-            .url = "https://github.com/TatsuyaM2667/ame-face/archive/40caef350d47b2e734869a86eda07de3aac0f52c.tar.gz",
-            .hash = "12207d6544577936a8e0da6eaca60e409d92f120c9801a9b1ea2a470d77af496fe8b",
+            .url = "https://github.com/TatsuyaM2667/ame-face/archive/bcef91268096a48b0c64707248db08d745679c19.tar.gz",
+            .hash = "1220ca6670f75f1778fc331a53d57f5455e10530556e49b0a576fda8b61f61d3619b",
         },
     },
     .paths = .{""},

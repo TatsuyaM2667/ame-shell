@@ -353,6 +353,7 @@ pub const App = struct {
                 if (self.charge) |ch| ch.reap();
                 if (self.nowplaying) |np| np.reap();
                 if (self.airpods_popup) |pp| pp.reap();
+                @import("hand/posegui.zig").reap();
                 self.wallpick.reap();
                 @import("shot.zig").reap(self);
                 @import("ripple.zig").reap(self);
@@ -885,6 +886,7 @@ fn onGlobalRemove(data: ?*anyopaque, _: ?*c.struct_wl_registry, name: u32) callc
         if (app.charge) |ch| ch.outputRemoved(o);
         if (app.nowplaying) |np| np.outputRemoved(o);
         if (app.airpods_popup) |pp| pp.outputRemoved(o);
+        @import("hand/posegui.zig").outputRemoved(o);
         @import("shot.zig").outputRemoved(app, o);
         @import("ripple.zig").outputRemoved(app, o);
         @import("wm/wobble.zig").outputRemoved(o);

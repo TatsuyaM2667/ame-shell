@@ -75,12 +75,13 @@ pub const Wall = struct {
     px: ?[*]u8 = null,
 };
 
-const Action = enum { wallpaper, update, lock, face_enroll, logout, sleep, reboot, poweroff };
+const Action = enum { wallpaper, update, lock, face_enroll, hand_poses, logout, sleep, reboot, poweroff };
 const actions = [_]struct { a: Action, icon: []const u8, name: []const u8, desc: []const u8, keys: []const u8 }{
     .{ .a = .wallpaper, .icon = "\u{F0E09}", .name = "壁紙", .desc = "壁紙を選ぶ", .keys = "wallpaper kabegami" },
     .{ .a = .update, .icon = "\u{F06B0}", .name = "アップデート", .desc = "パッケージと ame-shell を更新する(ame-update)", .keys = "update upgrade appudeto koushin" },
     .{ .a = .lock, .icon = "\u{F033E}", .name = "ロック", .desc = "画面をロックする", .keys = "lock rokku" },
     .{ .a = .face_enroll, .icon = "\u{F0C7B}", .name = "顔を登録", .desc = "パスワードで本人を確かめてから、顔認証用にカメラで顔を登録する", .keys = "face kao touroku faceid ninshou" },
+    .{ .a = .hand_poses, .icon = "\u{F1821}", .name = "ハンドのポーズ", .desc = "手のポーズ(両手の組み合わせも)を、アプリの起動や操作に割り当てる", .keys = "hand pose gesture te po-zu jesucha" },
     .{ .a = .logout, .icon = "\u{F0343}", .name = "ログアウト", .desc = "River を終了する", .keys = "logout exit" },
     .{ .a = .sleep, .icon = "\u{F04B2}", .name = "スリープ", .desc = "ロックしてサスペンド", .keys = "sleep suspend" },
     .{ .a = .reboot, .icon = "\u{F0709}", .name = "再起動", .desc = "コンピュータを再起動する", .keys = "reboot restart" },
@@ -588,7 +589,7 @@ pub const Launcher = struct {
                     self.app.wallpick.open();
                     return;
                 }
-                if (a != .lock and a != .face_enroll and self.armed != a) {
+                if (a != .lock and a != .face_enroll and a != .hand_poses and self.armed != a) {
                     // 取り返しのつかない操作は 2 回目の Enter で実行
                     self.armed = a;
                     self.redraw();
@@ -598,6 +599,7 @@ pub const Launcher = struct {
                 switch (a) {
                     .lock => _ = self.app.lock.lock(),
                     .face_enroll => _ = self.app.lock.lockForEnroll(), // 先にパスワードで本人を確かめる
+                    .hand_poses => @import("hand/posegui.zig").open(self.app),
                     .logout => self.app.riverCommand(&.{"exit"}),
                     .sleep => {
                         _ = self.app.lock.lock();
@@ -785,6 +787,31 @@ pub const Launcher = struct {
             wl.px = null;
         };
         return wl.tex;
+    }
+
+    /// アプリの一覧(読んでいなければ読む)。ハンドのポーズの設定でアプリを選ぶのに使う
+    pub fn appEntries(self: *Launcher) []Entry {
+        if (self.entries.items.len == 0) self.scan();
+        return self.entries.items;
+    }
+
+    /// .desktop のファイル名(id)でアプリを起動する(ハンドのポーズに割り当てたもの)。見つからなければ false
+    pub fn launchById(self: *Launcher, id: []const u8) bool {
+        for (self.appEntries()) |*e| if (std.mem.eql(u8, e.id, id)) {
+            var exec_buf: [1024]u8 = undefined;
+            var buf: [1024]u8 = undefined;
+            const cmd = stripFieldCodes(e.exec, &exec_buf);
+            const z = if (e.terminal)
+                std.fmt.bufPrintZ(&buf, "{s} -e {s}", .{ self.app.cfg.terminal.get(), cmd }) catch return false
+            else
+                std.fmt.bufPrintZ(&buf, "{s}", .{cmd}) catch return false;
+            self.app.spawn(z);
+            e.uses += 1;
+            e.last_used = std.time.timestamp();
+            self.saveHistory();
+            return true;
+        };
+        return false;
     }
 
     /// ウィンドウの app_id から .desktop の項目を探す(名前・アイコンの表示用)。
@@ -1068,7 +1095,7 @@ pub const Launcher = struct {
     }
 
     /// アイコン: PNG が見つかればそれを、無ければ頭文字の丸アイコン(名前から色を決める)。
-    fn drawIcon(self: *Launcher, cv: *gfx.Canvas, e: *Entry, x: f32, y: f32, size: f32) void {
+    pub fn drawIcon(self: *Launcher, cv: *gfx.Canvas, e: *Entry, x: f32, y: f32, size: f32) void {
         // 縮小済み 64x64 の転送は数十µs なので描画中に行ってよい
         self.uploadIcon(e);
         if (e.icon_tex != 0) {
