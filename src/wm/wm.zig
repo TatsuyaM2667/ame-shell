@@ -141,7 +141,7 @@ pub const WOut = struct {
     ame: ?*appmod.Output = null,
 };
 
-const Op = enum { none, move, resize };
+const Op = enum { none, move, resize, tile_move };
 
 pub const WSeat = struct {
     wm: *Wm,
@@ -199,6 +199,8 @@ pub const Action = union(enum) {
     // ポインタ
     op_move,
     op_resize,
+    /// Super+Alt+左ドラッグ: 浮かせずにタイルのまま動かす(カーソルが入ったタイルと入れ替える・別の画面へ移す)
+    op_tile_move,
     // 外部から(バー・ame-ctl)
     set_tags_on: struct { out: ?*WOut, mask: u32 },
     focus_window: *Window,
@@ -598,6 +600,20 @@ pub const Wm = struct {
                 } else if (s) |ss| ss.focused = self.firstVisible(next);
                 if (next.ame) |ao| self.app.focused_output = ao;
             },
+            .op_tile_move => if (s) |ss| {
+                const w = ss.pointer_window orelse return;
+                if (w.fullscreen) return;
+                // 浮いている窓はふつうの移動
+                if (w.floating) return self.apply(.op_move);
+                ss.op = .tile_move;
+                ss.op_window = w;
+                ss.op_dx = 0;
+                ss.op_dy = 0;
+                ss.op_px = ss.ptr_x;
+                ss.op_py = ss.ptr_y;
+                ss.focused = w;
+                c.river_seat_v1_op_start_pointer(ss.obj);
+            },
             .op_move, .op_resize, .hand_grab => if (s) |ss| {
                 if (a == .hand_grab and ss.op != .none) return;
                 const is_move = a != .op_resize;
@@ -694,7 +710,6 @@ pub const Wm = struct {
             },
         }
     }
-
 
     // ---------------------------------------------------------------------
     // 浮いた窓の縁のつまみ: 窓の下に透明な装飾(decoration_below)を、窓より GRIP だけ大きく置く。
@@ -863,6 +878,29 @@ pub const Wm = struct {
             }
         }
         self.kick();
+    }
+
+    /// タイルのまま動かす途中: カーソル(x, y)が別の画面なら窓をその画面へ、別のタイルの上ならそのタイルと入れ替える
+    fn tileMoveTo(self: *Wm, w: *Window, x: i32, y: i32) void {
+        const o = for (self.outputs.items) |oo| {
+            if (!oo.removed and x >= oo.x and x < oo.x + oo.w and y >= oo.y and y < oo.y + oo.h) break oo;
+        } else return;
+        if (w.out != o) {
+            w.out = o;
+            w.tags = o.tags;
+            self.requestManage();
+            return;
+        }
+        const fx: f32 = @floatFromInt(x);
+        const fy: f32 = @floatFromInt(y);
+        for (self.visibleList(o, true)) |other| {
+            if (other == w or fx < other.tx or fx >= other.tx + other.tw or fy < other.ty or fy >= other.ty + other.th) continue;
+            const ia = std.mem.indexOfScalar(*Window, self.windows.items, w) orelse return;
+            const ib = std.mem.indexOfScalar(*Window, self.windows.items, other) orelse return;
+            std.mem.swap(*Window, &self.windows.items[ia], &self.windows.items[ib]);
+            self.requestManage();
+            return;
+        }
     }
 
     fn visibleList(self: *Wm, o: ?*WOut, tiled_only: bool) []*Window {
@@ -1158,13 +1196,15 @@ pub const Wm = struct {
             self.keybinds.append(kb) catch {};
         }
         // Super+左ドラッグ: 移動 / Super+右ドラッグ: 大きさ変更 / Super+中クリック: 浮かせる
-        const pbs = [_]struct { btn: u32, action: Action }{
+        // Super+Alt+左ドラッグ: タイルのまま動かす
+        const pbs = [_]struct { btn: u32, action: Action, mods: u32 = MOD_SUPER }{
             .{ .btn = BTN_LEFT, .action = .op_move },
             .{ .btn = BTN_RIGHT, .action = .op_resize },
             .{ .btn = BTN_MIDDLE, .action = .float },
+            .{ .btn = BTN_LEFT, .action = .op_tile_move, .mods = MOD_SUPER | MOD_ALT },
         };
         for (pbs) |p| {
-            const obj = c.river_seat_v1_get_pointer_binding(s.obj, p.btn, MOD_SUPER) orelse continue;
+            const obj = c.river_seat_v1_get_pointer_binding(s.obj, p.btn, p.mods) orelse continue;
             const pb = self.app.alloc.create(PtrBind) catch continue;
             pb.* = .{ .wm = self, .obj = obj, .action = p.action };
             _ = c.river_pointer_binding_v1_add_listener(obj, &ptr_listener, pb);
@@ -1557,6 +1597,7 @@ fn opDelta(s: *WSeat, dx: i32, dy: i32) void {
     if (dx == s.op_dx and dy == s.op_dy and (dx != 0 or dy != 0)) return;
     s.op_dx = dx;
     s.op_dy = dy;
+    if (s.op == .tile_move) return s.wm.tileMoveTo(w, s.op_px + dx, s.op_py + dy);
     if (s.op == .move) {
         w.float_rect = .{ s.op_start[0] + fx, s.op_start[1] + fy, s.op_start[2], s.op_start[3] };
         const b: f32 = @floatFromInt(s.wm.border);

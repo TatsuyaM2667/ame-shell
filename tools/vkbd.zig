@@ -1,5 +1,5 @@
 // vkbd: 試験用の仮想キーボード(zwp_virtual_keyboard_v1)。ヘッドレス River 0.5 で WM のキー操作を自動試験するため。
-// 使い方: vkbd Super+Return | Super+Shift+2 | s ミリ秒 ...   (配列は XKB_DEFAULT_LAYOUT、無ければ us)
+// 使い方: vkbd Super+Return | Super+Shift+2 | s ミリ秒 ...   (配列は XKB_DEFAULT_LAYOUT、無ければ us)  down:キー / up:キー(押したまま・離す)
 const std = @import("std");
 const c = @cImport({
     @cInclude("wayland-client.h");
@@ -76,6 +76,19 @@ pub fn main() !u8 {
             const ms = try std.fmt.parseInt(u64, args.next() orelse break, 10);
             _ = c.wl_display_roundtrip(dpy);
             std.time.sleep(ms * std.time.ns_per_ms);
+            continue;
+        }
+        // "down:Super_L" / "up:Super_L": 押したまま・離す(押したまま vptr でドラッグする試験用)
+        if (std.mem.startsWith(u8, arg, "down:") or std.mem.startsWith(u8, arg, "up:")) {
+            const down = arg[0] == 'd';
+            var buf: [64]u8 = undefined;
+            const z = try std.fmt.bufPrintZ(&buf, "{s}", .{arg[if (down) 5 else 3..]});
+            const kc = findKey(km, c.xkb_keysym_from_name(z.ptr, c.XKB_KEYSYM_NO_FLAGS)) orelse {
+                std.debug.print("vkbd: キーが見つかりません: {s}\n", .{z});
+                return 1;
+            };
+            k.key(kc, down);
+            _ = c.wl_display_roundtrip(dpy);
             continue;
         }
         // "Super+Shift+2" → 修飾キーを押す → 最後のキーを押して離す → 修飾キーを離す
