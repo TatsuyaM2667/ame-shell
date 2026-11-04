@@ -80,6 +80,9 @@ const Msg = extern struct {
     /// 手の形(custom.zig の正規化した 21 点)。自分のポーズを見分ける・登録するのに使う
     shape: custom.Shape = [_]f32{0} ** custom.DIM,
     shape2: custom.Shape = [_]f32{0} ** custom.DIM,
+    /// 手首の横の位置(カメラの 0〜1)。両手のポーズで、どちらが画面の左の手かを決める
+    wx: f32 = 0,
+    wx2: f32 = 0,
 };
 
 /// ポーズを止めて割り当ての操作が動くまで(ms)
@@ -218,6 +221,9 @@ const State = struct {
     /// 最新の手の形と、その番号(届くたびに増える。ポーズの登録で使う)
     shape: custom.Shape = [_]f32{0} ** custom.DIM,
     shape_seq: u32 = 0,
+    /// 最新の両手の形(shape が画面の左の手、shape_b が右の手)と、映っている手の数
+    shape_b: custom.Shape = [_]f32{0} ** custom.DIM,
+    shape_hands: u8 = 1,
 };
 var st: State = .{};
 
@@ -482,11 +488,16 @@ fn frame(app: *App, m: Msg) void {
     const settled = now -| st.seen_since >= 500;
 
     // ---- 伸びている指(ポーズ)・もう一方の手: 3 コマ続いたら確定 ----
-    // 自分のポーズ(登録した形)に近ければその値、でなければ伸びている指
-    const id1: u8 = if (custom.match(&m.shape)) |i| custom.BASE + @as(u8, @intCast(i)) else m.ext;
-    const e2: u8 = if (m.has2 == 0) poses.NONE else if (custom.match(&m.shape2)) |i| custom.BASE + @as(u8, @intCast(i)) else m.ext2;
-    // 登録の画面が撮れるように、最新の形を残す
-    st.shape = m.shape;
+    // 自分のポーズ(登録した形)に近ければその値、でなければ伸びている指。
+    // 両手が映っていて、両手の自分のポーズに近ければ、その 1 つのポーズ(もう一方の手は無いことにする)
+    const left_first = m.wx <= m.wx2;
+    const two: ?usize = if (m.has2 != 0) (if (left_first) custom.match2(&m.shape, &m.shape2) else custom.match2(&m.shape2, &m.shape)) else null;
+    const id1: u8 = if (two) |i| custom.BASE + @as(u8, @intCast(i)) else if (custom.match(&m.shape)) |i| custom.BASE + @as(u8, @intCast(i)) else m.ext;
+    const e2: u8 = if (two != null or m.has2 == 0) poses.NONE else if (custom.match(&m.shape2)) |i| custom.BASE + @as(u8, @intCast(i)) else m.ext2;
+    // 登録の画面が撮れるように、最新の形を残す(両手なら画面の左の手を先に)
+    st.shape_hands = if (m.has2 != 0) 2 else 1;
+    st.shape = if (m.has2 != 0 and !left_first) m.shape2 else m.shape;
+    st.shape_b = if (left_first) m.shape2 else m.shape;
     st.shape_seq +%= 1;
     if (id1 == st.cand_ext and e2 == st.cand_ext2) st.cand_ext_n +|= 1 else {
         st.cand_ext = id1;
@@ -1286,6 +1297,8 @@ fn worker() void {
                 .ext2 = if (o) |of| of.ext else 0,
                 .shape = custom.normalize(hands[primary].?.pts, hands[primary].?.right),
                 .shape2 = if (hands[1 - primary]) |h2| custom.normalize(h2.pts, h2.right) else [_]f32{0} ** custom.DIM,
+                .wx = hands[primary].?.pts[0][0] / @as(f32, @floatFromInt(cam.w)),
+                .wx2 = if (hands[1 - primary]) |h2| h2.pts[0][0] / @as(f32, @floatFromInt(cam.w)) else 0,
             });
         } else send(.{ .kind = 0, .has = 0 });
     }
@@ -1485,8 +1498,9 @@ pub fn currentPose() ?[2]u8 {
     return .{ st.ext, st.ext2 };
 }
 
-/// 最新の手の形(自分のポーズの登録で撮る)。seq は届くたびに増える。手が見えていなければ null
-pub fn latestShape() ?struct { seq: u32, shape: custom.Shape } {
+/// 最新の手の形(自分のポーズの登録で撮る)。seq は届くたびに増える。hands = 映っている手の数。
+/// 両手なら a が画面の左の手、b が右の手。手が見えていなければ null
+pub fn latestShape() ?struct { seq: u32, hands: u8, a: custom.Shape, b: custom.Shape } {
     if (!st.on or !st.visible) return null;
-    return .{ .seq = st.shape_seq, .shape = st.shape };
+    return .{ .seq = st.shape_seq, .hands = st.shape_hands, .a = st.shape, .b = st.shape_b };
 }

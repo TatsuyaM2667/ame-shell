@@ -64,7 +64,9 @@ var st: struct {
     rec_name: [48]u8 = undefined,
     rec_name_len: usize = 0,
     rec_t0: u64 = 0,
-    rec_samples: [48]custom.Shape = undefined,
+    rec_samples: [48][2]custom.Shape = undefined,
+    /// コマごとに映っていた手の数
+    rec_hands: [48]u8 = undefined,
     rec_n: usize = 0,
     rec_seq: u32 = 0,
 } = .{};
@@ -156,7 +158,11 @@ fn hoverIdx(x: f32, y: f32) i32 {
 
 /// 手の絵: 手のひらと 5 本の指。伸びている指は長く明るく、曲げている指は短く暗く
 pub fn drawHand(cv: *gfx.Canvas, x: f32, y: f32, s: f32, mask: u8, col: Color) void {
-    // 自分のポーズ: 星の色の手の印
+    // 自分のポーズ: 星の色の手の印(両手のポーズは 2 つ)
+    if (custom.isTwoHanded(mask)) {
+        _ = cv.text(x + s / 2, y + s * 0.68, s * 0.42, Color.hex(0xffd36b), "\u{F1821}\u{F1821}", .{ .alignment = .center });
+        return;
+    }
     if (custom.isId(mask)) {
         _ = cv.text(x + s / 2, y + s * 0.72, s * 0.62, Color.hex(0xffd36b), "\u{F1821}", .{ .alignment = .center });
         return;
@@ -296,19 +302,37 @@ fn startRecord(app: *App) void {
 
 fn finishRecord() void {
     st.rec = .off;
-    if (st.rec_n < 6) {
+    // 撮ったコマの半分以上で両手が映っていれば両手のポーズ(両手のコマだけ使う)、でなければ片手のポーズ
+    var two: usize = 0;
+    for (st.rec_hands[0..st.rec_n]) |h| two += @intFromBool(h == 2);
+    const hands: u8 = if (two * 2 >= st.rec_n and two > 0) 2 else 1;
+    var k: usize = 0;
+    for (0..st.rec_n) |i| {
+        if ((hands == 2) != (st.rec_hands[i] == 2) and hands == 2) continue;
+        st.rec_samples[k] = st.rec_samples[i];
+        k += 1;
+    }
+    if (k < 6) {
         setMsg("手がよく見えなかったので、登録できませんでした(カメラの前で、もう一度)");
         return;
     }
-    const idx = custom.add(st.rec_name[0..st.rec_name_len], st.rec_samples[0..st.rec_n]) orelse {
+    const idx = custom.add(st.rec_name[0..st.rec_name_len], hands, st.rec_samples[0..k]) orelse {
         setMsg("登録できませんでした(多すぎます。使わないポーズを消してください)");
         return;
     };
+    st.rec_n = k;
     poses.reload();
     const id = custom.BASE + @as(u8, @intCast(idx));
     if (st.editing_b) st.b = id else st.a = id;
     var mb: [160]u8 = undefined;
-    setMsg(std.fmt.bufPrint(&mb, "「{s}」を登録しました({d} コマ)。操作を選んで「追加」してください", .{ custom.poses()[idx].nameStr(), st.rec_n }) catch "登録しました");
+    setMsg(std.fmt.bufPrint(&mb, "「{s}」を{s}のポーズとして登録しました({d} コマ)。下で操作を選んで「追加」してください", .{ custom.poses()[idx].nameStr(), if (hands == 2) "両手" else "片手", st.rec_n }) catch "登録しました");
+    // 両手のポーズは、それだけで 1 つのポーズ(手 2 は使わない)
+    if (hands == 2) {
+        st.a = id;
+        st.b = poses.NONE;
+        st.two = false;
+        st.editing_b = false;
+    }
 }
 
 fn drawRecord(app: *App, cv: *gfx.Canvas, x0: f32, y0: f32, pw: f32, ph: f32, acc: Color, txt: Color, sub: Color) bool {
@@ -324,7 +348,8 @@ fn drawRecord(app: *App, cv: *gfx.Canvas, x0: f32, y0: f32, pw: f32, ph: f32, ac
     if (st.rec == .capture) {
         if (live) |l| if (l.seq != st.rec_seq and st.rec_n < st.rec_samples.len) {
             st.rec_seq = l.seq;
-            st.rec_samples[st.rec_n] = l.shape;
+            st.rec_samples[st.rec_n] = .{ l.a, l.b };
+            st.rec_hands[st.rec_n] = l.hands;
             st.rec_n += 1;
         };
         if (now -| st.rec_t0 >= CAPTURE_MS) {
@@ -348,7 +373,8 @@ fn drawRecord(app: *App, cv: *gfx.Canvas, x0: f32, y0: f32, pw: f32, ph: f32, ac
             cv.rect(fr[0], fr[1], fr[2], fr[3], 12, white.alpha(0.1));
             _ = cv.text(fr[0] + 12, fr[1] + 25, 14, if (st.rec_name_len > 0) txt else sub, if (st.rec_name_len > 0) st.rec_name[0..st.rec_name_len] else "名前を打つ(例: OK サイン)", .{ .max_w = fr[2] - 24 });
             _ = cv.text(cx + 24, cy + 122, 12, sub, "「撮影を始める」の 3 秒後から 1.5 秒撮ります。カメラの前で形を作り、", .{ .max_w = cw - 48 });
-            _ = cv.text(cx + 24, cy + 140, 12, sub, "撮っている間に少しずつ向きを変えると、見分けやすくなります。", .{ .max_w = cw - 48 });
+            _ = cv.text(cx + 24, cy + 140, 12, sub, "撮っている間に、形と向きを保ったまま少しずつ動かすと見分けやすくなります。", .{ .max_w = cw - 48 });
+            _ = cv.text(cx + 24, cy + 158, 12, sub, "両手を映せば両手のポーズ(カメラを構える形など)、手の向きも覚えます。", .{ .max_w = cw - 48 });
             const cr = [4]f32{ cx + cw - 300, cy + ch - 58, 120, 38 };
             cv.rect(cr[0], cr[1], cr[2], cr[3], 19, white.alpha(if (isHover(.rec_cancel, 0)) 0.16 else 0.08));
             _ = cv.text(cr[0] + cr[2] / 2, cr[1] + 25, 13, txt, "やめる", .{ .alignment = .center });
@@ -370,7 +396,8 @@ fn drawRecord(app: *App, cv: *gfx.Canvas, x0: f32, y0: f32, pw: f32, ph: f32, ac
             cv.rect(cx + 24, cy + 120, cw - 48, 10, 5, white.alpha(0.15));
             cv.rect(cx + 24, cy + 120, (cw - 48) * p, 10, 5, acc);
             var mb: [64]u8 = undefined;
-            _ = cv.text(cx + cw / 2, cy + 170, 14, txt, std.fmt.bufPrint(&mb, "撮っています… {d} コマ", .{st.rec_n}) catch "", .{ .alignment = .center });
+            const now_two = if (live) |l| l.hands == 2 else false;
+            _ = cv.text(cx + cw / 2, cy + 170, 14, txt, std.fmt.bufPrint(&mb, "撮っています… {d} コマ({s})", .{ st.rec_n, if (now_two) "両手" else "片手" }) catch "", .{ .alignment = .center });
             _ = cv.text(cx + cw / 2, cy + 196, 12, sub, "形を保ったまま、少しずつ向きを変えてください", .{ .alignment = .center });
         },
         .off => {},
@@ -488,7 +515,7 @@ fn drawEditor(app: *App, cv: *gfx.Canvas, x: f32, y: f32, w: f32, h: f32, acc: C
             const id = custom.BASE + @as(u8, @intCast(k));
             const sel = id == cur;
             cv.rect(r[0], r[1], r[2], r[3], 12, if (sel) acc.alpha(0.45) else white.alpha(if (isHover(.custom_pose, k)) 0.14 else 0.06));
-            _ = cv.text(r[0] + r[2] / 2, r[1] + 34, 26, Color.hex(0xffd36b), "\u{F1821}", .{ .alignment = .center });
+            drawHand(cv, r[0] + r[2] / 2 - 19, r[1] + 4, 38, id, txt);
             _ = cv.text(r[0] + r[2] / 2, r[1] + th - 8, 10.5, txt, mine[k].nameStr(), .{ .alignment = .center, .max_w = r[2] - 4 });
             addHit(r, .custom_pose, k);
             const dr = [4]f32{ r[0] + r[2] - 20, r[1] + 3, 17, 17 };
