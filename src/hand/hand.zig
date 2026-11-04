@@ -1,9 +1,9 @@
 // ハンド操作: カメラに映った手の動きで、カーソルと窓を操作する(オン/オフできる。既定はオフ)。
 //
 //   指さす(人差し指だけ伸ばす)… カーソルが指先に付いて動く(窓のフォーカスもカーソルに付いて移る)
-//   つまむ(親指と人差し指)     … 短く: クリック(2 回でダブルクリック)/ つまんですぐ動かす: ドラッグ(左ボタンを
-//                                  押したまま。文字の選択・ファイルを運ぶ)/ つまんで 0.45 秒止めてから動かす: 窓をつかんで
-//                                  動かす。つかんだまま手をカメラに近づける・遠ざけると、窓が大きく・小さくなる(ズーム)
+//   つまむ(親指と人差し指)     … 短く: クリック(2 回でダブルクリック)/ つまんですぐ動かす: 窓をつかんで動かす /
+//                                  つまんで 0.45 秒止めてから動かす: ドラッグ(左ボタンを押したまま。文字の選択・ファイルを運ぶ)。
+//                                  つかんだまま手をカメラに近づける・遠ざけると、窓が大きく・小さくなる(ズーム)
 //   親指と中指でつまむ           … 右クリック   / 親指と薬指でつまむ … 真ん中のクリック
 //   ピース(人差し指と中指)を上下・左右に動かす … スクロール
 //   ポーズの割り当て(poses.zig・設定画面 posegui.zig)… 片手・両手のポーズを 0.7 秒止めると、割り当てた操作・アプリ
@@ -554,7 +554,7 @@ fn frame(app: *App, m: Msg) void {
         }
     }
 
-    // ---- つまむ: 短くでクリック。すぐ動かすとドラッグ、止めてから動かすと窓をつかむ ----
+    // ---- つまむ: 短くでクリック。すぐ動かすと窓をつかむ、止めてから動かすとアプリの中のドラッグ(文字の選択など)----
     const pinch_now = st.alt_btn == 0 and (if (st.pinching) m.pinch < 0.48 and st.gesture != .open else st.gesture == .pinch);
     if (pinch_now and !st.pinching) {
         st.pinching = true;
@@ -570,19 +570,19 @@ fn frame(app: *App, m: Msg) void {
         const moved = dx * dx + dy * dy > 30 * 30;
         if (!st.dragging) {
             if (moved and now -| st.pinch_t0 < GRAB_MS) {
-                // すぐ動かした: アプリの中のドラッグ(つまんだ所で左ボタンを押し、押したまま動かす)
-                if (appDragStart()) {
-                    st.dragging = true;
-                    st.app_drag = true;
-                    setBanner("ドラッグ");
-                }
-            } else if (!moved and now -| st.pinch_t0 >= GRAB_MS) {
-                // 止めていた: 窓をつかむ
+                // すぐ動かした: 窓をつかむ
                 if (grabStart(app)) {
                     st.dragging = true;
                     st.app_drag = false;
                     st.drag_size0 = st.size;
                     addRipple(st.cur, theme.accent(app).lighten(0.1), 80, 900);
+                }
+            } else if (moved) {
+                // 止めてから動かした: アプリの中のドラッグ(つまんだ所で左ボタンを押し、押したまま動かす)
+                if (appDragStart()) {
+                    st.dragging = true;
+                    st.app_drag = true;
+                    setBanner("ドラッグ");
                 }
             }
         }
