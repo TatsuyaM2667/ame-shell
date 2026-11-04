@@ -44,6 +44,7 @@ pub usingnamespace @cImport({
     @cInclude("ext-foreign-toplevel-list-v1-client-protocol.h");
     @cInclude("ext-image-copy-capture-v1-client-protocol.h");
     @cInclude("ext-data-control-v1-client-protocol.h");
+    @cInclude("text-input-unstable-v3-client-protocol.h");
     @cInclude("viewporter-client-protocol.h");
     @cInclude("single-pixel-buffer-v1-client-protocol.h");
     @cInclude("wlr-virtual-pointer-unstable-v1-client-protocol.h");

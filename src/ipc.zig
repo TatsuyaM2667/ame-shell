@@ -73,6 +73,7 @@ const help =
     \\  accent <#rrggbb>|reset
     \\  notify <text>          (テスト用の通知)
     \\  notifications toggle|clear
+    \\  ai toggle|open|close|clear|pick|send <text>   (AI チャット: 右から生えるパネル)
     \\  session | sidebar | utilities   (caelestia: 各ドロワーの開閉)
     \\  close-all
     \\  network | bluetooth     (Wi-Fi / Bluetooth の設定パネル)
@@ -242,6 +243,24 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
         app.dashboard.dataChanged();
     } else if (eq(u8, cmd, "notify")) {
         app.notifs.post("ame-ctl", if (rest.len > 0) rest else "テスト通知", "これは ame-ctl からのテスト通知です。日本語も表示できます 🌧", 0);
+    } else if (eq(u8, cmd, "ai")) {
+        const f = app.activeFrame() orelse return "error: AI チャットは枠のレイアウト(caelestia)で使えます";
+        const ai = @import("ai.zig");
+        ai.ensure(app);
+        if (eq(u8, arg, "clear")) {
+            ai.clear();
+        } else if (eq(u8, arg, "close")) {
+            if (f.aiOpen()) f.toggleAi();
+        } else if (eq(u8, arg, "open")) {
+            if (!f.aiOpen()) f.toggleAi();
+        } else if (eq(u8, arg, "pick")) {
+            if (!f.aiOpen()) f.toggleAi();
+            @import("frame/aipanel.zig").openPicker();
+        } else if (eq(u8, arg, "send")) {
+            if (!f.aiOpen()) f.toggleAi();
+            const sp = std.mem.indexOfScalar(u8, rest, ' ') orelse return "error: ai send <text>";
+            ai.send(rest[sp + 1 ..]);
+        } else f.toggleAi();
     } else if (eq(u8, cmd, "notifications")) {
         if (eq(u8, arg, "clear")) app.notifs.clearAll() else app.notifs.toggleCenter();
     } else if (eq(u8, cmd, "avatar")) {

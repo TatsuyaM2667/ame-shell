@@ -29,6 +29,7 @@ const theme = @import("../theme.zig");
 const dash = @import("dash.zig");
 const data = @import("data.zig");
 const netpanel = @import("netpanel.zig");
+const aipanel = @import("aipanel.zig");
 const side = @import("side.zig");
 const vbar = @import("vbar.zig");
 
@@ -105,6 +106,8 @@ pub const Frame = struct {
     /// Wi-Fi / Bluetooth の設定(バーの横から生える)
     net: Drawer = .{},
     netv: netpanel.State = .{},
+    /// AI チャット(右、サイドバーと同じ場所。どちらか一方だけ開く)
+    ai: Drawer = .{},
 
     bar: vbar.Bar = .{},
     dashv: dash.View = .{},
@@ -300,9 +303,24 @@ pub const Frame = struct {
     }
     pub fn toggleSidebar(self: *Frame) void {
         self.side.toggle();
+        if (self.side.open) self.ai.hide();
         self.app.notifs.unread = 0;
         self.afterOpenChange();
     }
+    /// AI チャットを開く / 閉じる(サイドバーとは入れ替わり)
+    pub fn toggleAi(self: *Frame) void {
+        if (self.ai.open) self.ai.hide() else {
+            self.side.hide();
+            self.ai.show(true);
+            aipanel.onOpen(self);
+        }
+        self.afterOpenChange();
+        @import("../ime.zig").update(self.app);
+    }
+    pub fn aiOpen(self: *const Frame) bool {
+        return self.ai.open;
+    }
+
     /// ネットワーク設定を開く(tab: 0=Wi-Fi 1=Bluetooth)。同じタブで開いていれば閉じる
     pub fn toggleNet(self: *Frame, tab: u8) void {
         if (self.net.open and self.netv.tab == tab) {
@@ -355,7 +373,7 @@ pub const Frame = struct {
 
     /// ランチャーとセッションはキーボードを奪う(Esc や入力のため)。それ以外は奪わない。
     fn updateKeyboard(self: *Frame) void {
-        const want: u32 = if (self.launch.open or self.net.open or (self.session.open and self.session.by_key))
+        const want: u32 = if (self.launch.open or self.net.open or self.ai.open or (self.session.open and self.session.by_key))
             c.ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE
         else
             c.ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
@@ -402,7 +420,7 @@ pub const Frame = struct {
     }
 
     pub fn closeAll(self: *Frame) void {
-        inline for (.{ &self.dash, &self.osd, &self.session, &self.side, &self.util, &self.pop, &self.net }) |d| d.hide();
+        inline for (.{ &self.dash, &self.osd, &self.session, &self.side, &self.util, &self.pop, &self.net, &self.ai }) |d| d.hide();
         self.app.launcher.close();
         self.pop_kind = .none;
         self.afterOpenChange();
@@ -438,7 +456,7 @@ pub const Frame = struct {
         {
             const d = &self.osd;
             const h = d.h.target;
-            const right_off = self.side.w.x * self.side.t.x + self.session.w.x * self.session.t.x;
+            const right_off = self.side.w.x * self.side.t.x + self.ai.w.x * self.ai.t.x + self.session.w.x * self.session.t.x;
             const inside = self.ptr_in and x > W - @max(T_, T_ + right_off + @max(d.w.x * d.t.x, if (d.open) d.w.target else 0)) - 1 and y >= H / 2 - h / 2 - R_ and y <= H / 2 + h / 2 + R_;
             if (inside and d.by_key) d.by_key = false;
             if (!d.by_key and inside != d.open and !(inside and loop.nowMs() < self.app.edge_quiet_until_ms)) {
@@ -594,6 +612,7 @@ pub const Frame = struct {
             .{ .d = &self.side, .which = .sidebar },
             .{ .d = &self.util, .which = .utilities },
             .{ .d = &self.pop, .which = .popout },
+            .{ .d = &self.ai, .which = .ai },
             .{ .d = &self.net, .which = .net },
         };
         for (list) |it| {
@@ -604,6 +623,7 @@ pub const Frame = struct {
                 .dashboard => dash.pointer(self, ev, lx, ly),
                 .launcher => self.app.launcher.panelPointer(ev, lx, ly, it.d.w.x, it.d.h.x),
                 .net => netpanel.pointer(self, ev, lx, ly),
+                .ai => aipanel.pointer(self, ev, lx, ly),
                 else => side.pointer(self, it.which, ev, lx, ly),
             };
         }
@@ -614,6 +634,11 @@ pub const Frame = struct {
         const self: *Frame = @ptrCast(@alignCast(ctx));
         if (self.launch.open) {
             self.app.launcher.frameKey(s, ev);
+            return;
+        }
+        if (self.ai.open) {
+            aipanel.key(self, ev);
+            s.schedule();
             return;
         }
         if (self.net.open and netpanel.key(self, ev)) {
@@ -660,6 +685,7 @@ pub const Frame = struct {
         self.notif.setSize(notif_w, @max(nh, 1));
         self.util.setSize(360, 206);
         self.side.setSize(400, self.side.h.x);
+        self.ai.setSize(aipanel.W, self.ai.h.x);
         const nsz = netpanel.size(self);
         self.net.setSize(nsz[0], nsz[1]);
         const psz = vbar.popSize(self, self.pop_kind);
@@ -669,7 +695,7 @@ pub const Frame = struct {
             self.updateTick();
         }
 
-        inline for (.{ &self.dash, &self.launch, &self.osd, &self.session, &self.side, &self.util, &self.notif, &self.pop, &self.net }) |d| {
+        inline for (.{ &self.dash, &self.launch, &self.osd, &self.session, &self.side, &self.util, &self.notif, &self.pop, &self.net, &self.ai }) |d| {
             if (d.step(dt)) animating = true;
         }
         if (self.pop_cy.step(dt)) animating = true;
@@ -697,7 +723,7 @@ pub const Frame = struct {
         }.k;
 
         // 右側の積み重ね: サイドバー → セッション → OSD の順に左へ
-        const side_vw = self.side.w.x * @max(self.side.t.x, 0);
+        const side_vw = self.side.w.x * @max(self.side.t.x, 0) + self.ai.w.x * @max(self.ai.t.x, 0);
         const sess_vw = self.session.w.x * @max(self.session.t.x, 0);
         const util_vh = self.util.h.x * @max(self.util.t.x, 0);
         const notif_vh = self.notif.h.x * @max(self.notif.t.x, 0);
@@ -744,17 +770,17 @@ pub const Frame = struct {
             d.oy = H - T_ - util_vh;
             sh.add(x, H - T_ - util_vh, w + T_ + R_, util_vh + T_ + R_, R_, kf(K_, util_vh));
         }
-        // サイドバー(右、通知とユーティリティの間)
-        {
-            const d = &self.side;
+        // サイドバーと AI チャット(右、通知とユーティリティの間。同じ場所に、どちらか一方)
+        inline for (.{ &self.side, &self.ai }) |d| {
             const top = T_ + notif_vh;
             const bottom = H - T_ - util_vh;
-            const x = W - T_ - side_vw;
-            d.vis = .{ x, top, side_vw, bottom - top };
+            const vw = d.w.x * @max(d.t.x, 0);
+            const x = W - T_ - vw;
+            d.vis = .{ x, top, vw, bottom - top };
             d.ox = x;
             d.oy = top;
             d.h.snap(bottom - top);
-            sh.add(x, top - R_ * 0.5, side_vw + T_ + R_, bottom - top + R_, R_, kf(K_, side_vw));
+            if (vw > 0.5 or d == &self.side) sh.add(x, top - R_ * 0.5, vw + T_ + R_, bottom - top + R_, R_, kf(K_, vw));
         }
         // 右辺の中央に出すものは、通知とユーティリティの間に収まるよう縦位置を寄せる
         const midY = struct {
@@ -850,6 +876,7 @@ pub const Frame = struct {
             .{ .d = &self.side, .which = .sidebar },
             .{ .d = &self.session, .which = .session },
             .{ .d = &self.osd, .which = .osd },
+            .{ .d = &self.ai, .which = .ai },
             .{ .d = &self.pop, .which = .popout },
             .{ .d = &self.net, .which = .net },
         };
@@ -879,7 +906,7 @@ pub const Frame = struct {
         n += 1;
         rects[n] = .{ 0, H - T_, W, T_ };
         n += 1;
-        inline for (.{ &self.dash, &self.launch, &self.notif, &self.util, &self.side, &self.session, &self.osd, &self.pop, &self.net }) |d| {
+        inline for (.{ &self.dash, &self.launch, &self.notif, &self.util, &self.side, &self.session, &self.osd, &self.pop, &self.net, &self.ai }) |d| {
             if (d.visible() and n < rects.len) {
                 rects[n] = d.vis;
                 n += 1;

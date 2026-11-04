@@ -22,6 +22,7 @@ riverctl map normal Super E spawn 'command -v thunar >/dev/null 2>&1 && exec thu
 riverctl map normal Super D spawn "ame-ctl launcher toggle"
 riverctl map normal Super A spawn "ame-ctl dashboard toggle"
 riverctl map normal Super N spawn "ame-ctl notifications toggle"
+riverctl map normal Super C spawn "ame-ctl ai toggle"
 riverctl map normal Super Q close
 riverctl map normal Super+Shift E exit
 riverctl map normal Super L spawn "ame-ctl lock"

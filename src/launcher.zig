@@ -75,8 +75,9 @@ pub const Wall = struct {
     px: ?[*]u8 = null,
 };
 
-const Action = enum { wallpaper, update, lock, face_enroll, hand_poses, hand_poses_only, logout, sleep, reboot, poweroff };
+const Action = enum { ai_chat, wallpaper, update, lock, face_enroll, hand_poses, hand_poses_only, logout, sleep, reboot, poweroff };
 const actions = [_]struct { a: Action, icon: []const u8, name: []const u8, desc: []const u8, keys: []const u8 }{
+    .{ .a = .ai_chat, .icon = "\u{F0674}", .name = "AI チャット", .desc = "右から出るパネルで AI と話す(OpenAI・Claude・Gemini・DeepSeek・OpenRouter など。Super+C)", .keys = "ai chat gpt claude gemini mistral deepseek openrouter kimi chatto" },
     .{ .a = .wallpaper, .icon = "\u{F0E09}", .name = "壁紙", .desc = "壁紙を選ぶ", .keys = "wallpaper kabegami" },
     .{ .a = .update, .icon = "\u{F06B0}", .name = "アップデート", .desc = "パッケージと ame-shell を更新する(ame-update)", .keys = "update upgrade appudeto koushin" },
     .{ .a = .lock, .icon = "\u{F033E}", .name = "ロック", .desc = "画面をロックする", .keys = "lock rokku" },
@@ -590,7 +591,7 @@ pub const Launcher = struct {
                     self.app.wallpick.open();
                     return;
                 }
-                if (a != .lock and a != .face_enroll and a != .hand_poses and a != .hand_poses_only and self.armed != a) {
+                if (a != .ai_chat and a != .lock and a != .face_enroll and a != .hand_poses and a != .hand_poses_only and self.armed != a) {
                     // 取り返しのつかない操作は 2 回目の Enter で実行
                     self.armed = a;
                     self.redraw();
@@ -601,6 +602,9 @@ pub const Launcher = struct {
                     .lock => _ = self.app.lock.lock(),
                     .face_enroll => _ = self.app.lock.lockForEnroll(), // 先にパスワードで本人を確かめる
                     .hand_poses => @import("hand/posegui.zig").open(self.app),
+                    .ai_chat => if (self.app.activeFrame()) |f| {
+                        if (!f.aiOpen()) f.toggleAi();
+                    },
                     .hand_poses_only => {
                         const hand = @import("hand/hand.zig");
                         if (hand.enabled() and hand.posesOnly()) hand.disable() else hand.enableMode(self.app, true);

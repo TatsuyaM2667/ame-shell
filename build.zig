@@ -32,6 +32,7 @@ const protocols = [_][]const u8{
     "protocol/ext-data-control-v1.xml",
     "protocol/viewporter.xml",
     "protocol/single-pixel-buffer-v1.xml",
+    "protocol/text-input-unstable-v3.xml",
 };
 
 pub fn build(b: *std.Build) void {

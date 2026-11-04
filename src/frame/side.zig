@@ -15,7 +15,7 @@ const data = @import("data.zig");
 const vbar = @import("vbar.zig");
 const Frame = @import("frame.zig").Frame;
 
-pub const Which = enum { dashboard, launcher, notifs, utilities, sidebar, session, osd, popout, net };
+pub const Which = enum { dashboard, launcher, notifs, utilities, sidebar, session, osd, popout, net, ai };
 
 pub const SessionAction = enum { lock, logout, sleep, reboot, poweroff };
 
@@ -379,6 +379,7 @@ pub fn draw(f: *Frame, which: Which, cv: *gfx.Canvas, w: f32, h: f32, dt: f32) b
         .osd => drawOsd(f, cv, w, h),
         .popout => vbar.drawPopout(f, cv, w, h),
         .net => @import("netpanel.zig").draw(f, cv, w, h, dt),
+        .ai => @import("aipanel.zig").draw(f, cv, w, h, dt),
         else => false,
     };
 }

@@ -126,6 +126,8 @@ pub const App = struct {
     icc_mgr: ?*c.struct_ext_image_copy_capture_manager_v1 = null,
     ics_mgr: ?*c.struct_ext_output_image_capture_source_manager_v1 = null,
     dc_mgr: ?*c.struct_ext_data_control_manager_v1 = null,
+    /// 日本語入力(text-input-v3。ime.zig)
+    ti_mgr: ?*c.struct_zwp_text_input_manager_v3 = null,
     /// 浮いた窓の縁の、大きさを変えるつまみ(wm.zig): 透明な 1 画素を拡大して置く
     viewporter: ?*c.struct_wp_viewporter = null,
     /// 仮想ポインタ(ハンド操作でカーソルを動かす、hand/hand.zig)
@@ -842,6 +844,8 @@ fn onGlobal(data: ?*anyopaque, reg: ?*c.struct_wl_registry, name: u32, interface
     } else if (iface(interface, &c.zwlr_virtual_pointer_manager_v1_interface)) {
         app.vptr_mgr = @ptrCast(bind(reg, name, &c.zwlr_virtual_pointer_manager_v1_interface, ver, 2));
         app.vptr_mgr_version = @min(ver, 2);
+    } else if (iface(interface, &c.zwp_text_input_manager_v3_interface)) {
+        app.ti_mgr = @ptrCast(bind(reg, name, &c.zwp_text_input_manager_v3_interface, ver, 1));
     } else if (iface(interface, &c.ext_data_control_manager_v1_interface)) {
         app.dc_mgr = @ptrCast(bind(reg, name, &c.ext_data_control_manager_v1_interface, ver, 1));
     } else if (iface(interface, &c.wl_seat_interface)) {

@@ -32,6 +32,7 @@ const fixed = [_]Bind{
     .{ .keysym = c.XKB_KEY_d, .mods = SUPER, .action = .{ .ame = "launcher toggle" } },
     .{ .keysym = c.XKB_KEY_a, .mods = SUPER, .action = .{ .ame = "dashboard toggle" } },
     .{ .keysym = c.XKB_KEY_n, .mods = SUPER, .action = .{ .ame = "notifications toggle" } },
+    .{ .keysym = c.XKB_KEY_c, .mods = SUPER, .action = .{ .ame = "ai toggle" } },
     .{ .keysym = c.XKB_KEY_u, .mods = SUPER, .action = .{ .ame = "utilities" } },
     .{ .keysym = c.XKB_KEY_Escape, .mods = SUPER, .action = .{ .ame = "session" } },
     .{ .keysym = c.XKB_KEY_l, .mods = SUPER | SHIFT, .action = .{ .ame = "lock" } },
