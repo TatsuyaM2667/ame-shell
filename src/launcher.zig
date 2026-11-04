@@ -75,7 +75,7 @@ pub const Wall = struct {
     px: ?[*]u8 = null,
 };
 
-const Action = enum { ai_chat, wallpaper, update, lock, face_enroll, hand_poses, hand_poses_only, logout, sleep, reboot, poweroff };
+const Action = enum { ai_chat, wallpaper, update, lock, face_enroll, hand_poses, hand_windows, hand_poses_only, logout, sleep, reboot, poweroff };
 const actions = [_]struct { a: Action, icon: []const u8, name: []const u8, desc: []const u8, keys: []const u8 }{
     .{ .a = .ai_chat, .icon = "\u{F0674}", .name = "AI チャット", .desc = "右から出るパネルで AI と話す(OpenAI・Claude・Gemini・DeepSeek・OpenRouter など。Super+C)", .keys = "ai chat gpt claude gemini mistral deepseek openrouter kimi chatto" },
     .{ .a = .wallpaper, .icon = "\u{F0E09}", .name = "壁紙", .desc = "壁紙を選ぶ", .keys = "wallpaper kabegami" },
@@ -83,6 +83,7 @@ const actions = [_]struct { a: Action, icon: []const u8, name: []const u8, desc:
     .{ .a = .lock, .icon = "\u{F033E}", .name = "ロック", .desc = "画面をロックする", .keys = "lock rokku" },
     .{ .a = .face_enroll, .icon = "\u{F0C7B}", .name = "顔を登録", .desc = "パスワードで本人を確かめてから、顔認証用にカメラで顔を登録する", .keys = "face kao touroku faceid ninshou" },
     .{ .a = .hand_poses, .icon = "\u{F1821}", .name = "ハンドのポーズ", .desc = "手のポーズ(両手の組み合わせも)を、アプリの起動や操作に割り当てる", .keys = "hand pose gesture te po-zu jesucha" },
+    .{ .a = .hand_windows, .icon = "\u{F1821}", .name = "ハンドで窓の操作だけ", .desc = "クリックはせず、つまんで窓を動かす・ワークスペースの移動・手のメニューだけにする(もう一度でオフ)", .keys = "hand window mado sousa no click" },
     .{ .a = .hand_poses_only, .icon = "\u{F1821}", .name = "ポーズでアプリ起動だけ", .desc = "カーソルは動かさず、手のポーズでアプリを起動するだけにする(もう一度でオフ)", .keys = "hand pose only app launch po-zu dake" },
     .{ .a = .logout, .icon = "\u{F0343}", .name = "ログアウト", .desc = "River を終了する", .keys = "logout exit" },
     .{ .a = .sleep, .icon = "\u{F04B2}", .name = "スリープ", .desc = "ロックしてサスペンド", .keys = "sleep suspend" },
@@ -591,7 +592,7 @@ pub const Launcher = struct {
                     self.app.wallpick.open();
                     return;
                 }
-                if (a != .ai_chat and a != .lock and a != .face_enroll and a != .hand_poses and a != .hand_poses_only and self.armed != a) {
+                if (a != .ai_chat and a != .lock and a != .face_enroll and a != .hand_poses and a != .hand_windows and a != .hand_poses_only and self.armed != a) {
                     // 取り返しのつかない操作は 2 回目の Enter で実行
                     self.armed = a;
                     self.redraw();
@@ -605,9 +606,10 @@ pub const Launcher = struct {
                     .ai_chat => if (self.app.activeFrame()) |f| {
                         if (!f.aiOpen()) f.toggleAi();
                     },
-                    .hand_poses_only => {
+                    .hand_windows, .hand_poses_only => {
                         const hand = @import("hand/hand.zig");
-                        if (hand.enabled() and hand.posesOnly()) hand.disable() else hand.enableMode(self.app, true);
+                        const md: hand.Mode = if (a == .hand_windows) .windows else .poses;
+                        if (hand.enabled() and hand.mode() == md) hand.disable() else hand.enableMode(self.app, md);
                     },
                     .logout => self.app.riverCommand(&.{"exit"}),
                     .sleep => {

@@ -82,8 +82,9 @@ pub const Config = struct {
     tap_to_click: bool = true,
     /// ハンド操作(hand/hand.zig): 起動時にオンにするか・使うカメラ(空 = /dev/video* から自動)
     hand_enabled: bool = false,
-    /// ハンド操作の動き方: false = 全部(カーソル・クリック・ポーズ)/ true = アプリ起動だけ(ポーズでアプリを起動するだけ)
-    hand_poses_only: bool = false,
+    /// ハンド操作の動き方: 全部(カーソル・クリック・ポーズ)/ 窓の操作(クリック無し: つまんで窓を動かす・ワークスペース・メニュー)/
+    /// アプリ起動だけ(ポーズでアプリを起動するだけ)
+    hand_mode: HandMode = .full,
     hand_camera: Str = .{},
     /// 指の軌跡に波を立てる
     hand_trail: bool = true,
@@ -157,6 +158,8 @@ pub const Config = struct {
 };
 
 /// 固定長文字列(設定は再読込で丸ごと差し替えるので、ヒープを使わない方が扱いやすい)。
+pub const HandMode = enum { full, windows, poses };
+
 pub const Str = struct {
     buf: [256]u8 = [_]u8{0} ** 256,
     len: usize = 0,
@@ -365,7 +368,7 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
         if (eq(u8, key, "enabled")) {
             cfg.hand_enabled = boolean(val) orelse false;
         } else if (eq(u8, key, "mode")) {
-            cfg.hand_poses_only = eq(u8, val, "poses");
+            cfg.hand_mode = std.meta.stringToEnum(HandMode, val) orelse .full;
         } else if (eq(u8, key, "trail")) {
             cfg.hand_trail = boolean(val) orelse true;
         } else if (eq(u8, key, "camera")) {

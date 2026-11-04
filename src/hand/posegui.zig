@@ -28,7 +28,7 @@ const white = Color.hex(0xffffff);
 const black = Color.hex(0x000000);
 
 const Tab = enum { action, app, command };
-const HitKind = enum { close, del, preset, which_a, which_b, two, use_live, tab, op, app, add, cmdbox, custom_pose, cdel, add_custom, rec_start, rec_cancel, mode_full, mode_poses };
+const HitKind = enum { close, del, preset, which_a, which_b, two, use_live, tab, op, app, add, cmdbox, custom_pose, cdel, add_custom, rec_start, rec_cancel, mode_full, mode_windows, mode_poses };
 const Hit = struct { r: [4]f32, kind: HitKind, i: usize = 0 };
 
 var st: struct {
@@ -225,15 +225,16 @@ fn draw(_: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
     cv.rect(cr[0], cr[1], cr[2], cr[3], 16, white.alpha(if (isHover(.close, 0)) 0.2 else 0.08));
     _ = cv.text(cr[0] + 16, cr[1] + 22, 16, txt, "\u{F0156}", .{ .alignment = .center });
     addHit(cr, .close, 0);
-    // ハンド操作の動き方: 全部(カーソル・クリック・ポーズ)/ アプリ起動だけ(ポーズでアプリを起動するだけ)
+    // ハンド操作の動き方: 全部 / 窓の操作(クリックしない)/ アプリ起動だけ
     {
         const hand = @import("hand.zig");
-        const po = if (hand.enabled()) hand.posesOnly() else app.cfg.hand_poses_only;
-        const mx = x0 + pw - 340;
+        const md = if (hand.enabled()) hand.mode() else app.cfg.hand_mode;
+        const mx = x0 + pw - 472;
         _ = cv.text(mx - 8, y0 + 43, 12, sub, if (hand.enabled()) "ハンド操作(オン)" else "ハンド操作(オフ)", .{ .alignment = .right });
         const segs = [_]struct { k: HitKind, label: []const u8, on: bool }{
-            .{ .k = .mode_full, .label = "全部", .on = !po },
-            .{ .k = .mode_poses, .label = "アプリ起動だけ", .on = po },
+            .{ .k = .mode_full, .label = "全部", .on = md == .full },
+            .{ .k = .mode_windows, .label = "窓の操作", .on = md == .windows },
+            .{ .k = .mode_poses, .label = "アプリ起動だけ", .on = md == .poses },
         };
         for (segs, 0..) |sg, k| {
             const r = [4]f32{ mx + @as(f32, @floatFromInt(k)) * 132, y0 + 22, 128, 32 };
@@ -261,7 +262,7 @@ const LIVE_MS = 3000;
 /// 「カメラに映っている手のポーズを使う」: 3 秒数えてから取り込む(ハンド操作がオフならオンにする)
 fn startLive(app: *App) void {
     const hand = @import("hand.zig");
-    if (!hand.enabled()) hand.enableMode(app, app.cfg.hand_poses_only);
+    if (!hand.enabled()) hand.enableMode(app, app.cfg.hand_mode);
     st.live_t0 = loop.nowMs();
     setMsg("3 秒後に、カメラに映っている手のポーズを取り込みます");
 }
@@ -454,7 +455,7 @@ fn drawList(app: *App, cv: *gfx.Canvas, x: f32, y: f32, w: f32, h: f32, acc: Col
         "元からある動き",
         "パー: 手のメニュー / 握りこぶし: 窓を閉じる",
         "いいね・ピース・3 本・4 本: ワークスペース",
-        "つまむ: クリック・ドラッグ / 親指と中指: 右クリック",
+        "つまむ: クリック / 動かすと窓を移動 / 親指と中指: 右クリック",
         "ピースを上下・左右に動かす: スクロール",
         "片手のポーズを割り当てると、元の動きの代わりになります",
     };
@@ -743,8 +744,9 @@ fn pointer(_: *anyopaque, s: *Surface, ev: surface.PointerEvent) void {
                     if (!st.two) st.b = poses.NONE;
                 },
                 .use_live => startLive(st.app.?),
-                .mode_full => @import("hand.zig").enableMode(st.app.?, false),
-                .mode_poses => @import("hand.zig").enableMode(st.app.?, true),
+                .mode_full => @import("hand.zig").enableMode(st.app.?, .full),
+                .mode_windows => @import("hand.zig").enableMode(st.app.?, .windows),
+                .mode_poses => @import("hand.zig").enableMode(st.app.?, .poses),
                 .tab => st.tab = @enumFromInt(h.i),
                 .op => st.op = @enumFromInt(h.i),
                 .app => st.app_idx = h.i,

@@ -86,7 +86,7 @@ const help =
     \\  net wifi|saved|radio|ssid|bt|bt-devices   (Wi-Fi・Bluetooth の状態。NetworkManager / BlueZ に D-Bus で聞く)
     \\  hand on|off|toggle|status   (ハンド操作: カメラで手の動きを見てカーソル・窓を操作する)
     \\  hand poses                   (手のポーズ・両手のポーズの割り当ての設定画面)
-    \\  hand poses-only|full         (アプリ起動だけ: カーソル・クリックを使わず、ポーズでアプリを起動するだけ / 全部)
+    \\  hand full|windows|poses-only (全部 / 窓の操作: クリックせず、つまんで窓を動かす・ワークスペース・メニュー / アプリ起動だけ)
     \\  airpods on|off|toggle|status (AirPods の頭の動きで操作: 左右に振る→ワークスペース / 上→ランチャー / 下→ダッシュボード)
     \\  face enroll|clear|status     (顔認証: 顔を登録・消す。登録するとロック画面で顔を見てロックを外す)
     \\  widget music <隅|on|off>     (ホーム画面の曲のウィジェット: top-left / top-right / bottom-left / bottom-right に置く・出す・消す)
@@ -322,13 +322,13 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
             @import("hand/posegui.zig").open(app);
             return "ok";
         }
-        // hand poses-only: アプリ起動だけ(カーソル・クリックは使わず、ポーズでアプリを起動するだけ)/ hand full: 全部
-        if (eq(u8, arg, "poses-only") or eq(u8, arg, "full")) {
-            hand.enableMode(app, eq(u8, arg, "poses-only"));
-            return if (hand.posesOnly()) "on (poses-only)" else "on";
+        // hand full: 全部 / hand windows: 窓の操作(クリックしない)/ hand poses-only: アプリ起動だけ
+        if (eq(u8, arg, "poses-only") or eq(u8, arg, "full") or eq(u8, arg, "windows")) {
+            hand.enableMode(app, if (eq(u8, arg, "poses-only")) .poses else if (eq(u8, arg, "windows")) .windows else .full);
+            return handStatus(hand.mode());
         }
-        if (eq(u8, arg, "on")) hand.enableMode(app, app.cfg.hand_poses_only) else if (eq(u8, arg, "off")) hand.disable() else if (eq(u8, arg, "toggle") or arg.len == 0) hand.toggle(app) else if (!eq(u8, arg, "status")) return "error: hand on|off|toggle|status|poses|poses-only|full";
-        return if (!hand.enabled()) "off" else if (hand.posesOnly()) "on (poses-only)" else "on";
+        if (eq(u8, arg, "on")) hand.enableMode(app, app.cfg.hand_mode) else if (eq(u8, arg, "off")) hand.disable() else if (eq(u8, arg, "toggle") or arg.len == 0) hand.toggle(app) else if (!eq(u8, arg, "status")) return "error: hand on|off|toggle|status|poses|full|windows|poses-only";
+        return if (!hand.enabled()) "off" else handStatus(hand.mode());
     } else if (eq(u8, cmd, "airpods")) {
         // AirPods の頭の動きで操作する(左右に振る: ワークスペース / 上: ランチャー / 下: ダッシュボード)
         const ap = @import("airpods.zig");
@@ -406,4 +406,12 @@ fn stats(app: *App, out: []u8) []const u8 {
         @import("text.zig").raster_n,
         if (@import("text.zig").raster_n > 0) @import("text.zig").raster_ns / @import("text.zig").raster_n / 1000 else 0,
     }) catch "error";
+}
+
+fn handStatus(md: @import("hand/hand.zig").Mode) []const u8 {
+    return switch (md) {
+        .full => "on",
+        .windows => "on (windows)",
+        .poses => "on (poses-only)",
+    };
 }
