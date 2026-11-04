@@ -607,12 +607,17 @@ pub const Wm = struct {
                 if (w.floating) return self.apply(.op_move);
                 ss.op = .tile_move;
                 ss.op_window = w;
+                ss.op_start = .{ w.tx, w.ty, w.tw, w.th };
                 ss.op_dx = 0;
                 ss.op_dy = 0;
                 ss.op_px = ss.ptr_x;
                 ss.op_py = ss.ptr_y;
                 ss.focused = w;
                 c.river_seat_v1_op_start_pointer(ss.obj);
+                // 浮かせたときと同じく、紙のようにたわむ絵がカーソルに付いて動く(本物はタイルのまま入れ替わる)
+                if (w.out) |wo| if (wo.ame) |ao| {
+                    wobble.begin(w, w.ident[0..w.ident_len], ss.op_start, .{ @floatFromInt(ss.ptr_x), @floatFromInt(ss.ptr_y) }, ao, .{ @floatFromInt(wo.x), @floatFromInt(wo.y) }, isGlassy(w.app_id[0..w.app_id_len]));
+                };
             },
             .op_move, .op_resize, .hand_grab => if (s) |ss| {
                 if (a == .hand_grab and ss.op != .none) return;
@@ -1597,7 +1602,10 @@ fn opDelta(s: *WSeat, dx: i32, dy: i32) void {
     if (dx == s.op_dx and dy == s.op_dy and (dx != 0 or dy != 0)) return;
     s.op_dx = dx;
     s.op_dy = dy;
-    if (s.op == .tile_move) return s.wm.tileMoveTo(w, s.op_px + dx, s.op_py + dy);
+    if (s.op == .tile_move) {
+        wobble.moveTo(w, s.op_start[0] + @as(f32, @floatFromInt(dx)), s.op_start[1] + @as(f32, @floatFromInt(dy)));
+        return s.wm.tileMoveTo(w, s.op_px + dx, s.op_py + dy);
+    }
     if (s.op == .move) {
         w.float_rect = .{ s.op_start[0] + fx, s.op_start[1] + fy, s.op_start[2], s.op_start[3] };
         const b: f32 = @floatFromInt(s.wm.border);
@@ -1645,6 +1653,11 @@ fn opRelease(s: *WSeat, river_op: bool) void {
             w.floating = false;
             s.wm.app.osd.info("タイルに戻しました");
         }
+    };
+    // タイルのまま動かした: たわむ絵を新しいタイルの位置へ運んでから、本物を見せる
+    if (s.op == .tile_move) if (s.op_window) |w| {
+        wobble.moveTo(w, w.tx, w.ty);
+        wobble.release(w);
     };
     if (s.op == .move) if (s.op_window) |w| {
         // タイルに戻したときは、たわむ絵をすぐやめる(窓はタイルの位置へ動く)
