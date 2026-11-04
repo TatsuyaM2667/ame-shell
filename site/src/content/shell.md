@@ -88,6 +88,27 @@
 - **会話**: Enter で送信・Shift+Enter で改行・送信中は ■ で止める(Ctrl+C)。返事は届いた分から表示し、見出し・箇条書き・コード・引用を見やすくします。DeepSeek R1 などの「考えている途中」も薄く出します。返事の下の「コピー」でクリップボードへ。＋(Ctrl+L)で新しい会話。会話は `~/.local/state/ame-shell/ai-chat` に残り、ame-shell を読み込み直しても続きから話せます。
 - **日本語入力**: fcitx5 などで変換しながら入力できます(text-input-v3。変換中の文字は下線、候補の窓は入力位置に出ます)。
 - 毎回最初に渡す指示は設定 `ai { system "…" }`。
+- **開いたまま他の窓で入力できます**: 開いた直後はパネルに入力でき、他の窓をクリックするとそちらに入力が移ります。もう一度 Super+C を押すと、閉じずにパネルへ入力が戻ります(パネルをクリックしても戻ります)。
+
+### コーディング CLI(Claude Code など) {#ai-cli}
+
+- パネルの上の名前を押すと、会社の一覧の下に **コーディング CLI** が並びます(入っているものだけ選べます): Claude Code・OpenCode・Gemini CLI・Codex CLI・Kimi CLI・Qwen Code・Cursor Agent・Amp・GitHub Copilot CLI・Crush・Goose・Aider。
+- CLI を選ぶ → **作業フォルダ**を選ぶ(最近使ったフォルダ・Claude Code の記録のあるフォルダが並ぶ。パスを入れて Tab で補完)→ **会話**を選ぶ(新しい会話 / 前回の続き / Claude Code は過去の会話の一覧)。
+- **Claude Code の続き**: 過去の会話を選ぶと、`~/.claude/projects/<フォルダ>/<id>.jsonl` の記録を読み込んで表示し、次の頼みごとから `claude --resume <id>` で続きを話します(`claude -c` と同じ続き方)。
+- 端末に出る作業の様子をチャットに映します: 返事は届いた分から、ツールの実行は「Bash: ls -la」「Edit: main.zig」のような見出しと結果の最初の数行で、終わると時間と費用も出ます。JSON の出力が無い CLI は、端末の文字をそのまま等幅で出します。
+- **許可**(パネルの「編集を許可」を押すと切り替え): 編集を許可(既定)/ 全部許可(確認なしでコマンドも実行。赤く表示)/ 計画だけ / 確認する(許可の要る操作は止まる。パネルからは許可できません)。
+- ■ で止めると、CLI と、その CLI が起動したコマンドもまとめて止めます。
+- 自分で CLI を足す: `~/.config/ame-shell/agents` に「名前 | 形式 | コマンド」を 1 行ずつ(形式は claude / gemini / codex / opencode / kimi / raw、`{prompt}` が頼みごとに置き換わる)。例: `Antigravity | raw | agy chat {prompt}`。
+- `ame-ctl ai agent claude ~/projects/foo [new|last|<会話の id>]` でも始められます。API のチャットに戻る: 会社を選ぶか `ame-ctl ai api`。
+
+### MCP サーバ {#ai-mcp}
+
+- パネルの「MCP」を押すと、登録した MCP サーバが並び、スイッチで使うものを選べます。一覧は `~/.config/ame-shell/mcp.json` と、Claude Code に登録したもの(`~/.claude.json`、読むだけ)。書き方は Claude Desktop と同じです:
+  ```json
+  {"mcpServers": {"fs": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/me"]}}}
+  ```
+- **API のチャット**: ame-shell が MCP のクライアントになり、選んだ stdio のサーバを起動してツールをモデルに渡します。モデルがツールを呼ぶと実行して結果を返し、続きを答えさせます(実行したツールと結果もチャットに出ます)。HTTP / SSE のサーバは API のチャットではまだ使えません。
+- **Claude Code**: 選んだサーバ(HTTP も)を `--mcp-config` で足します。Claude Code に登録済みのサーバやプラグインはそのまま使えます。
 
 ## ユーティリティ・セッション {#utilities}
 

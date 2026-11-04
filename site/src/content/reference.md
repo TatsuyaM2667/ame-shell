@@ -84,7 +84,8 @@ lock { enabled on }
 ```
 ame-ctl launcher toggle|open [検索語]|close
 ame-ctl dashboard toggle|open|close|dashboard|media|performance|workspaces
-ame-ctl ai toggle|open|close|clear|pick|send <文>   (AI チャット)
+ame-ctl ai toggle|open|close|clear|pick|mcp|api|send <文>   (AI チャット)
+ame-ctl ai agent <claude|opencode|gemini|codex|…> <フォルダ> [new|last|<会話の id>]   (コーディング CLI)
 ame-ctl network | bluetooth | wallpaper-picker | session | sidebar | utilities | close-all
 ame-ctl volume up|down|mute|<0-100>      ame-ctl brightness up|down
 ame-ctl wallpaper aurora|rain|<画像・GIF・動画のパス>
