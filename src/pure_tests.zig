@@ -14,6 +14,8 @@ test {
     _ = @import("hand/poses.zig");
     _ = @import("hand/custom.zig");
     _ = @import("ai.zig");
+    _ = @import("agent.zig");
+    _ = @import("mcp.zig");
 }
 
 test "spring converges and is velocity-continuous" {

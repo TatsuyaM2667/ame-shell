@@ -487,3 +487,92 @@ pub fn spawnPiped(argv: []const ?[*:0]const u8, input: []const u8, out_pid: *c_i
     out_pid.* = pid;
     return out[0];
 }
+
+/// コーディング CLI(claude など)を cwd で起動し、標準出力 + 標準エラーを読む fd を返す。標準入力には input を渡す。
+/// 新しいセッション(プロセスグループ)にするので、止めるときは kill(-pid) で子プロセスごと止められる。
+/// 色や端末の制御文字を出さないよう NO_COLOR=1 / TERM=dumb にする
+pub fn spawnAgent(argv: []const ?[*:0]const u8, input: []const u8, cwd: [*:0]const u8, out_pid: *c_int) ?c_int {
+    var out: [2]c_int = undefined;
+    var in: [2]c_int = undefined;
+    if (c.pipe2(&out, c.O_CLOEXEC) != 0) return null;
+    if (c.pipe2(&in, c.O_CLOEXEC) != 0) {
+        _ = c.close(out[0]);
+        _ = c.close(out[1]);
+        return null;
+    }
+    var args: [40:null]?[*:0]const u8 = .{null} ** 40;
+    for (argv, 0..) |a, i| {
+        if (i >= 39) break;
+        args[i] = a;
+    }
+    const pid = c.fork();
+    if (pid < 0) {
+        for ([_]c_int{ out[0], out[1], in[0], in[1] }) |fd| _ = c.close(fd);
+        return null;
+    }
+    if (pid == 0) {
+        _ = c.setsid();
+        _ = c.dup2(in[0], 0);
+        _ = c.dup2(out[1], 1);
+        _ = c.dup2(out[1], 2);
+        if (c.chdir(cwd) != 0) c._exit(126);
+        _ = c.setenv("NO_COLOR", "1", 1);
+        _ = c.setenv("TERM", "dumb", 1);
+        _ = c.setenv("PWD", cwd, 1);
+        childDefaults();
+        _ = c.execvp(args[0].?, @ptrCast(&args));
+        c._exit(127);
+    }
+    _ = c.close(out[1]);
+    _ = c.close(in[0]);
+    var off: usize = 0;
+    while (off < input.len) {
+        const n = c.write(in[1], input.ptr + off, input.len - off);
+        if (n <= 0) break;
+        off += @intCast(n);
+    }
+    _ = c.close(in[1]);
+    _ = c.fcntl(out[0], c.F_SETFL, c.O_NONBLOCK);
+    out_pid.* = pid;
+    return out[0];
+}
+
+/// 双方向に話す子プロセス(MCP の stdio サーバなど)。標準入力へ書く fd(in_w)と標準出力を読む fd(戻り値、非ブロック)。
+/// 標準エラーは捨てる。env は「名前=値」の並び(親の環境に足す)。新しいプロセスグループで動かす
+pub fn spawnDuplex(argv: []const ?[*:0]const u8, env: []const [*:0]const u8, in_w: *c_int, out_pid: *c_int) ?c_int {
+    var out: [2]c_int = undefined;
+    var in: [2]c_int = undefined;
+    if (c.pipe2(&out, c.O_CLOEXEC) != 0) return null;
+    if (c.pipe2(&in, c.O_CLOEXEC) != 0) {
+        _ = c.close(out[0]);
+        _ = c.close(out[1]);
+        return null;
+    }
+    var args: [40:null]?[*:0]const u8 = .{null} ** 40;
+    for (argv, 0..) |a, i| {
+        if (i >= 39) break;
+        args[i] = a;
+    }
+    const pid = c.fork();
+    if (pid < 0) {
+        for ([_]c_int{ out[0], out[1], in[0], in[1] }) |fd| _ = c.close(fd);
+        return null;
+    }
+    if (pid == 0) {
+        _ = c.setsid();
+        _ = c.dup2(in[0], 0);
+        _ = c.dup2(out[1], 1);
+        const devnull = c.open("/dev/null", c.O_WRONLY);
+        if (devnull >= 0) _ = c.dup2(devnull, 2);
+        for (env) |e| _ = c.putenv(@constCast(e));
+        childDefaults();
+        _ = c.execvp(args[0].?, @ptrCast(&args));
+        c._exit(127);
+    }
+    _ = c.close(out[1]);
+    _ = c.close(in[0]);
+    _ = c.fcntl(out[0], c.F_SETFL, c.O_NONBLOCK);
+    in_w.* = in[1];
+    out_pid.* = pid;
+    return out[0];
+}

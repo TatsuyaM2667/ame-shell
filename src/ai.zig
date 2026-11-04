@@ -17,6 +17,7 @@ const std = @import("std");
 const c = @import("c.zig");
 const App = @import("app.zig").App;
 const sys = @import("platform/sys.zig");
+const Mcp = @import("mcp.zig");
 
 pub const Proto = enum { openai, anthropic };
 
@@ -57,7 +58,8 @@ pub const providers = [_]Provider{
     .{ .id = CUSTOM, .name = "カスタム(OpenAI 互換)", .base = "", .model = "", .need_key = false },
 };
 
-pub const Role = enum { user, assistant };
+/// tool = コーディング CLI のツールの実行(1 行目が見出し、残りが出力)
+pub const Role = enum { user, assistant, tool };
 
 pub const Line = struct {
     a: u32,
@@ -72,6 +74,8 @@ pub const Msg = struct {
     /// 考えている途中の文章(DeepSeek R1・OpenRouter の reasoning、Claude の thinking)
     think: std.ArrayList(u8),
     err: bool = false,
+    /// 端末の出力をそのまま(等幅の帯で表示。コーディング CLI の生の出力)
+    mono: bool = false,
     /// 表示のレイアウト(aipanel が作る。文字が増えたら最後の段落から作り直す)
     lines: std.ArrayList(Line),
     lay_w: f32 = 0,
@@ -81,19 +85,45 @@ pub const Msg = struct {
     lay_max: f32 = 0,
     lay_lines_before: usize = 0,
     lay_max_before: f32 = 0,
+    /// MCP のツールの呼び出し(role = tool。API に送り返すための id・名前・引数・結果)
+    call_id: std.ArrayList(u8),
+    call_name: std.ArrayList(u8),
+    call_args: std.ArrayList(u8),
+    result: std.ArrayList(u8),
+    /// 結果が届いた(届くまでは「実行中」)
+    call_done: bool = false,
+    call_failed: bool = false,
+    /// この返事のあとにツールの呼び出しが続く(文が空でも送り返す)
+    has_calls: bool = false,
 
-    fn create(alloc: std.mem.Allocator, role: Role) !*Msg {
+    pub fn create(alloc: std.mem.Allocator, role: Role) !*Msg {
         const m = try alloc.create(Msg);
-        m.* = .{ .role = role, .text = std.ArrayList(u8).init(alloc), .think = std.ArrayList(u8).init(alloc), .lines = std.ArrayList(Line).init(alloc) };
+        const B = std.ArrayList(u8);
+        m.* = .{ .role = role, .text = B.init(alloc), .think = B.init(alloc), .lines = std.ArrayList(Line).init(alloc), .call_id = B.init(alloc), .call_name = B.init(alloc), .call_args = B.init(alloc), .result = B.init(alloc) };
         return m;
     }
-    fn destroy(self: *Msg, alloc: std.mem.Allocator) void {
+    pub fn destroy(self: *Msg, alloc: std.mem.Allocator) void {
         self.text.deinit();
         self.think.deinit();
         self.lines.deinit();
+        self.call_id.deinit();
+        self.call_name.deinit();
+        self.call_args.deinit();
+        self.result.deinit();
         alloc.destroy(self);
     }
 };
+
+/// 返事の途中で組み立てるツールの呼び出し
+const Call = struct {
+    index: u32 = 0,
+    id: std.ArrayList(u8),
+    name: std.ArrayList(u8),
+    args: std.ArrayList(u8),
+};
+const MAX_CALLS = 16;
+/// ツールを呼んで返す往復の上限(止まらなくなるのを防ぐ)
+const MAX_ROUNDS = 12;
 
 const MAX_MODELS = 600;
 
@@ -116,6 +146,14 @@ const State = struct {
     body_len: usize = 0,
     got: bool = false,
     stream_err: bool = false,
+    /// MCP の準備中・ツールの実行中(curl は動いていないが、まだ返事の途中)
+    working: bool = false,
+    round: u8 = 0,
+    calls: [MAX_CALLS]Call = undefined,
+    n_calls: usize = 0,
+    pending_tools: usize = 0,
+    status: [160]u8 = undefined,
+    status_len: usize = 0,
 
     // ---- モデルの一覧 ----
     mfd: c_int = -1,
@@ -141,6 +179,7 @@ pub fn ensure(app: *App) void {
     st.mbuf = std.ArrayList(u8).init(st.alloc);
     st.model_arena = std.heap.ArenaAllocator.init(st.alloc);
     st.model_list = std.ArrayList([]const u8).init(st.alloc);
+    for (&st.calls) |*cl| cl.* = .{ .id = std.ArrayList(u8).init(st.alloc), .name = std.ArrayList(u8).init(st.alloc), .args = std.ArrayList(u8).init(st.alloc) };
     loadState();
     if (app.cfg.ai_provider.len > 0) if (providerIndex(app.cfg.ai_provider.get())) |i| {
         // 設定ファイルの指定は「初めて使うとき」の既定。パネルで選び直したものが優先
@@ -187,7 +226,17 @@ pub fn setModel(i: usize, name: []const u8) void {
 }
 
 pub fn busy() bool {
-    return st.fd >= 0;
+    return st.fd >= 0 or st.working;
+}
+
+/// 今していること(MCP の準備・ツールの実行)
+pub fn status() []const u8 {
+    return st.status[0..st.status_len];
+}
+
+fn setStatus(comptime f: []const u8, args: anytype) void {
+    const s = std.fmt.bufPrint(&st.status, f, args) catch "";
+    st.status_len = s.len;
 }
 
 pub fn modelsBusy() bool {
@@ -203,7 +252,7 @@ pub fn modelError() []const u8 {
     return st.model_err[0..st.model_err_len];
 }
 
-fn redraw() void {
+pub fn redraw() void {
     if (st.app) |a| for (a.outputs.items) |o| if (o.frame) |f| f.schedule();
 }
 
@@ -211,13 +260,13 @@ fn redraw() void {
 // API キー
 // ---------------------------------------------------------------------------
 
-fn configDir(buf: []u8) ?[]const u8 {
+pub fn configDir(buf: []u8) ?[]const u8 {
     if (std.posix.getenv("XDG_CONFIG_HOME")) |x| if (x.len > 0) return std.fmt.bufPrint(buf, "{s}/ame-shell", .{x}) catch null;
     const h = std.posix.getenv("HOME") orelse return null;
     return std.fmt.bufPrint(buf, "{s}/.config/ame-shell", .{h}) catch null;
 }
 
-fn stateDir(buf: []u8) ?[]const u8 {
+pub fn stateDir(buf: []u8) ?[]const u8 {
     if (std.posix.getenv("XDG_STATE_HOME")) |x| if (x.len > 0) return std.fmt.bufPrint(buf, "{s}/ame-shell", .{x}) catch null;
     const h = std.posix.getenv("HOME") orelse return null;
     return std.fmt.bufPrint(buf, "{s}/.local/state/ame-shell", .{h}) catch null;
@@ -307,7 +356,7 @@ pub fn saveKey(i: usize, k: []const u8) bool {
     return true;
 }
 
-fn readSmall(path: []const u8, buf: []u8) ?[]const u8 {
+pub fn readSmall(path: []const u8, buf: []u8) ?[]const u8 {
     const f = std.fs.cwd().openFile(path, .{}) catch return null;
     defer f.close();
     const n = f.readAll(buf) catch return null;
@@ -318,7 +367,7 @@ fn readSmall(path: []const u8, buf: []u8) ?[]const u8 {
 // 選んだ会社・モデル / 会話の保存
 // ---------------------------------------------------------------------------
 
-fn statePath(buf: []u8, name: []const u8) ?[]const u8 {
+pub fn statePath(buf: []u8, name: []const u8) ?[]const u8 {
     var d: [400]u8 = undefined;
     const dir = stateDir(&d) orelse return null;
     return std.fmt.bufPrint(buf, "{s}/{s}", .{ dir, name }) catch null;
@@ -362,7 +411,7 @@ fn saveState() void {
     writeState("ai", out.items);
 }
 
-fn writeState(name: []const u8, bytes: []const u8) void {
+pub fn writeState(name: []const u8, bytes: []const u8) void {
     var d: [400]u8 = undefined;
     const dir = stateDir(&d) orelse return;
     std.fs.cwd().makePath(dir) catch {};
@@ -381,25 +430,38 @@ fn writeState(name: []const u8, bytes: []const u8) void {
 
 /// 会話の保存形式: 「U <バイト数>\n<本文>\n」/「A …」(本文に何が入っていても読み戻せる)
 fn saveChat() void {
+    writeChat(st.msgs.items, "ai-chat");
+}
+
+/// 会話を状態の置き場に保存する(コーディング CLI の会話も同じ形式。M = 等幅の出力)
+pub fn writeChat(msgs: []const *Msg, name: []const u8) void {
     var out = std.ArrayList(u8).init(st.alloc);
     defer out.deinit();
-    for (st.msgs.items) |m| {
+    for (msgs) |m| {
         if (m.err or m.text.items.len == 0) continue;
-        out.writer().print("{c} {d}\n", .{ @as(u8, if (m.role == .user) 'U' else 'A'), m.text.items.len }) catch return;
+        out.writer().print("{c} {d}\n", .{ @as(u8, switch (m.role) {
+            .user => 'U',
+            .assistant => if (m.mono) 'M' else 'A',
+            .tool => 'T',
+        }), m.text.items.len }) catch return;
         out.appendSlice(m.text.items) catch return;
         out.append('\n') catch return;
     }
-    writeState("ai-chat", out.items);
+    writeState(name, out.items);
 }
 
 fn loadChat() void {
+    readChat(&st.msgs, "ai-chat");
+}
+
+pub fn readChat(list: *std.ArrayList(*Msg), name: []const u8) void {
     var pb: [512]u8 = undefined;
-    const p = statePath(&pb, "ai-chat") orelse return;
+    const p = statePath(&pb, name) orelse return;
     const f = std.fs.cwd().openFile(p, .{}) catch return;
     defer f.close();
     const txt = f.readToEndAlloc(st.alloc, 8 << 20) catch return;
     defer st.alloc.free(txt);
-    parseChat(st.alloc, &st.msgs, txt) catch {};
+    parseChat(st.alloc, list, txt) catch {};
 }
 
 fn parseChat(alloc: std.mem.Allocator, list: *std.ArrayList(*Msg), txt: []const u8) !void {
@@ -408,11 +470,17 @@ fn parseChat(alloc: std.mem.Allocator, list: *std.ArrayList(*Msg), txt: []const 
         const nl = std.mem.indexOfScalarPos(u8, txt, i, '\n') orelse return;
         const head = txt[i..nl];
         if (head.len < 3 or head[1] != ' ') return;
-        const role: Role = if (head[0] == 'U') .user else if (head[0] == 'A') .assistant else return;
+        const role: Role = switch (head[0]) {
+            'U' => .user,
+            'A', 'M' => .assistant,
+            'T' => .tool,
+            else => return,
+        };
         const n = std.fmt.parseInt(usize, head[2..], 10) catch return;
         if (nl + 1 + n > txt.len) return;
         const m = try Msg.create(alloc, role);
         try m.text.appendSlice(txt[nl + 1 .. nl + 1 + n]);
+        m.mono = head[0] == 'M';
         try list.append(m);
         i = nl + 1 + n + 1;
     }
@@ -431,7 +499,10 @@ pub fn clear() void {
 // ---------------------------------------------------------------------------
 
 /// 送る本文(JSON)を作る
-fn buildBody(out: *std.ArrayList(u8), proto: Proto, mdl: []const u8, system: []const u8, msgs: []const *Msg) !void {
+fn buildBody(out: *std.ArrayList(u8), proto: Proto, mdl: []const u8, system: []const u8, msgs: []const *Msg, tools: []const Mcp.Tool) !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
     var ws = std.json.writeStream(out.writer(), .{});
     try ws.beginObject();
     try ws.objectField("model");
@@ -456,18 +527,152 @@ fn buildBody(out: *std.ArrayList(u8), proto: Proto, mdl: []const u8, system: []c
         try ws.write(system);
         try ws.endObject();
     }
-    for (msgs) |m| {
-        // 失敗した返事・空の返事(今から書く分)は送らない
-        if (m.err or m.text.items.len == 0) continue;
+    var i: usize = 0;
+    while (i < msgs.len) : (i += 1) {
+        const m = msgs[i];
+        // 失敗した返事・ツールの表示(コーディング CLI の分や、結果のまだ無い呼び出し)は送らない
+        if (m.err or m.role == .tool) continue;
+        if (m.role == .user) {
+            if (m.text.items.len == 0) continue;
+            try ws.beginObject();
+            try ws.objectField("role");
+            try ws.write("user");
+            try ws.objectField("content");
+            try ws.write(m.text.items);
+            try ws.endObject();
+            continue;
+        }
+        // 返事 + 続くツールの呼び出し
+        var j = i + 1;
+        while (j < msgs.len and msgs[j].role == .tool and msgs[j].call_id.items.len > 0 and msgs[j].call_done) j += 1;
+        const calls = msgs[i + 1 .. j];
+        if (m.text.items.len == 0 and calls.len == 0) continue; // 今から書く分
         try ws.beginObject();
         try ws.objectField("role");
-        try ws.write(if (m.role == .user) "user" else "assistant");
+        try ws.write("assistant");
         try ws.objectField("content");
-        try ws.write(m.text.items);
+        if (proto == .anthropic) {
+            try ws.beginArray();
+            if (m.text.items.len > 0) {
+                try ws.beginObject();
+                try ws.objectField("type");
+                try ws.write("text");
+                try ws.objectField("text");
+                try ws.write(m.text.items);
+                try ws.endObject();
+            }
+            for (calls) |t| {
+                try ws.beginObject();
+                try ws.objectField("type");
+                try ws.write("tool_use");
+                try ws.objectField("id");
+                try ws.write(t.call_id.items);
+                try ws.objectField("name");
+                try ws.write(t.call_name.items);
+                try ws.objectField("input");
+                try ws.write(parseObj(a, t.call_args.items));
+                try ws.endObject();
+            }
+            try ws.endArray();
+        } else {
+            if (m.text.items.len > 0) try ws.write(m.text.items) else try ws.write(null);
+            if (calls.len > 0) {
+                try ws.objectField("tool_calls");
+                try ws.beginArray();
+                for (calls) |t| {
+                    try ws.beginObject();
+                    try ws.objectField("id");
+                    try ws.write(t.call_id.items);
+                    try ws.objectField("type");
+                    try ws.write("function");
+                    try ws.objectField("function");
+                    try ws.beginObject();
+                    try ws.objectField("name");
+                    try ws.write(t.call_name.items);
+                    try ws.objectField("arguments");
+                    try ws.write(if (t.call_args.items.len > 0) t.call_args.items else "{}");
+                    try ws.endObject();
+                    try ws.endObject();
+                }
+                try ws.endArray();
+            }
+        }
         try ws.endObject();
+        if (calls.len == 0) continue;
+        // ツールの結果(Anthropic は 1 つの user にまとめる)
+        if (proto == .anthropic) {
+            try ws.beginObject();
+            try ws.objectField("role");
+            try ws.write("user");
+            try ws.objectField("content");
+            try ws.beginArray();
+            for (calls) |t| {
+                try ws.beginObject();
+                try ws.objectField("type");
+                try ws.write("tool_result");
+                try ws.objectField("tool_use_id");
+                try ws.write(t.call_id.items);
+                try ws.objectField("content");
+                try ws.write(if (t.result.items.len > 0) t.result.items else "(空)");
+                if (t.call_failed) {
+                    try ws.objectField("is_error");
+                    try ws.write(true);
+                }
+                try ws.endObject();
+            }
+            try ws.endArray();
+            try ws.endObject();
+        } else for (calls) |t| {
+            try ws.beginObject();
+            try ws.objectField("role");
+            try ws.write("tool");
+            try ws.objectField("tool_call_id");
+            try ws.write(t.call_id.items);
+            try ws.objectField("content");
+            try ws.write(if (t.result.items.len > 0) t.result.items else "(空)");
+            try ws.endObject();
+        }
+        i = j - 1;
     }
     try ws.endArray();
+    // MCP のツール
+    if (tools.len > 0) {
+        try ws.objectField("tools");
+        try ws.beginArray();
+        for (tools) |t| {
+            try ws.beginObject();
+            if (proto == .anthropic) {
+                try ws.objectField("name");
+                try ws.write(t.qname);
+                try ws.objectField("description");
+                try ws.write(t.description);
+                try ws.objectField("input_schema");
+                try ws.write(parseObj(a, t.schema));
+            } else {
+                try ws.objectField("type");
+                try ws.write("function");
+                try ws.objectField("function");
+                try ws.beginObject();
+                try ws.objectField("name");
+                try ws.write(t.qname);
+                try ws.objectField("description");
+                try ws.write(t.description);
+                try ws.objectField("parameters");
+                try ws.write(parseObj(a, t.schema));
+                try ws.endObject();
+            }
+            try ws.endObject();
+        }
+        try ws.endArray();
+    }
     try ws.endObject();
+}
+
+/// JSON のオブジェクトの文字列を値にする(壊れていれば空のオブジェクト)
+fn parseObj(a: std.mem.Allocator, s: []const u8) std.json.Value {
+    const v = std.json.parseFromSliceLeaky(std.json.Value, a, if (s.len > 0) s else "{}", .{}) catch return .{ .object = std.json.ObjectMap.init(a) };
+    if (v != .object) return .{ .object = std.json.ObjectMap.init(a) };
+    return v;
 }
 
 /// curl の設定ファイルの 1 行(値は "" で囲み、\ と " を逃がす)
@@ -519,7 +724,29 @@ pub fn send(text: []const u8) void {
     st.msgs.append(am) catch return;
     saveChat();
     redraw();
+    st.round = 0;
+    // MCP のサーバを選んでいれば、先に起動してツールの一覧を集める
+    Mcp.ensure(app);
+    if (Mcp.enabledCount() > 0) {
+        st.working = true;
+        setStatus("MCP サーバを準備しています…", .{});
+        Mcp.prepare(onMcpReady);
+        return;
+    }
+    startRequest();
+}
 
+fn onMcpReady() void {
+    if (!st.working) return; // 止めた・消した
+    st.working = false;
+    st.status_len = 0;
+    startRequest();
+}
+
+/// 今の会話を送って、返事(最後の空の返事の欄)を受け取り始める
+fn startRequest() void {
+    const app = st.app orelse return;
+    const am = lastAssistant() orelse return;
     const i = st.prov;
     const p = &providers[i];
     const base = baseUrl(i);
@@ -532,7 +759,7 @@ pub fn send(text: []const u8) void {
 
     var body = std.ArrayList(u8).init(st.alloc);
     defer body.deinit();
-    buildBody(&body, p.proto, mdl, app.cfg.ai_system.get(), st.msgs.items) catch return fail(am, "本文を作れませんでした");
+    buildBody(&body, p.proto, mdl, app.cfg.ai_system.get(), st.msgs.items, Mcp.tools()) catch return fail(am, "本文を作れませんでした");
     const rd = std.posix.getenv("XDG_RUNTIME_DIR") orelse "/tmp";
     const bp = std.fmt.bufPrint(&st.body_path, "{s}/ame-ai-{d}.json", .{ rd, c.getpid() }) catch return fail(am, "一時ファイルを作れませんでした");
     st.body_len = bp.len;
@@ -553,6 +780,7 @@ pub fn send(text: []const u8) void {
     st.http = 0;
     st.got = false;
     st.stream_err = false;
+    st.n_calls = 0;
     const argv = [_]?[*:0]const u8{ "curl", "-sS", "-N", "--connect-timeout", "15", "--max-time", "900", "-w", "\n" ++ HTTP_MARK ++ "%{http_code}\n", "-K", "-" };
     st.fd = sys.spawnPiped(&argv, cfg.items, &st.pid) orelse {
         removeBody();
@@ -577,6 +805,14 @@ fn removeBody() void {
 
 /// 返事を止める(届いた分は残す)
 pub fn stop() void {
+    if (st.working) {
+        st.working = false;
+        st.pending_tools = 0;
+        st.status_len = 0;
+        if (lastAssistant()) |m| if (m.text.items.len == 0) fail(m, "止めました");
+        saveChat();
+        redraw();
+    }
     if (st.fd < 0) return;
     _ = c.kill(st.pid, c.SIGTERM);
     finishStream(true);
@@ -647,6 +883,7 @@ fn handleLine(raw_line: []const u8) void {
             st.stream_err = true;
             if (st.raw.items.len < 4096) st.raw.appendSlice(d.err) catch {};
         }
+        if (std.mem.indexOf(u8, payload, "tool") != null) toolDelta(payload);
         return;
     }
     if (l.len == 0 or std.mem.startsWith(u8, l, "event:") or l[0] == ':') return;
@@ -729,6 +966,130 @@ pub fn errorMessage(v: std.json.Value) ?[]const u8 {
     }
 }
 
+/// 返事の途中のツールの呼び出し(OpenAI: delta.tool_calls / Anthropic: tool_use と input_json_delta)
+fn toolDelta(payload: []const u8) void {
+    const parsed = std.json.parseFromSlice(std.json.Value, st.alloc, payload, .{}) catch return;
+    defer parsed.deinit();
+    const v = parsed.value;
+    if (v != .object) return;
+    switch (providers[st.prov].proto) {
+        .anthropic => {
+            const ty = getStr(v, "type") orelse return;
+            const idx: u32 = if (v.object.get("index")) |x| (if (x == .integer) @intCast(@max(0, x.integer)) else 0) else 0;
+            if (std.mem.eql(u8, ty, "content_block_start")) {
+                const cb = v.object.get("content_block") orelse return;
+                const bt = getStr(cb, "type") orelse return;
+                if (!std.mem.eql(u8, bt, "tool_use")) return;
+                const cl = callAt(idx) orelse return;
+                cl.id.appendSlice(getStr(cb, "id") orelse "") catch {};
+                cl.name.appendSlice(getStr(cb, "name") orelse "") catch {};
+            } else if (std.mem.eql(u8, ty, "content_block_delta")) {
+                const d = v.object.get("delta") orelse return;
+                const pj = getStr(d, "partial_json") orelse return;
+                const cl = findCall(idx) orelse return;
+                cl.args.appendSlice(pj) catch {};
+            }
+        },
+        .openai => {
+            const ch = v.object.get("choices") orelse return;
+            if (ch != .array or ch.array.items.len == 0) return;
+            const delta = ch.array.items[0].object.get("delta") orelse ch.array.items[0].object.get("message") orelse return;
+            if (delta != .object) return;
+            const tc = delta.object.get("tool_calls") orelse return;
+            if (tc != .array) return;
+            for (tc.array.items, 0..) |t, k| {
+                if (t != .object) continue;
+                const idx: u32 = if (t.object.get("index")) |x| (if (x == .integer) @intCast(@max(0, x.integer)) else @intCast(k)) else @intCast(k);
+                const cl = findCall(idx) orelse callAt(idx) orelse continue;
+                if (getStr(t, "id")) |id| if (cl.id.items.len == 0) cl.id.appendSlice(id) catch {};
+                if (t.object.get("function")) |f| {
+                    if (getStr(f, "name")) |n| cl.name.appendSlice(n) catch {};
+                    if (getStr(f, "arguments")) |ar| cl.args.appendSlice(ar) catch {};
+                }
+            }
+        },
+    }
+}
+
+fn findCall(idx: u32) ?*Call {
+    for (st.calls[0..st.n_calls]) |*cl| if (cl.index == idx) return cl;
+    return null;
+}
+
+fn callAt(idx: u32) ?*Call {
+    if (findCall(idx)) |cl| return cl;
+    if (st.n_calls >= MAX_CALLS) return null;
+    const cl = &st.calls[st.n_calls];
+    st.n_calls += 1;
+    cl.index = idx;
+    cl.id.clearRetainingCapacity();
+    cl.name.clearRetainingCapacity();
+    cl.args.clearRetainingCapacity();
+    return cl;
+}
+
+/// モデルが呼んだツールを MCP サーバで実行する(結果がそろったら続きを頼む)
+fn runCalls(m: *Msg) void {
+    m.has_calls = true;
+    st.round += 1;
+    if (st.round > MAX_ROUNDS) {
+        const e = Msg.create(st.alloc, .assistant) catch return;
+        e.text.appendSlice("ツールの呼び出しが多すぎるので止めました") catch {};
+        e.err = true;
+        st.msgs.append(e) catch e.destroy(st.alloc);
+        return;
+    }
+    var made: [MAX_CALLS]*Msg = undefined;
+    var n: usize = 0;
+    for (st.calls[0..st.n_calls], 0..) |cl, k| {
+        const t = Msg.create(st.alloc, .tool) catch continue;
+        if (cl.id.items.len > 0) t.call_id.appendSlice(cl.id.items) catch {} else t.call_id.writer().print("call_{d}_{d}", .{ st.round, k }) catch {};
+        t.call_name.appendSlice(cl.name.items) catch {};
+        t.call_args.appendSlice(if (cl.args.items.len > 0) cl.args.items else "{}") catch {};
+        // 表示: 「サーバ.ツール: 引数」
+        const tool = Mcp.findTool(cl.name.items);
+        const srv = if (tool) |tt| Mcp.servers()[tt.server].name else "MCP";
+        const tn = if (tool) |tt| tt.name else cl.name.items;
+        const args = std.mem.trim(u8, cl.args.items, " \n");
+        t.text.writer().print("{s}.{s}: {s}", .{ srv, tn, args[0..@min(args.len, 200)] }) catch {};
+        st.msgs.append(t) catch {
+            t.destroy(st.alloc);
+            continue;
+        };
+        made[n] = t;
+        n += 1;
+    }
+    st.n_calls = 0;
+    if (n == 0) return;
+    st.working = true;
+    st.pending_tools = n;
+    setStatus("ツールを実行しています({d} 個)…", .{n});
+    for (made[0..n]) |t| Mcp.call(t.call_name.items, t.call_args.items, @intFromPtr(t), onToolResult);
+}
+
+fn onToolResult(ctx: usize, result: []const u8, is_error: bool) void {
+    // 会話を消したあとに届いた結果は捨てる
+    const t: *Msg = for (st.msgs.items) |m| {
+        if (@intFromPtr(m) == ctx) break m;
+    } else return;
+    if (t.call_done) return;
+    t.call_done = true;
+    t.call_failed = is_error;
+    t.result.appendSlice(result[0..@min(result.len, 60000)]) catch {};
+    t.text.append('\n') catch {};
+    t.text.appendSlice(result[0..@min(result.len, 3000)]) catch {};
+    if (result.len > 3000) t.text.appendSlice("\n…") catch {};
+    if (st.pending_tools > 0) st.pending_tools -= 1;
+    redraw();
+    if (st.pending_tools > 0 or !st.working) return;
+    // 全部そろった: 結果を渡して続きを頼む
+    st.working = false;
+    st.status_len = 0;
+    const am = Msg.create(st.alloc, .assistant) catch return;
+    st.msgs.append(am) catch return;
+    startRequest();
+}
+
 fn finishStream(stopped: bool) void {
     if (st.fd >= 0) {
         if (st.app) |a| a.loop.remove(st.fd);
@@ -736,6 +1097,14 @@ fn finishStream(stopped: bool) void {
         st.fd = -1;
     }
     removeBody();
+    if (!stopped and !st.stream_err and st.n_calls > 0) if (lastAssistant()) |m| {
+        // ツールを呼んだ(文が無くても失敗ではない)
+        runCalls(m);
+        saveChat();
+        redraw();
+        return;
+    };
+    st.n_calls = 0;
     if (lastAssistant()) |m| {
         if (!st.got and !stopped) {
             var eb: [600]u8 = undefined;
@@ -921,7 +1290,7 @@ test "body and curl config" {
     defer m2.destroy(a);
     var body = std.ArrayList(u8).init(a);
     defer body.deinit();
-    try buildBody(&body, .anthropic, "claude", "be brief", &.{ m1, m2 });
+    try buildBody(&body, .anthropic, "claude", "be brief", &.{ m1, m2 }, &.{});
     try std.testing.expectEqualStrings("{\"model\":\"claude\",\"stream\":true,\"max_tokens\":8192,\"system\":\"be brief\",\"messages\":[{\"role\":\"user\",\"content\":\"say \\\"hi\\\"\\n\"}]}", body.items);
     var cfg = std.ArrayList(u8).init(a);
     defer cfg.deinit();
@@ -953,4 +1322,33 @@ test "chat round trip" {
     try parseChat(a, &list, "U 5\nhello\nA 7\nline1\nx\n");
     try std.testing.expectEqual(@as(usize, 2), list.items.len);
     try std.testing.expectEqualStrings("line1\nx", list.items[1].text.items);
+}
+
+test "body with MCP tool calls" {
+    const a = std.testing.allocator;
+    var u = try Msg.create(a, .user);
+    defer u.destroy(a);
+    try u.text.appendSlice("天気は?");
+    var m = try Msg.create(a, .assistant);
+    defer m.destroy(a);
+    m.has_calls = true;
+    var t = try Msg.create(a, .tool);
+    defer t.destroy(a);
+    try t.call_id.appendSlice("c1");
+    try t.call_name.appendSlice("w__get");
+    try t.call_args.appendSlice("{\"city\":\"東京\"}");
+    try t.result.appendSlice("晴れ");
+    t.call_done = true;
+    const tools = [_]Mcp.Tool{.{ .server = 0, .qname = "w__get", .name = "get", .description = "d", .schema = "{\"type\":\"object\"}" }};
+    var body = std.ArrayList(u8).init(a);
+    defer body.deinit();
+    try buildBody(&body, .openai, "m", "", &.{ u, m, t }, &tools);
+    try std.testing.expect(std.mem.indexOf(u8, body.items, "\"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"w__get\",\"arguments\":\"{\\\"city\\\":\\\"東京\\\"}\"}}]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body.items, "{\"role\":\"tool\",\"tool_call_id\":\"c1\",\"content\":\"晴れ\"}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body.items, "\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"w__get\"") != null);
+    body.clearRetainingCapacity();
+    try buildBody(&body, .anthropic, "m", "", &.{ u, m, t }, &tools);
+    try std.testing.expect(std.mem.indexOf(u8, body.items, "{\"type\":\"tool_use\",\"id\":\"c1\",\"name\":\"w__get\",\"input\":{\"city\":\"東京\"}}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body.items, "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c1\",\"content\":\"晴れ\"}]}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body.items, "\"input_schema\":{\"type\":\"object\"}") != null);
 }
