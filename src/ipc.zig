@@ -73,7 +73,7 @@ const help =
     \\  accent <#rrggbb>|reset
     \\  notify <text>          (テスト用の通知)
     \\  notifications toggle|clear
-    \\  ai toggle|open|close|clear|pick|send <text>   (AI チャット: 右から生えるパネル)
+    \\  ai toggle|open|close|clear|pick|mcp|api|agent <CLI> <フォルダ> [new|last|<id>]|send <text>   (AI チャット: 右から生えるパネル)
     \\  session | sidebar | utilities   (caelestia: 各ドロワーの開閉)
     \\  close-all
     \\  network | bluetooth     (Wi-Fi / Bluetooth の設定パネル)
@@ -256,10 +256,34 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
         } else if (eq(u8, arg, "pick")) {
             if (!f.aiOpen()) f.toggleAi();
             @import("frame/aipanel.zig").openPicker();
+        } else if (eq(u8, arg, "mcp")) {
+            if (!f.aiOpen()) f.toggleAi();
+            @import("frame/aipanel.zig").openMcp();
+        } else if (eq(u8, arg, "api")) {
+            // コーディング CLI をやめて、API のチャットに戻る
+            @import("agent.zig").ensure(app);
+            @import("agent.zig").deactivate();
+            if (!f.aiOpen()) f.toggleAi();
+        } else if (eq(u8, arg, "agent")) {
+            // ai agent <CLI の id> <フォルダ> [new|last|<会話の id>]
+            const agent = @import("agent.zig");
+            agent.ensure(app);
+            var w = std.mem.tokenizeScalar(u8, rest, ' ');
+            _ = w.next();
+            const id = w.next() orelse return "error: ai agent <claude|opencode|gemini|codex|…> <フォルダ> [new|last|<会話の id>]";
+            const dir = w.next() orelse return "error: フォルダを指定してください";
+            const how = w.next() orelse "new";
+            const k = agent.indexOf(id) orelse return "error: その CLI はありません";
+            std.fs.cwd().access(dir, .{}) catch return "error: フォルダがありません";
+            agent.start(k, dir, if (eq(u8, how, "new")) .new else if (eq(u8, how, "last")) .last else .{ .id = how });
+            if (!f.aiOpen()) f.toggleAi();
+            @import("frame/aipanel.zig").showChat();
         } else if (eq(u8, arg, "send")) {
             if (!f.aiOpen()) f.toggleAi();
             const sp = std.mem.indexOfScalar(u8, rest, ' ') orelse return "error: ai send <text>";
-            ai.send(rest[sp + 1 ..]);
+            const ag = @import("agent.zig");
+            ag.ensure(app);
+            if (ag.isActive()) ag.send(rest[sp + 1 ..]) else ai.send(rest[sp + 1 ..]);
         } else f.toggleAi();
     } else if (eq(u8, cmd, "notifications")) {
         if (eq(u8, arg, "clear")) app.notifs.clearAll() else app.notifs.toggleCenter();

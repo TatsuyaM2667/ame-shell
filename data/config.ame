@@ -86,6 +86,8 @@ ai {
   // custom-url "http://127.0.0.1:1234/v1"  // custom: OpenAI 互換のサーバ(LM Studio・vLLM など)
   // custom-model "local-model"
   // system "日本語で簡潔に答えてください"   // 毎回最初に渡す指示
+  // MCP サーバ: ~/.config/ame-shell/mcp.json({"mcpServers": {...}}、Claude Desktop と同じ書き方)。パネルの「MCP」で選ぶ
+  // コーディング CLI を足す: ~/.config/ame-shell/agents(「名前 | 形式 | コマンド {prompt}」)
 }
 
 // AirPods の頭の動きで操作する(AirPods Pro 2 など。Linux のみ。ame-ctl airpods on|off、ユーティリティの「AirPods 操作」)
