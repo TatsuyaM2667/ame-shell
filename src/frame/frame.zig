@@ -108,6 +108,8 @@ pub const Frame = struct {
     netv: netpanel.State = .{},
     /// AI チャット(右、サイドバーと同じ場所。どちらか一方だけ開く)
     ai: Drawer = .{},
+    /// 開いた直後: キーボードを受け取るまで排他で取る
+    ai_grab: bool = false,
 
     bar: vbar.Bar = .{},
     dashv: dash.View = .{},
@@ -309,13 +311,28 @@ pub const Frame = struct {
     }
     /// AI チャットを開く / 閉じる(サイドバーとは入れ替わり)
     pub fn toggleAi(self: *Frame) void {
+        // 開いているがキーボードが他の窓にある: 閉じずに、パネルへ入力を戻す
+        if (self.ai.open and self.app.kb_surface != self.surf) {
+            self.ai_grab = true;
+            self.updateKeyboard();
+            self.surf.schedule();
+            return;
+        }
         if (self.ai.open) self.ai.hide() else {
             self.side.hide();
             self.ai.show(true);
+            self.ai_grab = true;
             aipanel.onOpen(self);
         }
         self.afterOpenChange();
         @import("../ime.zig").update(self.app);
+    }
+    /// キーボードがこの枠に来た: AI チャットの「開いた直後の排他」を解く
+    pub fn keyboardEntered(self: *Frame) void {
+        if (!self.ai_grab) return;
+        self.ai_grab = false;
+        self.updateKeyboard();
+        self.surf.schedule();
     }
     pub fn aiOpen(self: *const Frame) bool {
         return self.ai.open;
@@ -373,8 +390,13 @@ pub const Frame = struct {
 
     /// ランチャーとセッションはキーボードを奪う(Esc や入力のため)。それ以外は奪わない。
     fn updateKeyboard(self: *Frame) void {
-        const want: u32 = if (self.launch.open or self.net.open or self.ai.open or (self.session.open and self.session.by_key))
+        // AI チャットは非排他(on_demand): 開いている間も、他の窓をクリックすればそちらに入力できる
+        const want: u32 = if (self.launch.open or self.net.open or (self.session.open and self.session.by_key))
             c.ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE
+        else if (self.ai.open and self.ai_grab)
+            c.ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE
+        else if (self.ai.open)
+            c.ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND
         else
             c.ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
         if (want == self.kb_mode) return;

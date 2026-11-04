@@ -1132,6 +1132,8 @@ fn kKeymap(data: ?*anyopaque, _: ?*c.struct_wl_keyboard, format: u32, fd: i32, s
 fn kEnter(data: ?*anyopaque, _: ?*c.struct_wl_keyboard, _: u32, wl: ?*c.struct_wl_surface, _: [*c]c.struct_wl_array) callconv(.C) void {
     const app: *App = @ptrCast(@alignCast(data.?));
     app.kb_surface = surfOf(wl);
+    // AI チャット: 開いたときだけ排他でキーボードを取り、受け取ったら非排他(他の窓をクリックすれば戻れる)に
+    if (app.kb_surface) |s| for (app.outputs.items) |o| if (o.frame) |f| if (f.surf == s) f.keyboardEntered();
 }
 fn kLeave(data: ?*anyopaque, _: ?*c.struct_wl_keyboard, _: u32, _: ?*c.struct_wl_surface) callconv(.C) void {
     const app: *App = @ptrCast(@alignCast(data.?));
