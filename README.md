@@ -27,6 +27,7 @@ Chimera Linux(musl + dinit)向け。SDDM から選べるセッションつき。
   - ワークスペース: 1〜9 と、それぞれで**開いているアプリのアイコンと名前**
 - **下: ランチャー** — Super 単独・Super+D。ファジー検索、よく使う順、お気に入りの固定、全アイコンテーマ + SVG。`>` でアクション、`>壁紙` で壁紙
 - **右: 音量・明るさ(OSD)/ 通知 / ユーティリティ / セッション / 通知センター**
+- **右: AI チャット**(Super+C)— 通知センターと同じ場所から生えるパネルで、OpenAI・Claude・Gemini・Mistral・DeepSeek・OpenCode Zen・OpenRouter・Kimi・xAI・Groq・Qwen・GLM・Perplexity・Together・Cerebras・Ollama・OpenAI 互換のサーバと API で会話。返事は届いた分から表示、日本語入力(fcitx5)対応。API キーはパネルから保存(`~/.config/ame-shell/ai-keys`、0600)か環境変数
 - **縦バー** — タグ(液体のように伸びるインジケータ)・時計・音量・ネット・Bluetooth・電池。乗せると右にポップアウト
   - 音量のポップアウトで **出力先・入力先を切り替え**(再生中の音も移る)
   - ネット / Bluetooth をクリックすると **Wi-Fi・Bluetooth の設定パネル**(接続・切断・パスワード・スキャン・ごみ箱のボタンで Bluetooth の登録の削除(2 回押し)。外側をクリックで閉じる)。イヤホンは接続すると自動で音の出力先になる
@@ -238,6 +239,7 @@ PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5
 | Super(単独で押して離す)/ Super+D | ランチャー |
 | Super+Return / Super+T | 端末(ghostty。無ければ foot)|
 | Super+A / Super+N / Super+U | ダッシュボード / 通知センター / ユーティリティ |
+| Super+C | AI チャット(右から生えるパネル) |
 | Super+Escape | セッション(ロック・ログアウト・再起動・電源オフ。危険な操作は 2 回押し)|
 | Super+L | ロック |
 | Super+Shift+W | 壁紙ピッカー |

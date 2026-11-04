@@ -7,6 +7,7 @@
 | Super(単独で押して離す)/ Super+D | ランチャー |
 | Super+Return / Super+T | 端末(foot) |
 | Super+A / Super+N / Super+U | ダッシュボード / 通知センター / ユーティリティ |
+| Super+C | AI チャット(右から生えるパネル) |
 | Super+Escape | セッション(ロック・ログアウト・再起動・電源オフ。危険な操作は 2 回押し) |
 | Super+L | ロック |
 | Super+Shift+W | 壁紙ピッカー |
@@ -83,6 +84,7 @@ lock { enabled on }
 ```
 ame-ctl launcher toggle|open [検索語]|close
 ame-ctl dashboard toggle|open|close|dashboard|media|performance|workspaces
+ame-ctl ai toggle|open|close|clear|pick|send <文>   (AI チャット)
 ame-ctl network | bluetooth | wallpaper-picker | session | sidebar | utilities | close-all
 ame-ctl volume up|down|mute|<0-100>      ame-ctl brightness up|down
 ame-ctl wallpaper aurora|rain|<画像・GIF・動画のパス>

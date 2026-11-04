@@ -79,6 +79,16 @@
 - すでに別の通知デーモン(mako・swaync など)が動いていれば、名前を奪わずに譲ります。
 - 通知センター(Super+N)で履歴を見られます。通知停止(Do Not Disturb)も切り替えられます。
 
+## AI チャット(右・Super+C) {#ai}
+
+- **右から生えるパネル**で、いろいろな会社の AI と API で会話します。通知センターと同じ場所に出ます(通知センターとは入れ替わり)。Super+C・ランチャーの「AI チャット」・`ame-ctl ai toggle`。
+- **使える会社**: OpenAI・Anthropic(Claude)・Google Gemini・Mistral・DeepSeek・OpenCode Zen・OpenRouter・Kimi(Moonshot)・xAI(Grok)・Groq・Qwen(Alibaba Cloud)・Z.ai(GLM)・Perplexity・Together AI・Cerebras・Ollama(この PC)・カスタム(OpenAI 互換のサーバ。設定 `ai { custom-url "http://…/v1" }`)。Claude は Anthropic の形式、それ以外は OpenAI 互換の形式で話します。
+- **会社とモデル**: パネルの上の名前を押す(Ctrl+P)と会社の一覧。会社を選ぶと、その会社の `/models` からモデルの一覧を取ってきます。入力で絞り込み、一覧に無い名前も入れて Enter で使えます。選んだものは覚えます。
+- **API キー**: 会社を選んで「API キーを入れる」から貼り付け(Ctrl+V)て保存します。保存先は `~/.config/ame-shell/ai-keys`(自分だけが読める 0600)。環境変数(`OPENAI_API_KEY`・`ANTHROPIC_API_KEY`・`GEMINI_API_KEY`・`OPENROUTER_API_KEY`・`MOONSHOT_API_KEY` など)でも渡せます。キーは curl のコマンドラインに出さず、標準入力から渡します。
+- **会話**: Enter で送信・Shift+Enter で改行・送信中は ■ で止める(Ctrl+C)。返事は届いた分から表示し、見出し・箇条書き・コード・引用を見やすくします。DeepSeek R1 などの「考えている途中」も薄く出します。返事の下の「コピー」でクリップボードへ。＋(Ctrl+L)で新しい会話。会話は `~/.local/state/ame-shell/ai-chat` に残り、ame-shell を読み込み直しても続きから話せます。
+- **日本語入力**: fcitx5 などで変換しながら入力できます(text-input-v3。変換中の文字は下線、候補の窓は入力位置に出ます)。
+- 毎回最初に渡す指示は設定 `ai { system "…" }`。
+
 ## ユーティリティ・セッション {#utilities}
 
 - **ユーティリティ**(Super+U): Wi-Fi・Bluetooth・通知停止・スリープ防止・**録画**(wf-recorder、`~/Videos` に保存して通知。PC で鳴っている音も一緒に録る)・スクリーンショット・電源プロファイル(省電力 / バランス / 高性能)。
