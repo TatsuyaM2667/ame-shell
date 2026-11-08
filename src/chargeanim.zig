@@ -66,11 +66,6 @@ pub fn draw(cv: *gfx.Canvas, W: f32, H: f32, t: f32, pct: u8, kind: Kind) void {
 }
 
 fn drawPlug(cv: *gfx.Canvas, W: f32, H: f32, t: f32, pct: u8) void {
-    drawPlugEx(cv, W, H, t, pct, false);
-}
-
-/// with_char: 真ん中は稲妻の代わりに島のキャラクター(drawWithChar が描く)。% は少し下へ
-fn drawPlugEx(cv: *gfx.Canvas, W: f32, H: f32, t: f32, pct: u8, with_char: bool) void {
     if (t < 0 or t > DURATION) return;
     const k = @min(W, H) / 800;
     const cx = W / 2;
@@ -124,12 +119,12 @@ fn drawPlugEx(cv: *gfx.Canvas, W: f32, H: f32, t: f32, pct: u8, with_char: bool)
     cv.save();
     cv.opacity(te);
     cv.translate(0, (1 - te) * 10 * k);
-    if (!with_char) _ = cv.text(cx, cy - 22 * k, 34 * k * shrink, col, I_BOLT, .{ .alignment = .center });
+    _ = cv.text(cx, cy - 22 * k, 34 * k * shrink, col, I_BOLT, .{ .alignment = .center });
     // 数字は満ちていくリングに合わせて数え上がる
     const shown: u32 = @intFromFloat(@round(fill * 100));
     var pb: [8]u8 = undefined;
     const ps = std.fmt.bufPrint(&pb, "{d}%", .{if (t > 1.2) pct else @as(u8, @intCast(@min(shown, pct)))}) catch "";
-    _ = cv.text(cx, cy + (if (with_char) @as(f32, 58) else 40) * k, 46 * k * shrink, white, ps, .{ .bold = true, .alignment = .center });
+    _ = cv.text(cx, cy + 40 * k, 46 * k * shrink, white, ps, .{ .bold = true, .alignment = .center });
     cv.restore();
     cv.restore();
 }
@@ -205,17 +200,26 @@ fn drawUnplug(cv: *gfx.Canvas, W: f32, H: f32, t: f32, pct: u8) void {
 
 /// ロック中でないときに出す全面のサーフェス
 // ---------------------------------------------------------------------------
-// ダイナミックアイランドのキャラクターが、水玉になって真ん中へ落ち、くるっと回って充電のリングの中に座り、
-// 終わると島へ戻る(つないだとき・デスクトップのときだけ。ロック画面は今までどおり)
+// ダイナミックアイランドごと動く充電のアニメーション(つないだとき・デスクトップのときだけ。ロック画面は今までどおり)
+//   島が枠から外れて落ち、緑に染まりながらリングの軌道をくるっと 1 周して光の線を描き、上の定位置へ戻る
 // ---------------------------------------------------------------------------
 
-/// 落ちて回るまでの秒数(この後に、いつものリングのアニメーションが続く)
-pub const DROP: f32 = 1.1;
-/// 島へ戻る秒数(リングが消えるのと重なる)
-const RISE: f32 = 0.75;
+/// 全体の秒数
+const CHAR_TOTAL: f32 = 3.6;
+/// 落ちる・1 周する・止まる・戻る の区切り
+const P_DROP: f32 = 0.65;
+const P_ORBIT: f32 = 2.05;
+const P_HOLD: f32 = 2.75;
+/// 終わりのこれだけ前に、枠の島が開き始める(戻ってきた島と重なってつながるように)
+pub const CHAR_HANDOFF: f32 = 0.3;
 
 pub fn durationWithChar() f32 {
-    return DROP + DURATION;
+    return CHAR_TOTAL;
+}
+
+fn easeInOut(x: f32) f32 {
+    const t = clamp01(x);
+    return t * t * (3 - 2 * t);
 }
 
 fn easeInQuad(x: f32) f32 {
@@ -223,100 +227,131 @@ fn easeInQuad(x: f32) f32 {
     return t * t;
 }
 
-/// from = 島の真ん中(この面の座標)
-pub fn drawWithChar(cv: *gfx.Canvas, W: f32, H: f32, t: f32, pct: u8, from: [2]f32) void {
-    const total = durationWithChar();
-    if (t < 0 or t > total) return;
-    const k = @min(W, H) / 800;
-    const cx = W / 2;
-    const cy = H / 2 - 18 * k;
-    if (t >= DROP) drawPlugEx(cv, W, H, t - DROP, pct, true);
-    const col = chargeColor(pct);
-    const sit_r = 30 * k;
-    var x = cx;
-    var y = cy;
-    var r = sit_r;
-    var sx: f32 = 1; // 横の伸び(回るときは向きの cos)
-    var sy: f32 = 1;
-    var tail: f32 = 0; // 水玉のしっぽ(+ で上へ・- で下へ)
-    var face: f32 = 1; // 顔が見えている向き(-1 で後ろ向き)
-    var happy = false;
-    if (t < 0.55) {
-        // 落ちる: 小さな水玉が、伸びながら加速して真ん中へ
-        const p = t / 0.55;
-        const e = easeInQuad(p);
-        x = from[0] + (cx - from[0]) * e;
-        y = from[1] + (cy - from[1]) * e;
-        r = 12 * k + (sit_r - 12 * k) * e;
-        sy = 1 + 0.5 * @sin(p * std.math.pi);
-        sx = 1 / sy;
-        tail = 1.2 * (1 - p * 0.5);
-    } else if (t < DROP) {
-        // 着地してぷにっとつぶれ、くるっと 1 回転(縦の軸で)
-        const q = (t - 0.55) / (DROP - 0.55);
-        const land = @exp(-q * 7) * @cos(q * 22);
-        sy = 1 - 0.35 * land;
-        sx = 1 + 0.3 * land;
-        const spin = easeOutCubic(clamp01((q - 0.15) / 0.75)) * std.math.tau;
-        face = @cos(spin);
-        sx *= @max(@abs(face), 0.12);
-        happy = q > 0.85;
-    } else if (t < total - RISE) {
-        // リングの真ん中で、うれしそうにゆれる
-        const u = t - DROP;
-        happy = true;
-        const b = @abs(@sin(u * std.math.pi * 2.2));
-        y = cy - b * 5 * k;
-        sy = 1 + 0.05 * b;
-        sx = 1 - 0.04 * b;
-    } else {
-        // 島へ戻る: 上へ伸びて、すーっと吸い込まれる
-        const p = (t - (total - RISE)) / RISE;
-        const e = easeInQuad(p);
-        x = cx + (from[0] - cx) * e;
-        y = cy + (from[1] - cy) * e;
-        r = sit_r + (10 * k - sit_r) * e;
-        sy = 1 + 0.6 * @sin(p * std.math.pi);
-        sx = 1 / sy;
-        tail = -1.2 * p;
-    }
-    drawBlob(cv, x, y, r, sx, sy, tail, face, happy, col, k);
+fn lerp(a: f32, b: f32, t: f32) f32 {
+    return a + (b - a) * t;
 }
 
-/// 水玉のキャラクター: 島と同じ暗いガラスの体に、充電の色のふち。顔は白い 2 つの目
-fn drawBlob(cv: *gfx.Canvas, x: f32, y: f32, r: f32, sx: f32, sy: f32, tail: f32, face: f32, happy: bool, col: Color, k: f32) void {
-    const w = r * 2 * sx;
-    const h = r * 2 * sy;
-    const body = Color.hex(0x0c1222);
-    // 光
-    cv.shadow(x - w / 2, y - h / 2, w, h, @min(w, h) / 2, 26 * k, col.alpha(0.55));
-    // しっぽ(落ちるときは上、戻るときは下へ細くなる)
-    if (@abs(tail) > 0.01) {
-        const dir: f32 = if (tail > 0) -1 else 1;
-        const len = r * @abs(tail) * 1.6;
-        var i: f32 = 0;
-        while (i < 6) : (i += 1) {
-            const f = i / 6;
-            const tw = w * 0.5 * (1 - f) * (1 - f);
-            const ty = y + dir * (h * 0.3 + f * len);
-            cv.rect(x - tw / 2, ty - 3 * k, tw, 6 * k, 3 * k, body);
-        }
+/// from = 島の矩形(この面の座標: x, y, 幅, 高さ)
+pub fn drawWithChar(cv: *gfx.Canvas, W: f32, H: f32, t: f32, pct: u8, from: [4]f32) void {
+    if (t < 0 or t > CHAR_TOTAL) return;
+    const k = @min(W, H) / 800;
+    const cx = W / 2;
+    const cy = H / 2;
+    const col = chargeColor(pct);
+    const glow = col.lighten(0.35);
+    const R: f32 = 120 * k;
+    const vis = easeOutCubic(t / 0.35) * (1 - easeOutCubic((t - (CHAR_TOTAL - 0.5)) / 0.5));
+
+    // 背景を暗く + 真ん中のぼんやりした光
+    cv.rect(0, 0, W, H, 0, black.alpha(0.45 * vis));
+    const bloom = R * 3.2;
+    cv.shadow(cx - bloom / 2, cy - bloom / 2, bloom, bloom, bloom / 2, 160 * k, col.alpha(0.14 * vis));
+
+    const fx = from[0] + from[2] / 2;
+    const fy = from[1] + from[3] / 2;
+    const top = [2]f32{ cx, cy - R };
+    const ball: f32 = 44 * k;
+    var x = fx;
+    var y = fy;
+    var bw = from[2];
+    var bh = from[3];
+    var green: f32 = 0;
+    var fill: f32 = 0; // リングの光の線(0〜1)
+    var head = false; // 線の先が光っている(回っている間)
+    var look = [2]f32{ 0, 1 };
+    var happy = false;
+    if (t < P_DROP) {
+        // 枠から外れて、伸びながらリングの一番上へ落ちる。少しずつ緑に
+        const p = t / P_DROP;
+        const e = easeInOut(p);
+        x = lerp(fx, top[0], e);
+        y = lerp(fy, top[1], easeInQuad(p));
+        bw = lerp(from[2], ball, e);
+        bh = lerp(from[3], ball, e) * (1 + 0.35 * @sin(p * std.math.pi));
+        green = e;
+        look = .{ 0, 1 };
+    } else if (t < P_ORBIT) {
+        // リングの軌道をくるっと 1 周。通ったあとに光の線が残る
+        const q = easeInOut((t - P_DROP) / (P_ORBIT - P_DROP));
+        const ang = -std.math.pi / 2.0 + q * std.math.tau;
+        x = cx + @cos(ang) * R;
+        y = cy + @sin(ang) * R;
+        bw = ball;
+        bh = ball;
+        green = 1;
+        fill = q;
+        head = true;
+        look = .{ -@sin(ang), @cos(ang) }; // 進む向きを見る
+    } else if (t < P_HOLD) {
+        // 一番上で止まって喜ぶ。線は残りの % まで戻る
+        const u = (t - P_ORBIT) / (P_HOLD - P_ORBIT);
+        x = top[0];
+        y = top[1] - @abs(@sin(u * std.math.pi * 2)) * 8 * k;
+        bw = ball * (1 + 0.08 * @sin(u * std.math.pi * 4));
+        bh = ball * (1 - 0.08 * @sin(u * std.math.pi * 4));
+        green = 1;
+        fill = lerp(1, @as(f32, @floatFromInt(pct)) / 100, easeOutCubic(u * 1.6));
+        happy = true;
+    } else {
+        // 上の定位置へ戻る: 伸びながら上がり、島の形と色に戻る
+        const p = (t - P_HOLD) / (CHAR_TOTAL - P_HOLD);
+        const e = easeInOut(p);
+        x = lerp(top[0], fx, e);
+        y = lerp(top[1], fy, easeInQuad(p));
+        bw = lerp(ball, from[2], e);
+        bh = lerp(ball, from[3], e) * (1 + 0.35 * @sin(p * std.math.pi));
+        green = 1 - e;
+        fill = @as(f32, @floatFromInt(pct)) / 100;
+        happy = true;
+        look = .{ 0, -1 };
     }
-    cv.rect(x - w / 2, y - h / 2, w, h, @min(w, h) / 2, body);
-    cv.rectBorder(x - w / 2, y - h / 2, w, h, @min(w, h) / 2, .{ .a = 0 }, col.alpha(0.85), 2 * k);
-    // 顔(後ろ向きの間は出さない)
-    if (face <= 0.05 or r < 14 * k) return;
-    const gap = r * 0.36 * sx;
-    const ew = r * 0.24 * @abs(face);
-    const eh = r * 0.5 * sy;
+
+    // リング: 溝と、光の線
+    cv.save();
+    cv.opacity(clamp01(vis));
+    cv.arc(cx, cy, R, 12 * k, 1, white.alpha(0.12), .{ .a = 0 });
+    if (fill > 0.002) {
+        cv.arc(cx, cy, R + 2 * k, 20 * k, fill, col.alpha(0.18), .{ .a = 0 });
+        cv.arc(cx, cy, R, 12 * k, fill, col, .{ .a = 0 });
+    }
+    // 真ん中の %(1 周し始めてから)
+    const te = easeOutCubic((t - P_DROP) / 0.5);
+    if (te > 0.01) {
+        cv.save();
+        cv.opacity(te);
+        var pb: [8]u8 = undefined;
+        const shown: u32 = @intFromFloat(@round(@min(fill, @as(f32, @floatFromInt(pct)) / 100) * 100));
+        const ps = std.fmt.bufPrint(&pb, "{d}%", .{if (t > P_ORBIT) pct else @as(u8, @intCast(@min(shown, pct)))}) catch "";
+        _ = cv.text(cx, cy + 16 * k, 46 * k, white, ps, .{ .bold = true, .alignment = .center });
+        _ = cv.text(cx, cy - 30 * k, 26 * k, col, I_BOLT, .{ .alignment = .center });
+        cv.restore();
+    }
+    cv.restore();
+
+    // 島(の体)
+    const body = Color.mix(Color.hex(0x0c1222), col.lighten(0.05), green * 0.9);
+    const rad = @min(bw, bh) / 2;
+    if (head) cv.shadow(x - bw, y - bh, bw * 2, bh * 2, bw, 30 * k, glow.alpha(0.8));
+    cv.shadow(x - bw / 2, y - bh / 2, bw, bh, rad, 22 * k, col.alpha(0.5 * green));
+    cv.rect(x - bw / 2, y - bh / 2, bw, bh, rad, body);
+    cv.rectBorder(x - bw / 2, y - bh / 2, bw, bh, rad, .{ .a = 0 }, Color.mix(white.alpha(0.25), glow, green), 1.5 * k);
+    // 目(島のときと同じ白い目。進む向きを見る)
+    const s = @min(bh, 46 * k) / (46 * k);
+    const gap = 16 * k * s;
+    const ox = look[0] * 5 * k * s;
+    const oy = look[1] * 3 * k * s;
     for ([_]f32{ -1, 1 }) |side| {
-        const ex = x + side * gap;
-        const ey = y - r * 0.06;
+        const ex = x + side * gap + ox;
+        const ey = y + oy;
         if (happy) {
-            const a = r * 0.17;
-            cv.line(ex - a, ey + 2 * k, ex, ey - 4 * k, 3 * k, white);
-            cv.line(ex, ey - 4 * k, ex + a, ey + 2 * k, 3 * k, white);
-        } else cv.rect(ex - ew / 2, ey - eh / 2, ew, eh, ew / 2, white);
+            const a = 7 * k * s;
+            cv.line(ex - a, ey + 3 * k * s, ex, ey - 4 * k * s, 3 * k * s, white);
+            cv.line(ex, ey - 4 * k * s, ex + a, ey + 3 * k * s, 3 * k * s, white);
+        } else {
+            const ew = 11 * k * s;
+            const eh = 20 * k * s;
+            cv.rect(ex - ew / 2, ey - eh / 2, ew, eh, ew / 2, white);
+        }
     }
 }
 
@@ -327,9 +362,9 @@ pub const ChargeAnim = struct {
     t: f32 = -1,
     pct: u8 = 0,
     kind: Kind = .plug,
-    /// 島のキャラクターが水玉になって出てくる(つないだとき・島が出ているとき)
+    /// ダイナミックアイランドごと動く(つないだとき・島が出ているとき)
     with_char: bool = false,
-    from: [2]f32 = .{ 0, 0 },
+    from: [4]f32 = .{ 0, 0, 0, 0 },
 
     pub fn create(app: *App) !*ChargeAnim {
         const self = try app.alloc.create(ChargeAnim);
@@ -352,9 +387,11 @@ pub const ChargeAnim = struct {
         self.with_char = false;
         if (kind == .plug and app.cfg.island) if (app.activeFrame()) |f| if (f.island.visible()) {
             const r = f.island.vis;
-            self.from = .{ (r[0] + r[2] / 2) * f.S, (r[1] + r[3] / 2) * f.S };
+            self.from = .{ r[0] * f.S, r[1] * f.S, r[2] * f.S, r[3] * f.S };
             self.with_char = true;
         };
+        // 枠の島を閉じる(島ごと出かける)
+        if (self.with_char) app.redrawBars();
         if (self.surf == null) {
             const out = app.activeOutput() orelse return;
             const all = c.ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | c.ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
@@ -376,7 +413,10 @@ pub const ChargeAnim = struct {
     fn drawSurf(ctx: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
         const self: *ChargeAnim = @ptrCast(@alignCast(ctx));
         if (self.t < 0) return false;
+        const before = self.t;
         self.t += @min(dt, 0.05);
+        // 戻ってくる直前: 枠の島を開き始める
+        if (self.with_char and before < CHAR_TOTAL - CHAR_HANDOFF and self.t >= CHAR_TOTAL - CHAR_HANDOFF) self.app.redrawBars();
         if (self.t > (if (self.with_char) durationWithChar() else duration(self.kind))) {
             self.t = -1;
             self.app.reap_pending = true;
@@ -388,9 +428,9 @@ pub const ChargeAnim = struct {
         return true;
     }
 
-    /// 島のキャラクターが出かけている(島は目を出さない)
+    /// 島が出かけている(枠の島は閉じる)。戻ってくる少し前から、枠の島が開き始める
     pub fn charAway(self: *const ChargeAnim) bool {
-        return self.with_char and self.t >= 0;
+        return self.with_char and self.t >= 0 and self.t < CHAR_TOTAL - CHAR_HANDOFF;
     }
 
     /// 終わったらサーフェスを消す(app の reap から)

@@ -280,6 +280,8 @@ pub fn size(f: *Frame) ?[2]f32 {
     ensure(app);
     // ダッシュボードを開いている間は引っ込む(同じ場所)
     if (f.dash.visible()) return null;
+    // 充電のアニメーションで、島ごと出かけている間は閉じる
+    if (app.charge) |ch| if (ch.charAway()) return null;
     return switch (kindOf(f)) {
         .idle => .{ 210, 46 },
         .workspace => .{ 250, 46 },
@@ -383,13 +385,6 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
     }
     switch (kindOf(f)) {
         .idle => {
-            // 充電のアニメーションで、キャラクターが水玉になって出かけている間は、島は空っぽ
-            const away = if (app.charge) |ch| ch.charAway() else false;
-            if (away) {
-                animating = true;
-                cv.opacity(1);
-                return animating;
-            }
             const covered = st.gesture == .cover and handsActive(now);
             const low = battery() != .ok;
             var mood: Mood = if (covered) .squint else if (st.hover) .happy else if (st.sleepy) .sleepy else if (low) .worried else .normal;
