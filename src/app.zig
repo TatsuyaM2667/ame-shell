@@ -1082,6 +1082,7 @@ fn pMotion(data: ?*anyopaque, _: ?*c.struct_wl_pointer, _: u32, x: c.wl_fixed_t,
         return;
     };
     sendPtr(app, .motion, 0, 0);
+    if (app.ptr_surface) |s| @import("frame/island.zig").surfacePointer(app, s, app.ptr_x, app.ptr_y);
 }
 fn pButton(data: ?*anyopaque, _: ?*c.struct_wl_pointer, _: u32, _: u32, button: u32, state: u32) callconv(.C) void {
     const app: *App = @ptrCast(@alignCast(data.?));

@@ -5,7 +5,7 @@
 //   AI の作業中 … 回るしるし(終わったら「終わりました」を少し出す)。押すと AI チャット
 //   録画中      … 赤い点と経過時間
 // 待機中に描き続けない: まばたき・よそ見・表示を戻す時刻は timerfd で「次に変わる時刻」にだけ起きる。
-// カーソルを目で追うのは、カーソルが島の近くにあるときだけ(WM のカーソル位置から)。
+// 目はカーソル(WM のカーソル位置)を見る。しばらく動かさなければ、また自分できょろきょろする。
 const std = @import("std");
 const anim = @import("../anim.zig");
 const Spring = anim.Spring;
@@ -20,8 +20,8 @@ const Frame = @import("frame.zig").Frame;
 const PEEK_MS = 4000;
 const DONE_MS = 3000;
 const BLINK_MS = 170;
-/// カーソルを目で追う距離(島の中心から、論理 px)
-const NOTICE_R: f32 = 460;
+/// カーソルが止まってから、また自分できょろきょろし始めるまで
+const IDLE_MS = 4000;
 
 const Peek = enum { none, notif, done };
 
@@ -36,6 +36,7 @@ const State = struct {
     blink_t0: u64 = 0,
     next_glance: u64 = 0,
     following: bool = false,
+    last_move: u64 = 0,
     // 一時的に広げる
     peek: Peek = .none,
     peek_until: u64 = 0,
@@ -84,6 +85,7 @@ fn arm() void {
     var next = @min(st.next_blink, st.next_glance);
     if (st.peek != .none) next = @min(next, st.peek_until);
     if (st.rec_since != 0) next = @min(next, now + 1000 - (now - st.rec_since) % 1000);
+    if (st.following) next = @min(next, st.last_move + IDLE_MS);
     t.arm(@max(1, next -| now), 0);
 }
 
@@ -91,6 +93,13 @@ fn onTimer(_: *anyopaque, _: c_int, _: u32) void {
     if (st.timer) |t| t.ack();
     const now = loop.nowMs();
     const r = st.rng.random();
+    // カーソルが止まって少したった: 前を向いて、また自分できょろきょろ
+    if (st.following and now >= st.last_move + IDLE_MS) {
+        st.following = false;
+        st.look_x.set(0);
+        st.look_y.set(0);
+        st.next_glance = now + 1500;
+    }
     if (now >= st.next_blink) {
         st.blink_t0 = now;
         // ときどき 2 回続けてまばたき
@@ -134,36 +143,46 @@ pub fn peekNotif(app: *App, app_name: []const u8, summary: []const u8) void {
 /// WM のカーソルの位置(グローバル)。島の近くなら目で追う
 pub fn pointerMoved(app: *App, outs: anytype, gx: i32, gy: i32) void {
     if (!app.cfg.island or st.timer == null) return;
-    var near = false;
+    const was = st.following;
+    st.following = true;
+    st.last_move = loop.nowMs();
+    if (!was) arm(); // 止まったら戻るための時刻
     for (outs) |wo| {
         const ao = wo.ame orelse continue;
         const f = ao.frame orelse continue;
         if (!f.island.visible()) continue;
-        const S = f.S;
-        const lx = @as(f32, @floatFromInt(gx - wo.x)) / S;
-        const ly = @as(f32, @floatFromInt(gy - wo.y)) / S;
-        const r = f.island.vis;
-        const cx = r[0] + r[2] / 2;
-        const cy = r[1] + r[3] / 2;
-        const dx = lx - cx;
-        const dy = ly - cy;
-        if (dx * dx + dy * dy > NOTICE_R * NOTICE_R) continue;
-        near = true;
-        const tx = std.math.clamp(dx / 260, -1, 1);
-        const ty = std.math.clamp(dy / 200, -1, 1);
-        if (@abs(tx - st.look_x.target) > 0.04 or @abs(ty - st.look_y.target) > 0.04) {
-            st.look_x.set(tx);
-            st.look_y.set(ty);
-            f.schedule();
-        }
+        lookAt(f, @as(f32, @floatFromInt(gx - wo.x)), @as(f32, @floatFromInt(gy - wo.y)));
     }
-    if (near != st.following) {
-        st.following = near;
-        if (!near) {
-            st.look_x.set(0);
-            st.look_y.set(0);
-            redrawAll();
-        }
+}
+
+/// ame-shell のサーフェス(壁紙・枠)の上のカーソル。窓の上の動きは WM から(窓に入ったときなど)しか届かない
+pub fn surfacePointer(app: *App, s: *const @import("../surface.zig").Surface, x: f32, y: f32) void {
+    if (!app.cfg.island or st.timer == null) return;
+    const ao: *@import("../app.zig").Output = @ptrCast(@alignCast(s.output orelse return));
+    const f = ao.frame orelse return;
+    // 画面全体を覆う面(枠・壁紙)だけ: 座標が画面の論理座標そのまま
+    const full = s == f.surf or (if (ao.wall) |w| s == w.surf else false);
+    if (!full or !f.island.visible()) return;
+    if (!st.following) {
+        st.following = true;
+        st.last_move = loop.nowMs();
+        arm();
+    }
+    st.last_move = loop.nowMs();
+    lookAt(f, x, y);
+}
+
+/// 画面の論理座標 (x, y) を見る(画面の端まで目いっぱい、真下なら正面)
+fn lookAt(f: *Frame, x: f32, y: f32) void {
+    const lx = x / f.S;
+    const ly = y / f.S;
+    const r = f.island.vis;
+    const tx = std.math.clamp((lx - (r[0] + r[2] / 2)) / (f.W / 2), -1, 1);
+    const ty = std.math.clamp((ly - (r[1] + r[3] / 2)) / (f.H * 0.6), -1, 1);
+    if (@abs(tx - st.look_x.target) > 0.03 or @abs(ty - st.look_y.target) > 0.03) {
+        st.look_x.set(tx);
+        st.look_y.set(ty);
+        f.schedule();
     }
 }
 
@@ -197,7 +216,7 @@ pub fn size(f: *Frame) ?[2]f32 {
     // ダッシュボードを開いている間は引っ込む(同じ場所)
     if (f.dash.visible()) return null;
     return switch (kindOf(f)) {
-        .idle => .{ 104, 30 },
+        .idle => .{ 132, 42 },
         .music => .{ 236, 34 },
         .busy => .{ 250, 34 },
         .recording => .{ 176, 34 },
@@ -298,21 +317,23 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
 /// 目: (cx, cy) が真ん中。open = まぶたの開き(1 で全開)、happy = にっこり(^ ^)
 fn drawEyes(cv: *gfx.Canvas, cx: f32, cy: f32, k: f32, open: f32, happy: bool, acc: Color) void {
     const col = Color.mix(Color.hex(0xffffff), acc.lighten(0.5), 0.25);
-    const gap = 13 * k;
-    const ew = 9 * k;
-    const eh = 15 * k;
-    const ox = st.look_x.x * 5 * k;
-    const oy = st.look_y.x * 3 * k;
+    const gap = 17 * k;
+    const ew = 13 * k;
+    const eh = 24 * k;
+    const ox = st.look_x.x * 8 * k;
+    const oy = st.look_y.x * 4 * k;
     for ([_]f32{ -1, 1 }) |side| {
         const x = cx + side * gap + ox;
         const y = cy + oy;
         if (happy) {
             // ^ の形
-            cv.line(x - ew * 0.6, y + 2 * k, x, y - 4 * k, 2.6 * k, col);
-            cv.line(x, y - 4 * k, x + ew * 0.6, y + 2 * k, 2.6 * k, col);
+            cv.line(x - ew * 0.6, y + 3 * k, x, y - 5 * k, 3.2 * k, col);
+            cv.line(x, y - 5 * k, x + ew * 0.6, y + 3 * k, 3.2 * k, col);
             continue;
         }
-        const hh = @max(eh * open, 2.5 * k);
+        const hh = @max(eh * open, 3 * k);
+        // ほんのり光る、縦長の白い目(coucou のような)
+        cv.shadow(x - ew / 2, y - hh / 2, ew, hh, ew / 2, 8 * k, acc.lighten(0.4).alpha(0.35));
         cv.rect(x - ew / 2, y - hh / 2, ew, hh, ew / 2, col);
     }
 }
