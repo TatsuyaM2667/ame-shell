@@ -20,6 +20,8 @@ const Frame = @import("frame.zig").Frame;
 const PEEK_MS = 4000;
 const DONE_MS = 3000;
 const BLINK_MS = 170;
+/// 何も起きないまま、これだけたつと眠くなる
+const SLEEP_MS = 90_000;
 /// カーソルが止まってから、また自分できょろきょろし始めるまで
 const IDLE_MS = 4000;
 
@@ -30,8 +32,14 @@ const State = struct {
     app: ?*App = null,
     rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(1),
     // 目
-    look_x: Spring = Spring.init(0, 0.22, 0.8),
-    look_y: Spring = Spring.init(0, 0.22, 0.8),
+    look_x: Spring = Spring.init(0, 0.24, 0.62),
+    look_y: Spring = Spring.init(0, 0.24, 0.62),
+    /// 伸び縮み(+ で縦に伸びる・- でつぶれる)と、ぴょんと跳ねる高さ。どちらも少し揺れて戻るばね(ぽよん)
+    squash: Spring = Spring.init(0, 0.32, 0.42),
+    hop: Spring = Spring.init(0, 0.3, 0.45),
+    /// 最後に何か起きた時刻(カーソル・通知・乗せる)。しばらく何もなければ眠くなる
+    last_activity: u64 = 0,
+    sleepy: bool = false,
     next_blink: u64 = 0,
     blink_t0: u64 = 0,
     next_glance: u64 = 0,
@@ -70,6 +78,7 @@ fn ensure(app: *App) void {
     const now = loop.nowMs();
     st.next_blink = now + 2500;
     st.next_glance = now + 6000;
+    st.last_activity = now;
     arm();
 }
 
@@ -86,6 +95,7 @@ fn arm() void {
     if (st.peek != .none) next = @min(next, st.peek_until);
     if (st.rec_since != 0) next = @min(next, now + 1000 - (now - st.rec_since) % 1000);
     if (st.following) next = @min(next, st.last_move + IDLE_MS);
+    if (!st.sleepy) next = @min(next, st.last_activity + SLEEP_MS);
     t.arm(@max(1, next -| now), 0);
 }
 
@@ -100,13 +110,23 @@ fn onTimer(_: *anyopaque, _: c_int, _: u32) void {
         st.look_y.set(0);
         st.next_glance = now + 1500;
     }
+    if (!st.sleepy and now >= st.last_activity + SLEEP_MS) {
+        st.sleepy = true;
+        st.look_x.set(0);
+        st.look_y.set(0.3); // うとうと: 少し下を向く
+    }
     if (now >= st.next_blink) {
         st.blink_t0 = now;
+        // 開くときに、ぽよんと縦に伸びて戻る
+        st.squash.x = -0.22;
+        st.squash.set(0);
         // ときどき 2 回続けてまばたき
-        st.next_blink = now + if (r.float(f32) < 0.2) @as(u64, 260) else 2200 + r.uintLessThan(u64, 4200);
+        st.next_blink = now + if (st.sleepy) 6000 + r.uintLessThan(u64, 4000) else if (r.float(f32) < 0.2) @as(u64, 260) else 2200 + r.uintLessThan(u64, 4200);
     }
     if (now >= st.next_glance) {
-        if (!st.following) {
+        if (st.sleepy) {
+            st.next_glance = now + 8000;
+        } else if (!st.following) {
             // よそ見: たまに左右や上を見て、また前を向く
             if (st.look_x.target == 0 and st.look_y.target == 0) {
                 st.look_x.set((r.float(f32) * 2 - 1) * 0.9);
@@ -135,6 +155,8 @@ pub fn peekNotif(app: *App, app_name: []const u8, summary: []const u8) void {
     st.peek = .notif;
     st.peek_until = loop.nowMs() + PEEK_MS;
     set(&st.peek_app, &st.peek_app_len, app_name);
+    // びっくりして目を見開き、ぴょんと跳ねる
+    react(0.4, 260);
     set(&st.peek_text, &st.peek_text_len, summary);
     arm();
     redrawAll();
@@ -146,6 +168,7 @@ pub fn pointerMoved(app: *App, outs: anytype, gx: i32, gy: i32) void {
     const was = st.following;
     st.following = true;
     st.last_move = loop.nowMs();
+    wake();
     if (!was) arm(); // 止まったら戻るための時刻
     for (outs) |wo| {
         const ao = wo.ame orelse continue;
@@ -168,6 +191,7 @@ pub fn surfacePointer(app: *App, s: *const @import("../surface.zig").Surface, x:
         st.last_move = loop.nowMs();
         arm();
     }
+    wake();
     st.last_move = loop.nowMs();
     lookAt(f, x, y);
 }
@@ -237,6 +261,11 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
     if (hv != st.hover) {
         st.hover = hv;
         animating = true;
+        // 乗せた: にっこりして、ぴょんと跳ねる
+        if (hv) {
+            wake();
+            react(0.25, 200);
+        }
     }
     // AI の作業が終わった: 少しだけ知らせる
     const busy = agentBusy();
@@ -256,7 +285,7 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
         }
     } else st.rec_since = 0;
 
-    var sp = [_]*Spring{ &st.look_x, &st.look_y };
+    var sp = [_]*Spring{ &st.look_x, &st.look_y, &st.squash, &st.hop };
     if (anim.stepAll(&sp, 1.0 / 60.0)) animating = true;
     const blink: f32 = if (now -| st.blink_t0 < BLINK_MS) blk: {
         animating = true;
@@ -270,9 +299,9 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
     if (fit < 0.75) return true;
     cv.opacity((fit - 0.75) * 4);
     switch (kindOf(f)) {
-        .idle => drawEyes(cv, w / 2, h / 2 - 1, 1, blink, false, acc),
+        .idle => drawEyes(cv, w / 2, h / 2 - 1, 1, blink, if (st.hover) .happy else if (st.sleepy) .sleepy else .normal, acc),
         .peek => {
-            drawEyes(cv, 34, h / 2, 0.8, blink, true, acc);
+            drawEyes(cv, 34, h / 2, 0.8, blink, .happy, acc);
             if (st.peek == .done) {
                 var b: [120]u8 = undefined;
                 _ = cv.text(64, h / 2 - 4, 13.5, txt, std.fmt.bufPrint(&b, "{s} が終わりました", .{st.busy_name[0..st.busy_name_len]}) catch "", .{ .bold = true, .max_w = w - 80 });
@@ -304,7 +333,7 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
             const a: f32 = 24;
             if (m.art_tex != 0) cv.image(m.art_tex, 10, (h - a) / 2, a, a, 6) else cv.rect(10, (h - a) / 2, a, a, 6, acc.alpha(0.4));
             _ = cv.text(42, h / 2 + 5, 12.5, txt, m.title[0..m.title_len], .{ .max_w = w - 100 });
-            drawEyes(cv, w - 34, h / 2, 0.55, blink, false, acc);
+            drawEyes(cv, w - 34, h / 2, 0.55, blink, if (st.sleepy) .sleepy else .normal, acc);
         },
         .music_big => if (drawMusicBig(f, cv, w, h, acc, txt, sub)) {
             animating = true;
@@ -315,26 +344,51 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
 }
 
 /// 目: (cx, cy) が真ん中。open = まぶたの開き(1 で全開)、happy = にっこり(^ ^)
-fn drawEyes(cv: *gfx.Canvas, cx: f32, cy: f32, k: f32, open: f32, happy: bool, acc: Color) void {
-    const col = Color.mix(Color.hex(0xffffff), acc.lighten(0.5), 0.25);
+const Mood = enum { normal, happy, sleepy };
+
+/// 目: (cx, cy) が真ん中、k が大きさ。open = まぶたの開き(1 で全開)
+fn drawEyes(cv: *gfx.Canvas, cx: f32, cy: f32, k: f32, open: f32, mood: Mood, acc: Color) void {
+    const white = Color.hex(0xffffff);
+    const tint = Color.mix(white, acc.lighten(0.45), 0.35);
     const gap = 17 * k;
-    const ew = 13 * k;
-    const eh = 24 * k;
+    const s = std.math.clamp(st.squash.x, -0.6, 0.8);
+    // 伸びると細く、つぶれると太く(体積を保つように)
+    const ew = 14 * k * (1 - 0.45 * s);
+    const eh = 23 * k * (1 + s);
     const ox = st.look_x.x * 8 * k;
-    const oy = st.look_y.x * 4 * k;
+    const oy = st.look_y.x * 4 * k + st.hop.x * k;
     for ([_]f32{ -1, 1 }) |side| {
-        const x = cx + side * gap + ox;
+        // 見ている方の目を少し大きく(顔ごと向いたように)
+        const pk = 1 + side * st.look_x.x * 0.1;
+        const x = cx + side * gap + ox * 1.15;
         const y = cy + oy;
-        if (happy) {
-            // ^ の形
-            cv.line(x - ew * 0.6, y + 3 * k, x, y - 5 * k, 3.2 * k, col);
-            cv.line(x, y - 5 * k, x + ew * 0.6, y + 3 * k, 3.2 * k, col);
-            continue;
+        switch (mood) {
+            .happy => {
+                // にっこり(^ ^)と、ほっぺの赤み
+                const a = ew * 0.62 * pk;
+                cv.line(x - a, y + 3 * k, x, y - 5 * k, 3.4 * k, white);
+                cv.line(x, y - 5 * k, x + a, y + 3 * k, 3.4 * k, white);
+                cv.shadow(x + side * 8 * k - 7 * k, y + 7 * k, 14 * k, 6 * k, 3 * k, 7 * k, Color.hex(0xff8fb3).alpha(0.8));
+            },
+            .sleepy => {
+                // すやすや(閉じた目の ‿)
+                const a = ew * 0.55;
+                cv.line(x - a, y, x, y + 3 * k, 2.6 * k, tint);
+                cv.line(x, y + 3 * k, x + a, y, 2.6 * k, tint);
+            },
+            .normal => {
+                const w2 = ew * pk * (1 + 0.25 * (1 - open)); // まばたきの間は少し横に広がる
+                const h2 = @max(eh * pk * open, 3 * k);
+                // ほんのり光る、まるい縦長の目。上は白、下は少し色づく
+                cv.shadow(x - w2 / 2, y - h2 / 2, w2, h2, w2 / 2, 9 * k, acc.lighten(0.4).alpha(0.38));
+                cv.rectGrad(x - w2 / 2, y - h2 / 2, w2, h2, w2 / 2, white, tint);
+            },
         }
-        const hh = @max(eh * open, 3 * k);
-        // ほんのり光る、縦長の白い目(coucou のような)
-        cv.shadow(x - ew / 2, y - hh / 2, ew, hh, ew / 2, 8 * k, acc.lighten(0.4).alpha(0.35));
-        cv.rect(x - ew / 2, y - hh / 2, ew, hh, ew / 2, col);
+    }
+    // 眠いときは小さな z
+    if (mood == .sleepy) {
+        _ = cv.text(cx + gap + 14 * k, cy - 4 * k, 9 * k, white.alpha(0.55), "z", .{});
+        _ = cv.text(cx + gap + 21 * k, cy - 11 * k, 12 * k, white.alpha(0.7), "Z", .{});
     }
 }
 
@@ -398,4 +452,24 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
         .recording => {},
     }
     return true;
+}
+
+/// 反応する: 縦に伸びて(s)、上へ跳ねる(速さ v)。ばねで少し揺れながら戻る
+fn react(s: f32, v: f32) void {
+    st.squash.x = s;
+    st.squash.set(0);
+    st.hop.v = -v;
+    st.hop.set(0);
+    st.last_activity = loop.nowMs();
+    redrawAll();
+}
+
+/// 何か起きた: 眠っていたら、びっくりして起きる
+fn wake() void {
+    st.last_activity = loop.nowMs();
+    if (!st.sleepy) return;
+    st.sleepy = false;
+    st.look_y.set(0);
+    react(0.5, 300);
+    arm();
 }
