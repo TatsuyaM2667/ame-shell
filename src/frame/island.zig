@@ -383,13 +383,6 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
     }
     switch (kindOf(f)) {
         .idle => {
-            // 充電のアニメーションで、キャラクターが水玉になって出かけている間は、島は空っぽ
-            const away = if (app.charge) |ch| ch.charAway() else false;
-            if (away) {
-                animating = true;
-                cv.opacity(1);
-                return animating;
-            }
             const covered = st.gesture == .cover and handsActive(now);
             const low = battery() != .ok;
             var mood: Mood = if (covered) .squint else if (st.hover) .happy else if (st.sleepy) .sleepy else if (low) .worried else .normal;
