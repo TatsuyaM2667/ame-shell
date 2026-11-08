@@ -7,6 +7,7 @@ test {
     _ = @import("greeter.zig");
     _ = @import("png.zig");
     _ = @import("lyrics.zig");
+    _ = @import("ame_lib");
     _ = @import("chargeanim.zig");
     _ = @import("airpods.zig");
     _ = @import("airpodspopup.zig");

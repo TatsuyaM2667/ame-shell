@@ -97,6 +97,9 @@ pub fn build(b: *std.Build) void {
     // 手の認識(ame-hand)と顔認証(ame-face)は別のリポジトリ(build.zig.zon)
     const hand_dep = b.dependency("ame_hand", .{ .target = target, .optimize = optimize });
     const face_dep = b.dependency("ame_face", .{ .target = target, .optimize = optimize });
+    // 画面にも OS にも依存しない部品(src/lib/)。ame-shell と小さな道具(src/cmd/)とテストで共有
+    const lib_mod = b.createModule(.{ .root_source_file = b.path("src/lib/lib.zig") });
+    exe.root_module.addImport("ame_lib", lib_mod);
     exe.root_module.addImport("ame-hand", hand_dep.module("ame-hand"));
     exe.root_module.addImport("ame-face", face_dep.module("ame-face"));
     // ライブラリのヘッダの場所: Linux は /usr、FreeBSD は /usr/local(パッケージ)。
@@ -177,6 +180,21 @@ pub fn build(b: *std.Build) void {
         ctl.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{sr}) });
     }
     b.installArtifact(ctl);
+
+    const cmds = [_][]const u8{"ame-lyrics"};
+    // --- 画面を持たない小さな道具(標準入出力でやりとりする。src/cmd/。libc だけ)---
+    for (cmds) |name| {
+        const t = b.addExecutable(.{
+            .name = name,
+            .root_source_file = b.path(b.fmt("src/cmd/{s}.zig", .{name})),
+            .target = target,
+            .optimize = optimize,
+            .strip = strip,
+        });
+        t.root_module.addImport("ame_lib", lib_mod);
+        t.linkLibC();
+        b.installArtifact(t);
+    }
 
     // --- ロック画面のパスワード照合の補助(FreeBSD で root の setuid として入れる。src/auth_helper.zig) ---
     const auth = b.addExecutable(.{
@@ -297,6 +315,15 @@ pub fn build(b: *std.Build) void {
 
     const tests = b.addTest(.{ .root_source_file = b.path("src/pure_tests.zig"), .target = target, .optimize = optimize });
     tests.addObjectFile(anim_obj);
+    tests.root_module.addImport("ame_lib", lib_mod);
     tests.linkLibC();
-    b.step("test", "純粋ロジックのテスト").dependOn(&b.addRunArtifact(tests).step);
+    const test_step = b.step("test", "純粋ロジックのテスト");
+    test_step.dependOn(&b.addRunArtifact(tests).step);
+    // 小さな道具のテスト(引数の読み方など)
+    for (cmds) |name| {
+        const ct = b.addTest(.{ .root_source_file = b.path(b.fmt("src/cmd/{s}.zig", .{name})), .target = target, .optimize = optimize });
+        ct.root_module.addImport("ame_lib", lib_mod);
+        ct.linkLibC();
+        test_step.dependOn(&b.addRunArtifact(ct).step);
+    }
 }
