@@ -3,9 +3,11 @@
 pub const lrc = @import("lrc.zig");
 pub const ai = @import("ai.zig");
 pub const mcp = @import("mcp.zig");
+pub const agentfmt = @import("agentfmt.zig");
 
 test {
     _ = lrc;
     _ = ai;
     _ = mcp;
+    _ = agentfmt;
 }

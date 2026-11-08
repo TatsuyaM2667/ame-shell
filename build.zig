@@ -181,7 +181,7 @@ pub fn build(b: *std.Build) void {
     }
     b.installArtifact(ctl);
 
-    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai" };
+    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai", "ame-agent" };
     // --- 画面を持たない小さな道具(標準入出力でやりとりする。src/cmd/。libc だけ)---
     for (cmds) |name| {
         const t = b.addExecutable(.{
@@ -319,6 +319,10 @@ pub fn build(b: *std.Build) void {
     tests.linkLibC();
     const test_step = b.step("test", "純粋ロジックのテスト");
     test_step.dependOn(&b.addRunArtifact(tests).step);
+    // 部品(src/lib)のテスト。名前付きのモジュールのテストは読み込む側からは走らないので、別に走らせる
+    const lt = b.addTest(.{ .root_source_file = b.path("src/lib/lib.zig"), .target = target, .optimize = optimize });
+    lt.linkLibC();
+    test_step.dependOn(&b.addRunArtifact(lt).step);
     // 小さな道具のテスト(引数の読み方など)
     for (cmds) |name| {
         const ct = b.addTest(.{ .root_source_file = b.path(b.fmt("src/cmd/{s}.zig", .{name})), .target = target, .optimize = optimize });

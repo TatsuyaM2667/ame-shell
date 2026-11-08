@@ -14,6 +14,7 @@ const App = @import("app.zig").App;
 const ai = @import("ai.zig");
 const sys = @import("platform/sys.zig");
 const Msg = ai.Msg;
+const af = @import("ame_lib").agentfmt;
 
 fn redraw() void {
     if (st.redraw_fn) |f| f();
@@ -27,23 +28,7 @@ fn nowMs() u64 {
     return @intCast(@max(0, std.time.milliTimestamp()));
 }
 
-pub const Fmt = enum {
-    /// Claude Code の stream-json(Qwen Code・Cursor Agent・Amp も同じ形)
-    claude,
-    gemini,
-    codex,
-    opencode,
-    /// 役割ごとのメッセージ({"role":"assistant","content":…,"tool_calls":…})
-    kimi,
-    /// 端末の出力をそのまま
-    raw,
-
-    pub fn parse(s: []const u8) ?Fmt {
-        inline for (std.meta.fields(Fmt)) |f| if (std.mem.eql(u8, s, f.name)) return @enumFromInt(f.value);
-        return null;
-    }
-};
-
+pub const Fmt = af.Fmt;
 /// ツールの実行の許可
 pub const Perm = enum { edits, all, plan, ask };
 pub const perm_labels = [_][]const u8{ "編集は自動で許可", "全部を自動で許可", "計画だけ(変更しない)", "毎回確認(許可の要るものは止まる)" };
@@ -111,7 +96,7 @@ const State = struct {
     fd: c_int = -1,
     pid: c_int = 0,
     line: std.ArrayList(u8) = undefined,
-    seg_streamed: bool = false,
+    parser: af.Parser = .{ .fmt = .raw, .ctx = undefined, .emit = onEvent },
     cur: ?*Msg = null,
     raw_msg: ?*Msg = null,
     got_any: bool = false,
@@ -374,7 +359,7 @@ pub fn send(text: []const u8) void {
     var cb: [1100]u8 = undefined;
     const cwdz = std.fmt.bufPrintZ(&cb, "{s}", .{cwd()}) catch return addError("フォルダの名前が長すぎます");
     st.line.clearRetainingCapacity();
-    st.seg_streamed = false;
+    st.parser = .{ .fmt = fmtOf(st.idx), .cwd = cwd(), .ctx = &st, .emit = onEvent, .alloc = st.alloc };
     st.cur = null;
     st.raw_msg = null;
     st.got_any = false;
@@ -566,7 +551,7 @@ fn onRead(_: *anyopaque, fd: c_int, _: u32) void {
         const l = st.alloc.dupe(u8, st.line.items) catch "";
         defer if (l.len > 0) st.alloc.free(l);
         st.line.clearRetainingCapacity();
-        handleLine(l, true);
+        st.parser.line(l);
     }
     finish(false);
 }
@@ -579,8 +564,8 @@ fn feed(bytes: []const u8) void {
             const l = st.alloc.dupe(u8, st.line.items) catch return;
             defer st.alloc.free(l);
             st.line.clearRetainingCapacity();
-            handleLine(l, true);
-        } else handleLine(rest[0..nl], true);
+            st.parser.line(l);
+        } else st.parser.line(rest[0..nl]);
         rest = rest[nl + 1 ..];
     }
     if (st.line.items.len < 8 << 20) st.line.appendSlice(rest) catch {};
@@ -701,36 +686,11 @@ fn attachResult(out: []const u8, is_err: bool) void {
 var ansi_buf: [4096]u8 = undefined;
 
 fn stripAnsiInPlace(s: []const u8) []const u8 {
-    var n: usize = 0;
-    var i: usize = 0;
-    while (i < s.len and n < ansi_buf.len) {
-        const ch = s[i];
-        if (ch == 0x1b) {
-            i += 1;
-            if (i < s.len and s[i] == '[') {
-                i += 1;
-                while (i < s.len and !(s[i] >= 0x40 and s[i] <= 0x7e)) i += 1;
-                i += 1;
-            } else if (i < s.len and s[i] == ']') {
-                while (i < s.len and s[i] != 0x07 and s[i] != 0x1b) i += 1;
-                i += 1;
-            } else i += 1;
-            continue;
-        }
-        if (ch == '\r') {
-            i += 1;
-            continue;
-        }
-        ansi_buf[n] = ch;
-        n += 1;
-        i += 1;
-    }
-    return ansi_buf[0..n];
+    return af.stripAnsi(s, &ansi_buf);
 }
 
 /// 端末の出力の 1 行
-fn rawLine(l: []const u8) void {
-    const t = stripAnsiInPlace(l);
+fn rawLine(t: []const u8) void {
     st.got_any = true;
     const m = blk: {
         if (st.raw_msg) |rm| if (lastMsg() == rm) break :blk rm;
@@ -746,396 +706,32 @@ fn rawLine(l: []const u8) void {
     st.cur = null;
 }
 
-fn handleLine(raw_line: []const u8, live: bool) void {
-    const l = std.mem.trimRight(u8, raw_line, "\r");
-    const f = fmtOf(st.idx);
-    if (f == .raw) return rawLine(l);
-    const t = std.mem.trim(u8, l, " ");
-    if (t.len == 0) return;
-    if (t[0] != '{') return rawLine(l);
-    const parsed = std.json.parseFromSlice(std.json.Value, st.alloc, t, .{}) catch return rawLine(l);
-    defer parsed.deinit();
-    const v = parsed.value;
-    if (v != .object) return rawLine(l);
-    switch (f) {
-        .claude => handleClaude(v, live),
-        .gemini => handleGemini(v),
-        .codex => handleCodex(v),
-        .opencode => handleOpencode(v),
-        .kimi => handleKimi(v),
-        .raw => unreachable,
-    }
-}
-
-fn getStr(v: std.json.Value, k: []const u8) ?[]const u8 {
-    if (v != .object) return null;
-    const x = v.object.get(k) orelse return null;
-    return if (x == .string) x.string else null;
-}
-
-fn getVal(v: std.json.Value, k: []const u8) ?std.json.Value {
-    if (v != .object) return null;
-    return v.object.get(k);
-}
-
-fn getBool(v: std.json.Value, k: []const u8) bool {
-    const x = getVal(v, k) orelse return false;
-    return x == .bool and x.bool;
-}
-
-/// ツールの見出し(「Bash: ls -la」「Edit: src/main.zig」など)
-fn toolTitle(tool: []const u8, input: ?std.json.Value, buf: []u8) []const u8 {
-    var arg: []const u8 = "";
-    if (input) |in| {
-        if (in == .object) {
-            for ([_][]const u8{ "command", "cmd", "file_path", "filePath", "path", "absolute_path", "pattern", "url", "query", "description", "prompt", "title" }) |k| {
-                if (getStr(in, k)) |s| {
-                    arg = s;
-                    break;
-                }
-            }
-        } else if (in == .string) arg = in.string;
-    }
-    // 1 行目だけ・作業フォルダは省く
-    if (std.mem.indexOfScalar(u8, arg, '\n')) |nl| arg = arg[0..nl];
-    const dir = cwd();
-    if (dir.len > 0 and std.mem.startsWith(u8, arg, dir) and arg.len > dir.len and arg[dir.len] == '/') arg = arg[dir.len + 1 ..];
-    if (arg.len > 160) arg = arg[0..160];
-    if (arg.len == 0) return std.fmt.bufPrint(buf, "{s}", .{tool}) catch tool;
-    return std.fmt.bufPrint(buf, "{s}: {s}", .{ tool, arg }) catch tool;
-}
-
-/// ツールの結果(文字列 / [{type:text,text}] / その他は JSON のまま)の文字
-fn resultText(v: std.json.Value, buf: *std.ArrayList(u8)) void {
-    switch (v) {
-        .string => |s| buf.appendSlice(s) catch {},
-        .array => |a| for (a.items) |e| {
-            if (getStr(e, "text")) |t| {
-                if (buf.items.len > 0) buf.append('\n') catch {};
-                buf.appendSlice(t) catch {};
-            } else if (e == .string) buf.appendSlice(e.string) catch {};
+/// CLI の出力から読み取った出来事を、チャットの表示にする(読み方は lib/agentfmt.zig)
+fn onEvent(_: *anyopaque, e: af.Event) void {
+    switch (e) {
+        .session => |id| setSession(id),
+        .delta => |t| appendLive(t),
+        .text => |t| addAssistant(t),
+        .user => |t| addUser(t),
+        .tool => |t| addTool(t),
+        .result => |r| attachResult(r.text, r.err),
+        .@"error" => |t| addError(t),
+        .split => st.cur = null,
+        .done => |d| {
+            const secs = (nowMs() -| st.t0) / 1000;
+            if (d.cost > 0) setStatus("終わりました({d} 秒・${d:.3})", .{ secs, d.cost }) else setStatus("終わりました({d} 秒)", .{secs});
         },
-        .object => if (getStr(v, "text") orelse getStr(v, "output") orelse getStr(v, "content")) |t| buf.appendSlice(t) catch {},
-        else => {},
+        .raw => |t| rawLine(t),
     }
 }
 
-/// Claude Code の stream-json / 会話の記録(.jsonl)の 1 行
-fn handleClaude(v: std.json.Value, live: bool) void {
-    const ty = getStr(v, "type") orelse return;
-    const eq = std.mem.eql;
-    if (getBool(v, "isSidechain") or getBool(v, "isMeta") or getBool(v, "isCompactSummary")) return;
-    if (live) if (getStr(v, "session_id")) |sid| setSession(sid);
-    if (eq(u8, ty, "system")) return;
-    if (eq(u8, ty, "stream_event")) {
-        const ev = getVal(v, "event") orelse return;
-        const et = getStr(ev, "type") orelse return;
-        if (eq(u8, et, "content_block_start")) {
-            st.seg_streamed = false;
-            st.cur = null;
-        } else if (eq(u8, et, "content_block_delta")) {
-            const d = getVal(ev, "delta") orelse return;
-            if (getStr(d, "text")) |t| {
-                appendLive(t);
-                st.seg_streamed = true;
-            }
-        }
-        return;
-    }
-    if (eq(u8, ty, "assistant") or eq(u8, ty, "user")) {
-        const msg = getVal(v, "message") orelse return;
-        const content = getVal(msg, "content") orelse return;
-        const is_user = eq(u8, ty, "user");
-        if (content == .string) {
-            if (is_user and !live) addHumanText(content.string);
-            if (!is_user and !(live and st.seg_streamed)) addAssistant(content.string);
-            return;
-        }
-        if (content != .array) return;
-        var tb: [256]u8 = undefined;
-        for (content.array.items) |b| {
-            const bt = getStr(b, "type") orelse continue;
-            if (eq(u8, bt, "text")) {
-                const t = getStr(b, "text") orelse continue;
-                if (is_user) {
-                    if (!live) addHumanText(t);
-                } else if (!(live and st.seg_streamed)) addAssistant(t);
-            } else if (eq(u8, bt, "tool_use")) {
-                addTool(toolTitle(getStr(b, "name") orelse "ツール", getVal(b, "input"), &tb));
-            } else if (eq(u8, bt, "tool_result")) {
-                var out = std.ArrayList(u8).init(st.alloc);
-                defer out.deinit();
-                if (getVal(b, "content")) |cv| resultText(cv, &out);
-                attachResult(out.items, getBool(b, "is_error"));
-            }
-        }
-        if (!is_user and live) st.cur = null;
-        return;
-    }
-    if (eq(u8, ty, "result")) {
-        const secs = (nowMs() -| st.t0) / 1000;
-        if (getBool(v, "is_error")) addError(getStr(v, "result") orelse getStr(v, "subtype") orelse "エラーで止まりました");
-        const cost: f64 = if (getVal(v, "total_cost_usd")) |cv| switch (cv) {
-            .float => cv.float,
-            .integer => @floatFromInt(cv.integer),
-            else => 0,
-        } else 0;
-        if (cost > 0) setStatus("終わりました({d} 秒・${d:.3})", .{ secs, cost }) else setStatus("終わりました({d} 秒)", .{secs});
-    }
-}
+pub const SessionInfo = af.SessionInfo;
+pub const listSessions = af.listSessions;
 
-/// 人が打った文だけを会話として出す(<command-name> などの内部の文は出さない)
-fn addHumanText(t: []const u8) void {
-    const tt = std.mem.trim(u8, t, " \n");
-    if (tt.len == 0 or tt[0] == '<') return;
-    if (std.mem.startsWith(u8, tt, "[Request interrupted")) return;
-    addUser(tt);
-}
-
-fn handleGemini(v: std.json.Value) void {
-    const ty = getStr(v, "type") orelse return;
-    const eq = std.mem.eql;
-    if (getStr(v, "session_id")) |sid| setSession(sid);
-    if (eq(u8, ty, "message")) {
-        const role = getStr(v, "role") orelse "assistant";
-        if (!eq(u8, role, "assistant")) return;
-        const t = getStr(v, "content") orelse return;
-        if (getBool(v, "delta")) appendLive(t) else addAssistant(t);
-    } else if (eq(u8, ty, "tool_use")) {
-        var tb: [256]u8 = undefined;
-        addTool(toolTitle(getStr(v, "tool_name") orelse "ツール", getVal(v, "parameters"), &tb));
-    } else if (eq(u8, ty, "tool_result")) {
-        var out = std.ArrayList(u8).init(st.alloc);
-        defer out.deinit();
-        if (getVal(v, "output")) |o| resultText(o, &out);
-        attachResult(out.items, if (getStr(v, "status")) |s| eq(u8, s, "error") else false);
-    } else if (eq(u8, ty, "error")) {
-        addError(getStr(v, "message") orelse "エラー");
-    }
-}
-
-fn handleCodex(v: std.json.Value) void {
-    const ty = getStr(v, "type") orelse return;
-    const eq = std.mem.eql;
-    if (eq(u8, ty, "thread.started")) {
-        if (getStr(v, "thread_id")) |id| setSession(id);
-    } else if (eq(u8, ty, "item.completed")) {
-        const item = getVal(v, "item") orelse return;
-        const it = getStr(item, "type") orelse getStr(item, "item_type") orelse return;
-        var tb: [256]u8 = undefined;
-        if (eq(u8, it, "agent_message") or eq(u8, it, "assistant_message")) {
-            addAssistant(getStr(item, "text") orelse "");
-        } else if (eq(u8, it, "command_execution")) {
-            addTool(toolTitle("$", getVal(item, "command"), &tb));
-            const code = getVal(item, "exit_code");
-            const bad = if (code) |cv| cv == .integer and cv.integer != 0 else false;
-            attachResult(getStr(item, "aggregated_output") orelse "", bad);
-        } else if (eq(u8, it, "file_change")) {
-            var list = std.ArrayList(u8).init(st.alloc);
-            defer list.deinit();
-            list.appendSlice("ファイルの変更:") catch {};
-            if (getVal(item, "changes")) |ch| if (ch == .array) for (ch.array.items) |e| {
-                list.append(' ') catch {};
-                list.appendSlice(getStr(e, "path") orelse "?") catch {};
-            };
-            addTool(list.items);
-        } else if (eq(u8, it, "mcp_tool_call")) {
-            const s = std.fmt.bufPrint(&tb, "MCP: {s}.{s}", .{ getStr(item, "server") orelse "?", getStr(item, "tool") orelse "?" }) catch "MCP";
-            addTool(s);
-        } else if (eq(u8, it, "web_search")) {
-            addTool(toolTitle("検索", getVal(item, "query"), &tb));
-        } else if (eq(u8, it, "error")) {
-            addError(getStr(item, "message") orelse "エラー");
-        }
-    } else if (eq(u8, ty, "turn.failed")) {
-        const e = getVal(v, "error");
-        addError(if (e) |ev| getStr(ev, "message") orelse "失敗しました" else "失敗しました");
-    } else if (eq(u8, ty, "error")) {
-        addError(getStr(v, "message") orelse "エラー");
-    }
-}
-
-fn handleOpencode(v: std.json.Value) void {
-    const ty = getStr(v, "type") orelse return;
-    const eq = std.mem.eql;
-    if (getStr(v, "sessionID")) |sid| setSession(sid);
-    const part = getVal(v, "part");
-    if (eq(u8, ty, "text")) {
-        if (part) |p| addAssistant(getStr(p, "text") orelse "");
-    } else if (eq(u8, ty, "tool_use") or eq(u8, ty, "tool")) {
-        const p = part orelse return;
-        const state = getVal(p, "state");
-        var tb: [256]u8 = undefined;
-        const title = if (state) |s| getStr(s, "title") else null;
-        if (title) |t| {
-            const s = std.fmt.bufPrint(&tb, "{s}: {s}", .{ getStr(p, "tool") orelse "ツール", t }) catch t;
-            addTool(s);
-        } else addTool(toolTitle(getStr(p, "tool") orelse "ツール", if (state) |s| getVal(s, "input") else null, &tb));
-        if (state) |s| attachResult(getStr(s, "output") orelse getStr(s, "error") orelse "", if (getStr(s, "status")) |x| eq(u8, x, "error") else false);
-    } else if (eq(u8, ty, "error")) {
-        const e = getVal(v, "error");
-        var msg: []const u8 = "エラー";
-        if (e) |ev| {
-            if (getStr(ev, "message")) |m| msg = m;
-            if (getVal(ev, "data")) |d| if (getStr(d, "message")) |m| {
-                msg = m;
-            };
-        }
-        addError(msg);
-    }
-}
-
-fn handleKimi(v: std.json.Value) void {
-    const role = getStr(v, "role") orelse return handleClaude(v, true);
-    const eq = std.mem.eql;
-    if (eq(u8, role, "assistant")) {
-        if (getVal(v, "content")) |cv| {
-            var out = std.ArrayList(u8).init(st.alloc);
-            defer out.deinit();
-            resultText(cv, &out);
-            addAssistant(out.items);
-        }
-        if (getVal(v, "tool_calls")) |tc| if (tc == .array) for (tc.array.items) |call| {
-            const f = getVal(call, "function") orelse continue;
-            var tb: [256]u8 = undefined;
-            // arguments は JSON の文字列
-            var args_v: ?std.json.Value = null;
-            var parsed: ?std.json.Parsed(std.json.Value) = null;
-            defer if (parsed) |p| p.deinit();
-            if (getStr(f, "arguments")) |a| {
-                parsed = std.json.parseFromSlice(std.json.Value, st.alloc, a, .{}) catch null;
-                if (parsed) |p| args_v = p.value;
-            }
-            addTool(toolTitle(getStr(f, "name") orelse "ツール", args_v, &tb));
-        };
-    } else if (eq(u8, role, "tool")) {
-        var out = std.ArrayList(u8).init(st.alloc);
-        defer out.deinit();
-        if (getVal(v, "content")) |cv| resultText(cv, &out);
-        attachResult(out.items, false);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Claude Code の会話の記録
-// ---------------------------------------------------------------------------
-
-fn claudeDir(buf: []u8) ?[]const u8 {
-    if (std.posix.getenv("CLAUDE_CONFIG_DIR")) |d| if (d.len > 0) return std.fmt.bufPrint(buf, "{s}/projects", .{d}) catch null;
-    const home = std.posix.getenv("HOME") orelse return null;
-    return std.fmt.bufPrint(buf, "{s}/.claude/projects", .{home}) catch null;
-}
-
-/// フォルダの記録の置き場(英数字以外を - にした名前)
-fn claudeProjectDir(dir: []const u8, buf: []u8) ?[]const u8 {
-    var db: [512]u8 = undefined;
-    const base = claudeDir(&db) orelse return null;
-    var nb: [1100]u8 = undefined;
-    const n = @min(dir.len, nb.len);
-    for (dir[0..n], 0..) |ch, i| nb[i] = if (std.ascii.isAlphanumeric(ch)) ch else '-';
-    return std.fmt.bufPrint(buf, "{s}/{s}", .{ base, nb[0..n] }) catch null;
-}
-
-pub const SessionInfo = struct { id: []const u8, title: []const u8, mtime: i128 };
-
-/// そのフォルダの Claude Code の会話(新しい順)。文字列は arena に置く
-pub fn listSessions(arena: std.mem.Allocator, dir: []const u8, out: *std.ArrayList(SessionInfo)) void {
-    var pb: [1700]u8 = undefined;
-    const pdir = claudeProjectDir(dir, &pb) orelse return;
-    var d = std.fs.cwd().openDir(pdir, .{ .iterate = true }) catch return;
-    defer d.close();
-    var it = d.iterate();
-    while (it.next() catch null) |e| {
-        if (e.kind != .file or !std.mem.endsWith(u8, e.name, ".jsonl")) continue;
-        const f = d.openFile(e.name, .{}) catch continue;
-        defer f.close();
-        const stt = f.stat() catch continue;
-        const title = scanFirstPrompt(arena, f) orelse continue;
-        out.append(.{ .id = arena.dupe(u8, e.name[0 .. e.name.len - 6]) catch continue, .title = title, .mtime = stt.mtime }) catch {};
-    }
-    std.mem.sort(SessionInfo, out.items, {}, struct {
-        fn lt(_: void, a: SessionInfo, b: SessionInfo) bool {
-            return a.mtime > b.mtime;
-        }
-    }.lt);
-    if (out.items.len > 60) out.shrinkRetainingCapacity(60);
-}
-
-/// 記録を少しずつ読み、最初の人の発言を探す(長いツールの結果の行が先に来ることがあるので、最大 8MB まで)
-fn scanFirstPrompt(arena: std.mem.Allocator, f: std.fs.File) ?[]const u8 {
-    var buf = std.ArrayList(u8).init(std.heap.c_allocator);
-    defer buf.deinit();
-    var chunk: [262144]u8 = undefined;
-    var from: usize = 0; // まだ調べていない行の先頭
-    while (buf.items.len < 8 << 20) {
-        const n = f.read(&chunk) catch return null;
-        if (n == 0) break;
-        buf.appendSlice(chunk[0..n]) catch return null;
-        const last_nl = std.mem.lastIndexOfScalar(u8, buf.items, '\n') orelse continue;
-        if (last_nl + 1 <= from) continue;
-        if (firstPrompt(arena, buf.items[from .. last_nl + 1])) |t| return t;
-        from = last_nl + 1;
-    }
-    if (from < buf.items.len) return firstPrompt(arena, buf.items[from..]);
-    return null;
-}
-
-/// 記録の最初の、人が打った文
-fn firstPrompt(arena: std.mem.Allocator, head: []const u8) ?[]const u8 {
-    var it = std.mem.splitScalar(u8, head, '\n');
-    while (it.next()) |l| {
-        if (std.mem.indexOf(u8, l, "\"type\":\"user\"") == null) continue;
-        const p = std.json.parseFromSlice(std.json.Value, arena, l, .{}) catch continue;
-        const v = p.value;
-        if (getBool(v, "isMeta") or getBool(v, "isSidechain") or getBool(v, "isCompactSummary")) continue;
-        const msg = getVal(v, "message") orelse continue;
-        const content = getVal(msg, "content") orelse continue;
-        var t: []const u8 = "";
-        if (content == .string) t = content.string else if (content == .array) {
-            for (content.array.items) |b| if (getStr(b, "text")) |x| {
-                t = x;
-                break;
-            };
-        }
-        t = std.mem.trim(u8, t, " \n");
-        if (t.len == 0 or t[0] == '<') continue;
-        var out = arena.alloc(u8, @min(t.len, 160)) catch return null;
-        for (t[0..out.len], 0..) |ch, i| out[i] = if (ch == '\n') ' ' else ch;
-        // UTF-8 の途中で切らない
-        var n = out.len;
-        if (n < t.len) while (n > 0 and (out[n - 1] & 0xC0) == 0x80) {
-            n -= 1;
-        };
-        if (n < t.len and n > 0 and out[n - 1] >= 0xC0) n -= 1;
-        return out[0..n];
-    }
-    return null;
-}
-
-/// 会話の記録を読み込んで表示する(大きい記録は最後の 8MB だけ)
+/// Claude Code の会話の記録を読み込んで表示する
 fn loadClaudeHistory(dir: []const u8, id: []const u8) void {
-    var pb: [1700]u8 = undefined;
-    const pdir = claudeProjectDir(dir, &pb) orelse return;
-    var fb: [1900]u8 = undefined;
-    const path = std.fmt.bufPrint(&fb, "{s}/{s}.jsonl", .{ pdir, id }) catch return;
-    const f = std.fs.cwd().openFile(path, .{}) catch return;
-    defer f.close();
-    const size = (f.stat() catch return).size;
-    const cap: u64 = 8 << 20;
-    if (size > cap) f.seekTo(size - cap) catch return;
-    const data = f.readToEndAlloc(st.alloc, cap + 1) catch return;
-    defer st.alloc.free(data);
-    var it = std.mem.splitScalar(u8, data, '\n');
-    if (size > cap) _ = it.next(); // 途中から読んだ最初の行は捨てる
-    const keep = st.idx;
-    while (it.next()) |l| {
-        const t = std.mem.trim(u8, l, " \r");
-        if (t.len == 0 or t[0] != '{') continue;
-        const p = std.json.parseFromSlice(std.json.Value, st.alloc, t, .{}) catch continue;
-        defer p.deinit();
-        handleClaude(p.value, false);
-    }
-    st.idx = keep;
+    var p = af.Parser{ .fmt = .claude, .live = false, .cwd = dir, .ctx = &st, .emit = onEvent, .alloc = st.alloc };
+    _ = af.loadHistory(st.alloc, dir, id, &p);
     st.cur = null;
     st.got_any = false;
     setStatus("記録を読み込みました(続きから話せます)", .{});
@@ -1159,7 +755,7 @@ pub fn recentFolders(arena: std.mem.Allocator, out: *std.ArrayList(Folder)) void
     };
     // Claude Code の記録の置き場: 一番新しい記録の cwd
     var db: [512]u8 = undefined;
-    if (claudeDir(&db)) |base| {
+    if (af.claudeDir(&db)) |base| {
         var d = std.fs.cwd().openDir(base, .{ .iterate = true }) catch return finishFolders(out);
         defer d.close();
         var it = d.iterate();
@@ -1326,7 +922,14 @@ fn parseCustoms(txt: []const u8) void {
 
 // ---------------------------------------------------------------------------
 
-test "claude stream-json" {
+test "custom agents and ansi" {
+    parseCustoms("# comment\nAntigravity | raw | agy chat {prompt}\nbad line\n");
+    try std.testing.expectEqual(@as(usize, 1), st.n_custom);
+    try std.testing.expectEqualStrings("Antigravity", name(builtin.len));
+    try std.testing.expectEqualStrings("ok", stripAnsiInPlace("\x1b[1;32mok\x1b[0m\r"));
+}
+
+test "claude output into chat" {
     const a = std.testing.allocator;
     st.alloc = a;
     st.msgs = std.ArrayList(*Msg).init(a);
@@ -1335,59 +938,20 @@ test "claude stream-json" {
         st.msgs.deinit();
     }
     st.cwd_len = 0;
-    st.idx = 0;
-    const lines = [_][]const u8{
+    st.parser = .{ .fmt = .claude, .ctx = &st, .emit = onEvent, .alloc = a };
+    for ([_][]const u8{
         "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"abc-123\"}",
-        "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"content_block\":{\"type\":\"text\"}}}",
-        "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"見て\"}}}",
-        "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"みます\"}}}",
+        "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\"}}",
+        "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"delta\":{\"text\":\"見て\"}}}",
+        "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"delta\":{\"text\":\"みます\"}}}",
         "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"見てみます\"}]}}",
-        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Bash\",\"input\":{\"command\":\"ls -la\\nsecond\"}}]}}",
-        "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"a\\nb\"}]}}",
-        "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"abc-123\",\"total_cost_usd\":0.01}",
-    };
-    for (lines) |l| {
-        const p = try std.json.parseFromSlice(std.json.Value, a, l, .{});
-        defer p.deinit();
-        handleClaude(p.value, true);
-    }
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"ls -la\"}}]}}",
+        "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"content\":\"a\\nb\"}]}}",
+    }) |l| st.parser.line(l);
     try std.testing.expectEqualStrings("abc-123", sessionId());
     try std.testing.expectEqual(@as(usize, 2), st.msgs.items.len);
     try std.testing.expectEqualStrings("見てみます", st.msgs.items[0].text.items);
     try std.testing.expectEqualStrings("Bash: ls -la\na\nb", st.msgs.items[1].text.items);
-}
-
-test "claude history" {
-    const a = std.testing.allocator;
-    st.alloc = a;
-    st.msgs = std.ArrayList(*Msg).init(a);
-    defer {
-        for (st.msgs.items) |m| m.destroy(a);
-        st.msgs.deinit();
-    }
-    const lines = [_][]const u8{
-        "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<command-name>/clear</command-name>\"}}",
-        "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"直して\"}}",
-        "{\"type\":\"assistant\",\"isSidechain\":true,\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"sub\"}]}}",
-        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"はい\"}]}}",
-    };
-    for (lines) |l| {
-        const p = try std.json.parseFromSlice(std.json.Value, a, l, .{});
-        defer p.deinit();
-        handleClaude(p.value, false);
-    }
-    try std.testing.expectEqual(@as(usize, 2), st.msgs.items.len);
-    try std.testing.expectEqualStrings("直して", st.msgs.items[0].text.items);
-    var arena = std.heap.ArenaAllocator.init(a);
-    defer arena.deinit();
-    try std.testing.expectEqualStrings("最初の頼みごと", firstPrompt(arena.allocator(), "{\"type\":\"user\",\"message\":{\"content\":\"<x>\"}}\n{\"type\":\"user\",\"message\":{\"content\":\"最初の頼みごと\"}}\n").?);
-}
-
-test "custom agents and ansi" {
-    parseCustoms("# comment\nAntigravity | raw | agy chat {prompt}\nbad line\n");
-    try std.testing.expectEqual(@as(usize, 1), st.n_custom);
-    try std.testing.expectEqualStrings("Antigravity", name(builtin.len));
-    try std.testing.expectEqualStrings("ok", stripAnsiInPlace("\x1b[1;32mok\x1b[0m\r"));
 }
 
 // ---------------------------------------------------------------------------
