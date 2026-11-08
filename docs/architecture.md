@@ -1,17 +1,68 @@
 # アーキテクチャ
 
+## 考え方(Unix 哲学)
+- **画面は 1 プロセス**(ame-shell)。描画と入力は 1 つの EGL コンテキスト・1 つの epoll にまとめ、メモリの予算(PSS < 80MB)を守る。
+- **画面の要らない仕事は小さなコマンド**に分ける。1 つのことをし、文字(テキスト / 1 行 1 つの JSON)を標準入出力でやりとりする。
+  ame-shell もそれを子プロセスとして動かして出力を読むだけなので、端末からも同じものが使え、単独で試せる。
+- **部品(src/lib/)は画面にも OS にも依存しない**。コマンドと画面の両方が `@import("ame_lib")` で使い、試験は `zig build test` で走る。
+- **数値の重い処理は Odin(anim/)**、**他人が書けるウィジェットは WASM(widgets/)**、OS の違いは `src/platform/` に閉じ込める。
+
+## 小さな道具(zig-out/bin)
+| コマンド | すること | 入力 → 出力 |
+|---|---|---|
+| `ame-lyrics [-d 秒] アーティスト 曲名` | 歌詞を探す(music-tui・LRCLIB・NetEase・Kugou、キャッシュつき) | → LRC。終了コード 0 見つかった / 1 無い / 2 一時的な失敗 |
+| `ame-ai [-p 会社] [-m モデル]` | いろいろな会社の AI と話す。`--json` で会話と MCP のツール呼び出し | 質問 → 返事 / 会話の JSON → 出来事の JSON の行 |
+| `ame-ai models` / `ame-ai providers` | モデル・会社の一覧 | → 1 行 1 つ |
+| `CLI の出力 \| ame-agent [-f 形式]` | Claude Code・Gemini・Codex・OpenCode・Kimi の出力を共通の出来事に | JSON の行 → 出来事の JSON の行 |
+| `ame-agent sessions [フォルダ]` / `history フォルダ id` | Claude Code の会話の一覧・記録 | → JSON の行 |
+| `ame-ctl …` | 動いている ame-shell を操作する(`ame-ctl help`) | 引数 → 結果の文字 |
+| `ame-auth` | ロック画面のパスワード照合(FreeBSD、setuid) | — |
+
+例: `echo 'Zig の comptime を一言で' | ame-ai -p anthropic`、
+`claude -p 直して --output-format stream-json --verbose | ame-agent -C "$PWD" | jq -r 'select(.type=="tool").title'`
+
+## ソースの置き場
+```
+src/
+  main.zig ctl.zig auth_helper.zig   実行ファイルの入口(ame-shell / ame-ctl / ame-auth)
+  c.zig                               C ライブラリの取り込み(ここ 1 か所だけ)
+  core/      本体の状態と Wayland の接続(app)・設定(config)・ame-ctl の口(ipc)・サーフェス・足りない道具の案内
+  gfx/       GLES3 の 2D レンダラ・文字(HarfBuzz/FreeType)・アイコン・PNG・配色・アニメ(Odin へのつなぎ)・波紋
+  frame/     画面の枠: 縦のバー・ダイナミックアイランド・AI のパネル・ダッシュボードの中身など
+  desktop/   バー・ダッシュボード・ランチャー・通知・OSD・壁紙(と動画)・スクショ・クリップボード・日本語入力・システムの変化の監視
+  lock/      ロック画面(状態と認証 / 見た目)・ログイン画面
+  media/     再生中の曲(MPRIS)・音の出力先・歌詞(ame-lyrics を呼ぶ)・曲のカードとウィジェット
+  ai/        AI チャット(ame-ai を呼ぶ)・コーディング CLI(出力の読み方は lib/agentfmt)・MCP の選択
+  device/    AirPods(頭の動き・つないだときのカード・スリープ後のつなぎ直し)
+  widget/    WASM ウィジェットの実行(wasm3)とホストとの取り決め(ABI)
+  wm/        River 0.4 以降で使う内蔵のウィンドウマネージャ
+  hand/ face/  手のジェスチャ・顔の認証(カメラ)
+  platform/  OS ごとの違い(Linux / FreeBSD)・イベントループ
+  lib/       画面にも OS にも依存しない部品(lrc・ai・mcp・agentfmt)
+  cmd/       小さな道具(ame-lyrics・ame-ai・ame-agent)
+anim/        Odin: ばね・あいまい検索・主色抽出・FFT・画像の縮小(C ABI。wasm32 にも同じものをビルド)
+widgets/     WASM ウィジェット(Zig → wasm32)
+```
+新しい機能を足すとき: 画面が要らない部分はまず `src/lib/` に純粋な関数として書いて試験を付け、
+外から使える意味があれば `src/cmd/` にコマンドを足す(`build.zig` の `cmds` と `session/install-session.sh` にも名前を足す)。
+
+## プロセスの図
 ```
                        ┌──────────────── ame-shell(1プロセス・1 EGL コンテキスト)────────────────┐
- River ◀─Wayland──▶   │ app.zig        globals / 出力 / seat / River status・control / 入力配送      │
- (layer-shell,        │ surface.zig    layer/lock サーフェス。wl_surface.frame 駆動の描画             │
-  session-lock,       │ gfx.zig        GLES3 2D レンダラ(インスタンス化した1種類の四角形 + SDF)       │
-  river-status)       │ text.zig       fontconfig → HarfBuzz → FreeType SDF → 共有グリフアトラス     │
-                       │ anim.zig ────▶ anim/anim.odin(Odin: スプリング/ファジー/主色抽出, C ABI)    │
-                       │ bar / wallpaper / osd / launcher / notify / dashboard / lock / media         │
-                       │ wasm.zig ────▶ wasm3(C)── widgets/*.wasm(Zig + Odin を wasm32 に)        │
-                       │ ipc.zig        Unix ソケット ◀── ame-ctl(Zig, libc のみ)                    │
-                       │ platform/      loop.zig(epoll+timerfd) / sys.zig(sysfs, procfs, 外部コマンド)│
-                       └──────────────────────────────────────────────────────────────────────────────┘
+ River ◀─Wayland──▶   │ core/app       globals / 出力 / seat / River status・control / 入力配送       │
+ (layer-shell,        │ core/surface   layer/lock サーフェス。wl_surface.frame 駆動の描画              │
+  session-lock,       │ gfx/gfx        GLES3 2D レンダラ(インスタンス化した1種類の四角形 + SDF)        │
+  river-wm)           │ gfx/text       fontconfig → HarfBuzz → FreeType SDF → 共有グリフアトラス      │
+                       │ gfx/anim ────▶ anim/*.odin(Odin: ばね/ファジー/主色/FFT/縮小, C ABI)         │
+                       │ desktop/ lock/ media/ ai/ frame/ wm/                                          │
+                       │ widget/wasm ─▶ wasm3(C)── widgets/*.wasm(Zig + Odin を wasm32 に)         │
+                       │ core/ipc       Unix ソケット ◀── ame-ctl(Zig, libc のみ)                    │
+                       │ platform/      loop(epoll+timerfd) / sys(sysfs, procfs, 外部コマンド)      │
+                       └───────┬──────────────────────────────────────────────────────────────────────┘
+                               │ 子プロセス(標準入出力・1 行 1 つの JSON)
+                               ├── ame-lyrics(歌詞)        ── curl
+                               ├── ame-ai(AI・MCP)         ── curl / MCP サーバ
+                               └── claude などのコーディング CLI(出力は lib/agentfmt で読む。ame-agent と同じ)
 ```
 
 ## イベントループ

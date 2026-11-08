@@ -341,8 +341,22 @@ ame-ctl lock | reload | widgets reload | stats | restart | quit
 - River 0.3 では、ワークスペースごとのアプリ名は推測(River 0.3 は窓とタグの対応を外に出さない)。
 - ランチャーの日本語入力(IME)とトレイは未対応。
 - FreeBSD: Bluetooth の機器の追加は端末(`doas bluetooth-config scan`)。ログイン画面は SDDM。
-- 動画壁紙は再生中に CPU 約 5%(720p)・メモリ +130MB 程度を使う。
+- 動画壁紙は再生中に CPU 約 5%(720p)・メモリ +130MB 程度を使う(透明な窓から見えるよう、窓を開いていても動き続ける。止まるのは全画面の窓があるときだけ)。
 - 詳細は `docs/blockers.md`、計測値は `docs/perf.md`。
+
+## 小さな道具(端末からも使える)
+
+画面の要らない仕事は、1 つのことをする小さなコマンドに分けてあります。ame-shell もこれを動かして出力を読むだけなので、端末やスクリプトから同じように使えます(標準入出力・テキスト / 1 行 1 つの JSON)。
+
+```sh
+ame-lyrics 'YOASOBI' 'アイドル' > idol.lrc               # 歌詞を探す(0 見つかった / 1 無い / 2 一時的な失敗)
+echo 'Zig の comptime を一言で' | ame-ai -p anthropic       # AI に聞く(会社とモデルは省くとチャットで最後に選んだもの)
+ame-ai models -p openai                                     # モデルの一覧
+claude -p '直して' --output-format stream-json --verbose | ame-agent -C "$PWD"   # コーディング CLI の出力を共通の出来事に
+ame-agent sessions ~/projects/foo                          # Claude Code の会話の一覧
+```
+
+構成とソースの置き場は `docs/architecture.md` にあります。
 
 ## ドキュメントサイト
 

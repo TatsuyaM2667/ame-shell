@@ -13,6 +13,10 @@ Chimera Linux / musl / dinit / Ryzen 7 7735HS / Radeon 680M (radeonsi) / River 0
 待機 CPU < 0.5%(壁紙静止)/ < 2%(ライブ壁紙)、PSS < 80MB・私有 < 60MB、起動 → バー < 300ms、描画 < 16.6ms。
 描画は必ず wl_surface.frame 駆動。ポーリング用タイマー禁止(timerfd は「次に変わる時刻」にだけ使う)。
 
+## 構成(docs/architecture.md)
+画面は ame-shell の 1 プロセス、画面の要らない仕事は `src/cmd/` の小さなコマンド(ame-lyrics / ame-ai / ame-agent、標準入出力・JSON の行)。
+画面にも OS にも依存しない部品は `src/lib/`(`@import("ame_lib")`、試験は `zig build test`)。src は役割ごとのフォルダ(core / gfx / frame / desktop / lock / media / ai / device / widget / wm / platform)。
+
 ## ビルドとテスト
 ```sh
 zig build -Doptimize=ReleaseFast && zig build test
