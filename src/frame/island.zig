@@ -362,7 +362,8 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
     // 再生中: 島の中をジャケットの色でほんのり染める(上の角は枠の外なので、上へはみ出して描く)
     if (app.media.status != .none) {
         const R = f.R();
-        cv.rectGrad(0, -R, w, h + R, R, acc.alpha(0.10), acc.alpha(0.32));
+        // 上(枠の帯との境目)は透明から、下へいくほど色づく
+        cv.rectGrad(0, -2, w, h + 2, R, acc.alpha(0), acc.alpha(0.30));
     }
     // リズムに乗る: 低音が強く来たら、ぴょこっと跳ねて体を左右に揺らす
     if (playing and f.spectrum.running()) {
@@ -382,6 +383,13 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
     }
     switch (kindOf(f)) {
         .idle => {
+            // 充電のアニメーションで、キャラクターが水玉になって出かけている間は、島は空っぽ
+            const away = if (app.charge) |ch| ch.charAway() else false;
+            if (away) {
+                animating = true;
+                cv.opacity(1);
+                return animating;
+            }
             const covered = st.gesture == .cover and handsActive(now);
             const low = battery() != .ok;
             var mood: Mood = if (covered) .squint else if (st.hover) .happy else if (st.sleepy) .sleepy else if (low) .worried else .normal;
