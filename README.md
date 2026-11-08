@@ -355,6 +355,7 @@ ame-ai models -p openai                                     # モデルの一覧
 claude -p '直して' --output-format stream-json --verbose | ame-agent -C "$PWD"   # コーディング CLI の出力を共通の出来事に
 ame-agent sessions ~/projects/foo                          # Claude Code の会話の一覧
 ame-config check                                          # 設定ファイルを確かめる(間違いは「ファイル:行:」で出る)
+ame-weather Sapporo                                       # 今の天気(--json で JSON)
 ```
 
 構成とソースの置き場は `docs/architecture.md` にあります。

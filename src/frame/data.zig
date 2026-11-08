@@ -144,29 +144,15 @@ pub const Weather = struct {
     on_update: ?*const fn (ctx: *anyopaque) void = null,
     ctx: *anyopaque = undefined,
 
-    /// 30 分以上経っていれば取り直す(ダッシュボードを開いたときに呼ぶ)
+    /// 30 分以上経っていれば取り直す(ダッシュボードを開いたときに呼ぶ)。取るのは ame-weather(src/cmd/ame-weather.zig)
     pub fn refresh(self: *Weather) void {
         if (self.fd >= 0) return;
         if (self.fetched_ms != 0 and loop.nowMs() - self.fetched_ms < 30 * 60 * 1000) return;
         self.len = 0;
-        // %t 気温 / %C 天気(日本語)/ %x 天気記号(アイコン選択用)/ %l 場所。
-        // 場所は shell { weather-location "Sapporo" } で指定でき、無ければ IP アドレスから推定
-        var ub: [256]u8 = undefined;
-        var lb: [96]u8 = undefined;
-        var ln: usize = 0;
-        for (self.app.cfg.weather_location.get()) |ch| {
-            if (ln >= lb.len) break;
-            // URL に入れられない文字は落とし、空白は + に(wttr.in の書式)
-            if (std.ascii.isAlphanumeric(ch) or ch == '-' or ch == ',' or ch >= 0x80) {
-                lb[ln] = ch;
-                ln += 1;
-            } else if (ch == ' ') {
-                lb[ln] = '+';
-                ln += 1;
-            }
-        }
-        const url = std.fmt.bufPrintZ(&ub, "https://wttr.in/{s}?format=%t|%C|%x|%l&lang=ja", .{lb[0..ln]}) catch return;
-        const fd = sys.spawnReader(&.{ "curl", "-sf", "--max-time", "8", url.ptr }, &self.pid) orelse return;
+        // 場所は shell { weather-location "Sapporo" }。無ければ IP アドレスから推定
+        var lb: [128]u8 = undefined;
+        const loc = std.fmt.bufPrintZ(&lb, "{s}", .{self.app.cfg.weather_location.get()}) catch return;
+        const fd = sys.spawnReader(&.{ "ame-weather", "--json", loc.ptr }, &self.pid) orelse return;
         self.fd = fd;
         self.app.loop.add(fd, c.EPOLLIN | c.EPOLLHUP, self, onRead) catch {};
     }
@@ -182,16 +168,13 @@ pub const Weather = struct {
         _ = c.close(fd);
         self.fd = -1;
         self.fetched_ms = loop.nowMs();
-        var it = std.mem.splitScalar(u8, std.mem.trim(u8, self.buf[0..self.len], " \n"), '|');
-        const t = it.next() orelse return;
-        const cond = it.next() orelse return;
-        const sym = it.next() orelse "";
-        const place = it.next() orelse "";
-        if (t.len == 0 or std.mem.indexOf(u8, t, "Unknown") != null) return;
-        copy(&self.temp, &self.temp_len, std.mem.trimLeft(u8, t, "+"));
-        copy(&self.cond, &self.cond_len, cond);
-        copy(&self.symbol, &self.symbol_len, sym);
-        copy(&self.place, &self.place_len, place);
+        const R = struct { temp: []const u8, condition: []const u8, symbol: []const u8, place: []const u8 };
+        const p = std.json.parseFromSlice(R, std.heap.c_allocator, std.mem.trim(u8, self.buf[0..self.len], " \n"), .{ .ignore_unknown_fields = true }) catch return;
+        defer p.deinit();
+        copy(&self.temp, &self.temp_len, p.value.temp);
+        copy(&self.cond, &self.cond_len, p.value.condition);
+        copy(&self.symbol, &self.symbol_len, p.value.symbol);
+        copy(&self.place, &self.place_len, p.value.place);
         self.ok = true;
         if (self.on_update) |f| f(self.ctx);
     }
@@ -202,19 +185,10 @@ pub const Weather = struct {
         while (len.* > 0 and len.* < src.len and (dst[len.* - 1] & 0xC0) == 0x80) len.* -= 1;
     }
 
-    /// wttr.in の天気記号 → Nerd Font アイコン
+    /// 天気記号 → Nerd Font アイコン(夜は月。lib/weather.zig)
     pub fn icon(self: *const Weather) []const u8 {
-        const s = self.symbol[0..self.symbol_len];
         const hour = @import("../desktop/bar.zig").localTime().tm_hour;
-        const night = hour < 6 or hour >= 18;
-        if (std.mem.eql(u8, s, "o")) return if (night) "\u{F0594}" else "\u{F0599}"; // 晴れ
-        if (std.mem.eql(u8, s, "m")) return if (night) "\u{F0F31}" else "\u{F0595}"; // 晴れ時々曇り
-        if (std.mem.eql(u8, s, "mm") or std.mem.eql(u8, s, "mmm")) return "\u{F0590}"; // 曇り
-        if (std.mem.eql(u8, s, "=")) return "\u{F0591}"; // 霧
-        if (std.mem.indexOf(u8, s, "/!/") != null or std.mem.indexOf(u8, s, "!") != null) return "\u{F0593}"; // 雷
-        if (std.mem.indexOf(u8, s, "*") != null) return "\u{F0598}"; // 雪
-        if (std.mem.indexOf(u8, s, "/") != null or std.mem.indexOf(u8, s, ".") != null) return "\u{F0597}"; // 雨
-        return "\u{F0590}";
+        return @import("ame_lib").weather.icon(self.symbol[0..self.symbol_len], hour < 6 or hour >= 18);
     }
 };
 
