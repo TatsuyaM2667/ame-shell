@@ -337,14 +337,6 @@ pub const Frame = struct {
         self.updateKeyboard();
         self.surf.schedule();
     }
-    /// ダイナミックアイランドを一瞬で閉じる・開く(充電のアニメーションが島ごと描いている間の入れ替え。chargeanim.zig)
-    pub fn islandSnap(self: *Frame, open: bool) void {
-        self.island.open = open;
-        self.island.by_key = false;
-        self.island.t.snap(if (open) 1 else 0);
-        self.schedule();
-    }
-
     pub fn aiOpen(self: *const Frame) bool {
         return self.ai.open;
     }

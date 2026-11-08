@@ -280,8 +280,6 @@ pub fn size(f: *Frame) ?[2]f32 {
     ensure(app);
     // ダッシュボードを開いている間は引っ込む(同じ場所)
     if (f.dash.visible()) return null;
-    // 充電のアニメーションで、島ごと出かけている間は閉じる
-    if (app.charge) |ch| if (ch.charAway()) return null;
     return switch (kindOf(f)) {
         .idle => .{ 210, 46 },
         .workspace => .{ 250, 46 },
