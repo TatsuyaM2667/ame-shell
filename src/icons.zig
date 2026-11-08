@@ -15,6 +15,7 @@
 // "-symbolic" アイコン(単色の線画、暗い色で描かれている)は暗い UI で見えないので明るい色に塗り直す。
 const std = @import("std");
 const c = @import("c.zig");
+const anim = @import("anim.zig");
 
 const Best = struct { path: []const u8, score: i32, theme_rank: u8 };
 const Map = std.StringHashMap(Best);
@@ -301,7 +302,7 @@ fn decodeSvg(path: [:0]const u8, ow: usize, oh: usize) ?[*]u8 {
     return out;
 }
 
-/// 箱フィルタで縮小(乗算済みアルファで平均して縁のにじみを防ぐ。大きな画像は最大 8x8 点に間引く)
+/// 縮小(面積平均・乗算済みアルファ。計算は anim/image.odin)。cover なら切り抜いて埋め、でなければ収めて中央に置く
 pub fn scaleRgba(src: [*]const u8, sw: usize, sh: usize, ow: usize, oh: usize, cover: bool) ?[*]u8 {
     const out: [*]u8 = @ptrCast(std.c.malloc(ow * oh * 4) orelse return null);
     @memset(out[0 .. ow * oh * 4], 0);
@@ -310,39 +311,24 @@ pub fn scaleRgba(src: [*]const u8, sw: usize, sh: usize, ow: usize, oh: usize, c
     const scale = if (cover) @min(fx, fy) else @max(fx, fy);
     const dw: usize = @min(ow, @max(1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(sw)) / scale))));
     const dh: usize = @min(oh, @max(1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(sh)) / scale))));
-    const ox = (ow - dw) / 2;
-    const oy = (oh - dh) / 2;
     const sx0: f32 = if (cover) (@as(f32, @floatFromInt(sw)) - @as(f32, @floatFromInt(ow)) * scale) / 2 else 0;
     const sy0: f32 = if (cover) (@as(f32, @floatFromInt(sh)) - @as(f32, @floatFromInt(oh)) * scale) / 2 else 0;
-    for (0..dh) |y| for (0..dw) |x| {
-        const x0: usize = @intFromFloat(@max(0, sx0 + @as(f32, @floatFromInt(x)) * scale));
-        const y0: usize = @intFromFloat(@max(0, sy0 + @as(f32, @floatFromInt(y)) * scale));
-        const x1 = @min(sw, @max(x0 + 1, @as(usize, @intFromFloat(sx0 + @as(f32, @floatFromInt(x + 1)) * scale))));
-        const y1 = @min(sh, @max(y0 + 1, @as(usize, @intFromFloat(sy0 + @as(f32, @floatFromInt(y + 1)) * scale))));
-        const stepx = @max(1, (x1 -| x0) / 8);
-        const stepy = @max(1, (y1 -| y0) / 8);
-        var acc = [4]u32{ 0, 0, 0, 0 };
-        var cnt: u32 = 0;
-        var yy = y0;
-        while (yy < y1) : (yy += stepy) {
-            var xx = x0;
-            while (xx < x1) : (xx += stepx) {
-                const i = (yy * sw + xx) * 4;
-                const al: u32 = src[i + 3];
-                acc[0] += @as(u32, src[i]) * al;
-                acc[1] += @as(u32, src[i + 1]) * al;
-                acc[2] += @as(u32, src[i + 2]) * al;
-                acc[3] += al;
-                cnt += 1;
-            }
-        }
-        const o = ((y + oy) * ow + (x + ox)) * 4;
-        if (acc[3] > 0) {
-            out[o] = @intCast(acc[0] / acc[3]);
-            out[o + 1] = @intCast(acc[1] / acc[3]);
-            out[o + 2] = @intCast(acc[2] / acc[3]);
-        }
-        out[o + 3] = @intCast(acc[3] / @max(cnt, 1));
-    };
+    const tmp: [*]f32 = @ptrCast(@alignCast(std.c.malloc(sh * dw * 4 * @sizeOf(f32)) orelse {
+        std.c.free(out);
+        return null;
+    }));
+    defer std.c.free(tmp);
+    anim.ame_scale_rgba(src, @intCast(sw), @intCast(sh), out, @intCast(ow), @intCast((ow - dw) / 2), @intCast((oh - dh) / 2), @intCast(dw), @intCast(dh), sx0, sy0, scale, tmp);
     return out;
+}
+
+test "scaleRgba averages by area without colour bleeding" {
+    // 4×2 → 2×1: 左半分は赤(不透明)、右半分は左上だけ緑(不透明)で残りは透明な青
+    const px = [_]u8{
+        255, 0, 0, 255, 255, 0, 0, 255, 0, 255, 0,   255, 0, 0, 255, 0,
+        255, 0, 0, 255, 255, 0, 0, 255, 0, 0,   255, 0,   0, 0, 255, 0,
+    };
+    const out = scaleRgba(&px, 4, 2, 2, 1, false).?;
+    defer std.c.free(out);
+    try std.testing.expectEqualSlices(u8, &.{ 255, 0, 0, 255, 0, 255, 0, 64 }, out[0..8]);
 }

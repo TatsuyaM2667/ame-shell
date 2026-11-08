@@ -6,6 +6,7 @@ test {
     _ = @import("portal.zig");
     _ = @import("greeter.zig");
     _ = @import("png.zig");
+    _ = @import("icons.zig");
     _ = @import("lyrics.zig");
     _ = @import("ame_lib");
     _ = @import("chargeanim.zig");
