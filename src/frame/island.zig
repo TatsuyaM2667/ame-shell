@@ -1,6 +1,6 @@
 // ダイナミックアイランド: 枠の上の中央から生える小さな島。状況に合わせて、ばねで伸び縮みする。
 //   ふだん      … AI の目(ときどきまばたき・きょろきょろ。カーソルが近づくとそちらを見る)。押すと AI チャット
-//   再生中      … ジャケットと曲名。乗せると広がって、進み具合と 前 / 再生 / 次
+//   再生中      … ジャケットと曲名と目。乗せると広がって、進み具合と 前 / 再生 / 次
 //   通知        … 4 秒だけ広がって、アプリ名と要約(目は嬉しい形)。押すと通知センター
 //   AI の作業中 … 回るしるし(終わったら「終わりました」を少し出す)。押すと AI チャット
 //   録画中      … 赤い点と経過時間
@@ -217,7 +217,7 @@ pub fn size(f: *Frame) ?[2]f32 {
     if (f.dash.visible()) return null;
     return switch (kindOf(f)) {
         .idle => .{ 132, 42 },
-        .music => .{ 236, 34 },
+        .music => .{ 272, 38 },
         .busy => .{ 250, 34 },
         .recording => .{ 176, 34 },
         .peek => .{ 380, 66 },
@@ -303,8 +303,8 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
             const m = app.media;
             const a: f32 = 24;
             if (m.art_tex != 0) cv.image(m.art_tex, 10, (h - a) / 2, a, a, 6) else cv.rect(10, (h - a) / 2, a, a, 6, acc.alpha(0.4));
-            _ = cv.text(42, h / 2 + 5, 12.5, txt, m.title[0..m.title_len], .{ .max_w = w - 80 });
-            drawBars(cv, w - 30, h / 2, m.status == .playing, acc);
+            _ = cv.text(42, h / 2 + 5, 12.5, txt, m.title[0..m.title_len], .{ .max_w = w - 100 });
+            drawEyes(cv, w - 34, h / 2, 0.55, blink, false, acc);
         },
         .music_big => if (drawMusicBig(f, cv, w, h, acc, txt, sub)) {
             animating = true;
@@ -335,16 +335,6 @@ fn drawEyes(cv: *gfx.Canvas, cx: f32, cy: f32, k: f32, open: f32, happy: bool, a
         // ほんのり光る、縦長の白い目(coucou のような)
         cv.shadow(x - ew / 2, y - hh / 2, ew, hh, ew / 2, 8 * k, acc.lighten(0.4).alpha(0.35));
         cv.rect(x - ew / 2, y - hh / 2, ew, hh, ew / 2, col);
-    }
-}
-
-/// 再生中のしるし(3 本の棒。止まっている間は低いまま)
-fn drawBars(cv: *gfx.Canvas, x: f32, cy: f32, playing: bool, acc: Color) void {
-    // shortcut: 動かない棒(待機中に描き続けないため)。音に合わせて動かすなら、スペクトラムを島が開いている間だけ動かす
-    const hs = [_]f32{ 0.55, 1.0, 0.7 };
-    for (hs, 0..) |hh, i| {
-        const bh = if (playing) 12 * hh else 3;
-        cv.rect(x + @as(f32, @floatFromInt(i)) * 6, cy - bh / 2, 3.5, bh, 1.75, acc.lighten(0.35));
     }
 }
 
