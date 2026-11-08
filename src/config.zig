@@ -106,6 +106,8 @@ pub const Config = struct {
     music_corner: Corner = .bottom_right,
     /// 充電器をつないだときの全画面のアニメーション(chargeanim.zig)
     charge_anim: bool = true,
+    /// ダイナミックアイランド(枠の上の中央。frame/island.zig)
+    island: bool = true,
     /// AirPods の頭の動きで操作する(airpods.zig)
     airpods_enabled: bool = false,
     airpods_yaw: f32 = 25,
@@ -363,6 +365,8 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             if (num(val)) |n| cfg.frame_opacity = std.math.clamp(n, 0, 1) else ok = false;
         } else if (eq(u8, key, "charge-animation")) {
             cfg.charge_anim = boolean(val) orelse true;
+        } else if (eq(u8, key, "island")) {
+            cfg.island = boolean(val) orelse true;
         } else ok = false;
     } else if (eq(u8, sec, "hand")) {
         if (eq(u8, key, "enabled")) {

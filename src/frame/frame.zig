@@ -30,6 +30,7 @@ const dash = @import("dash.zig");
 const data = @import("data.zig");
 const netpanel = @import("netpanel.zig");
 const aipanel = @import("aipanel.zig");
+const island = @import("island.zig");
 const side = @import("side.zig");
 const vbar = @import("vbar.zig");
 
@@ -110,6 +111,8 @@ pub const Frame = struct {
     ai: Drawer = .{},
     /// 開いた直後: キーボードを受け取るまで排他で取る
     ai_grab: bool = false,
+    /// ダイナミックアイランド(上の中央。ダッシュボードを開いている間は引っ込む)
+    island: Drawer = .{},
 
     bar: vbar.Bar = .{},
     dashv: dash.View = .{},
@@ -467,7 +470,9 @@ pub const Frame = struct {
             // 開いている(開きかけを含む)間は、アニメーション途中の大きさではなく開き切った大きさで判定する。
             // でないと、開くより速くカーソルを下ろしたときに「外に出た」と判定されて閉じてしまう
             const reach = @max(T_, T_ + @max(d.h.x * d.t.x, if (d.open) d.h.target else 0)) + 1;
-            const inside = self.ptr_in and y < reach and x >= x0 - R_ and x <= x0 + w + R_;
+            // 島の上ではダッシュボードを開かない(島を押す・広げるため)
+            const on_island = !d.open and self.island.contains(x, y, 6);
+            const inside = self.ptr_in and y < reach and x >= x0 - R_ and x <= x0 + w + R_ and !on_island;
             if (inside and d.by_key) d.by_key = false;
             if (!d.by_key and inside != d.open and !(inside and loop.nowMs() < self.app.edge_quiet_until_ms)) {
                 if (inside) d.show(false) else d.hide();
@@ -623,6 +628,7 @@ pub const Frame = struct {
             self.afterOpenChange();
             return true;
         }
+        if (self.island.contains(x, y, 0)) return island.pointer(self, ev, x - self.island.ox, y - self.island.oy);
         _ = self.bar.pointer(self, .{ .kind = .leave, .x = 0, .y = 0 }, -1, -1);
         const D = struct { d: *Drawer, which: side.Which };
         const list = [_]D{
@@ -708,6 +714,10 @@ pub const Frame = struct {
         self.util.setSize(360, 206);
         self.side.setSize(400, self.side.h.x);
         self.ai.setSize(aipanel.W, self.ai.h.x);
+        if (island.size(self)) |isz| {
+            if (!self.island.open) self.island.show(false);
+            self.island.setSize(isz[0], isz[1]);
+        } else if (self.island.open) self.island.hide();
         const nsz = netpanel.size(self);
         self.net.setSize(nsz[0], nsz[1]);
         const psz = vbar.popSize(self, self.pop_kind);
@@ -717,7 +727,7 @@ pub const Frame = struct {
             self.updateTick();
         }
 
-        inline for (.{ &self.dash, &self.launch, &self.osd, &self.session, &self.side, &self.util, &self.notif, &self.pop, &self.net, &self.ai }) |d| {
+        inline for (.{ &self.dash, &self.launch, &self.osd, &self.session, &self.side, &self.util, &self.notif, &self.pop, &self.net, &self.ai, &self.island }) |d| {
             if (d.step(dt)) animating = true;
         }
         if (self.pop_cy.step(dt)) animating = true;
@@ -760,6 +770,17 @@ pub const Frame = struct {
             d.ox = x;
             d.oy = T_ + vh - d.h.x;
             sh.add(x, -R_, w, T_ + R_ + vh, R_, kf(K_, vh));
+        }
+        // ダイナミックアイランド(上・中央、ダッシュボードと同じ場所から小さく生える)
+        {
+            const d = &self.island;
+            const w = d.w.x;
+            const vh = d.h.x * @max(d.t.x, 0);
+            const x = BW_ + (W - BW_ - T_) / 2 - w / 2;
+            d.vis = .{ x, T_, w, vh };
+            d.ox = x;
+            d.oy = T_ + vh - d.h.x;
+            if (vh > 0.5) sh.add(x, -R_, w, T_ + R_ + vh, R_, kf(K_, vh));
         }
         // ランチャー(下・中央)
         {
@@ -884,6 +905,14 @@ pub const Frame = struct {
             cv.restore();
             cv.setClip(0, 0, 0, 0);
         } else if (self.spectrum.running()) self.spectrum.stop();
+        if (self.island.visible() and self.island.vis[3] > 1) {
+            cv.save();
+            cv.setClip(self.island.vis[0], self.island.vis[1], self.island.vis[2], self.island.vis[3]);
+            cv.translate(self.island.ox, self.island.oy);
+            if (island.draw(self, cv, self.island.w.x, self.island.h.x)) animating = true;
+            cv.restore();
+            cv.setClip(0, 0, 0, 0);
+        }
         if (self.launch.visible() and self.launch.vis[3] > 1) {
             cv.save();
             cv.setClip(self.launch.vis[0], self.launch.vis[1], self.launch.vis[2], self.launch.vis[3]);
@@ -928,7 +957,7 @@ pub const Frame = struct {
         n += 1;
         rects[n] = .{ 0, H - T_, W, T_ };
         n += 1;
-        inline for (.{ &self.dash, &self.launch, &self.notif, &self.util, &self.side, &self.session, &self.osd, &self.pop, &self.net, &self.ai }) |d| {
+        inline for (.{ &self.dash, &self.launch, &self.notif, &self.util, &self.side, &self.session, &self.osd, &self.pop, &self.net, &self.ai, &self.island }) |d| {
             if (d.visible() and n < rects.len) {
                 rects[n] = d.vis;
                 n += 1;

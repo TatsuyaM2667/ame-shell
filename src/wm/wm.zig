@@ -1674,6 +1674,7 @@ fn sPtrPos(data: ?*anyopaque, _: ?*c.struct_river_seat_v1, x: i32, y: i32) callc
     s.ptr_x = x;
     s.ptr_y = y;
     s.ptr_moved = true;
+    @import("../frame/island.zig").pointerMoved(s.wm.app, s.wm.outputs.items, x, y);
 }
 fn sTouchDelta(_: ?*anyopaque, _: ?*c.struct_river_seat_v1, _: i32, _: i32, _: i32) callconv(.C) void {}
 fn sTouchRel(_: ?*anyopaque, _: ?*c.struct_river_seat_v1, _: i32) callconv(.C) void {}

@@ -330,6 +330,7 @@ pub const Notifs = struct {
             self.app.dashboard.dataChanged();
             return n.id;
         }
+        @import("frame/island.zig").peekNotif(self.app, app_name, summary);
         self.layout();
         self.ensureSurface();
         self.armTimer();
