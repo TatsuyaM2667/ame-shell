@@ -19,6 +19,7 @@ const Output = appmod.Output;
 const surface = @import("../core/surface.zig");
 const Surface = surface.Surface;
 const loop = @import("../platform/loop.zig");
+const icons = @import("../gfx/icons.zig");
 
 /// libdbus の DBusError(ビットフィールドを含むため translate-c では不透明型になる)と同じレイアウト。
 const DBusError = extern struct { name: ?[*:0]const u8 = null, message: ?[*:0]const u8 = null, dummy: c_uint = 0, padding1: ?*anyopaque = null };
@@ -37,6 +38,9 @@ pub const Notif = struct {
     sum_len: usize = 0,
     body: [512]u8 = undefined,
     body_len: usize = 0,
+    // desktop-entry のヒント(どのアプリか。アイコンと、押したときに移る窓を探すのに使う)
+    entry: [96]u8 = undefined,
+    entry_len: usize = 0,
     has_default_action: bool = false,
     urgency: u8 = 1,
     expire_at: u64 = 0, // 0 = 自動では消えない
@@ -55,6 +59,9 @@ pub const Notif = struct {
     }
     pub fn bodyText(self: *const Notif) []const u8 {
         return self.body[0..self.body_len];
+    }
+    pub fn entryName(self: *const Notif) []const u8 {
+        return self.entry[0..self.entry_len];
     }
 };
 
@@ -82,6 +89,89 @@ fn copyTo(dst: []u8, len: *usize, src: []const u8) void {
     len.* = o;
 }
 
+/// 通知の画像の大きさ(表示は最大 44px なので、高解像度の画面でも足りる)
+const ICON_PX = 96;
+
+const Image = struct { id: u32, px: ?[*]u8 = null, tex: c.GLuint = 0, content: bool };
+const Loaded = struct { id: u32, px: [*]u8, content: bool };
+
+/// 通知といっしょに届いたもの(desktop-entry と画像)
+const Extra = struct {
+    entry: []const u8 = "",
+    /// ファイルのパス・file:// の URL・アイコン名(スレッドで読む)
+    image: []const u8 = "",
+    /// image-data(すでに ICON_PX 四方の RGBA にしたもの。持ち主は postFull)
+    px: ?[*]u8 = null,
+    /// 送り主の画像(Discord の相手のアイコンなど)。false ならアプリのアイコン
+    content: bool = false,
+};
+
+/// "file:///a/b.png" → "/a/b.png"、"/a/b.png" はそのまま。ファイルでなければ null(アイコン名)
+fn filePath(s: []const u8) ?[]const u8 {
+    if (std.mem.startsWith(u8, s, "file://")) return s[7..];
+    if (s.len > 0 and s[0] == '/') return s;
+    return null;
+}
+
+fn isFile(s: []const u8) bool {
+    return filePath(s) != null;
+}
+
+/// image-data のヒント((iiibiiay): 幅・高さ・1 行のバイト数・アルファの有無・ビット数・チャンネル数・画素)を
+/// ICON_PX 四方の RGBA にする。送り主の値は信用せず、大きさを確かめてから読む
+fn readImageData(v: *c.DBusMessageIter) ?[*]u8 {
+    if (c.dbus_message_iter_get_arg_type(v) != c.DBUS_TYPE_STRUCT) return null;
+    var st: c.DBusMessageIter = undefined;
+    c.dbus_message_iter_recurse(v, &st);
+    var vals: [6]i32 = undefined;
+    for (&vals, 0..) |*x, k| {
+        const want: c_int = if (k == 3) c.DBUS_TYPE_BOOLEAN else c.DBUS_TYPE_INT32;
+        if (c.dbus_message_iter_get_arg_type(&st) != want) return null;
+        var u: u32 = 0;
+        c.dbus_message_iter_get_basic(&st, &u);
+        x.* = @bitCast(u);
+        _ = c.dbus_message_iter_next(&st);
+    }
+    if (c.dbus_message_iter_get_arg_type(&st) != c.DBUS_TYPE_ARRAY) return null;
+    var arr: c.DBusMessageIter = undefined;
+    c.dbus_message_iter_recurse(&st, &arr);
+    var data: [*c]const u8 = null;
+    var n: c_int = 0;
+    c.dbus_message_iter_get_fixed_array(&arr, @ptrCast(&data), &n);
+    return icons.rawToRgba(vals, if (data) |d| d[0..@intCast(@max(n, 0))] else &.{}, ICON_PX);
+}
+
+/// 通知のアイコンを描く。送り主の画像(Discord なら相手のアイコン)があれば丸く大きく、右下に小さくアプリのアイコン。
+/// 無ければアプリのアイコン(ランチャーの索引から)。どちらも無ければ false
+pub fn drawIcon(app: *App, n: *const Notif, cv: *gfx.Canvas, x: f32, y: f32, size: f32) bool {
+    const app_tex = appIconTex(app, n);
+    if (app.notifs.image(n.id)) |im| {
+        if (!im.content and app_tex != 0) {
+            cv.image(app_tex, x, y, size, size, size * 0.24);
+            return true;
+        }
+        cv.image(im.tex, x, y, size, size, if (im.content) size / 2 else size * 0.24);
+        if (im.content and app_tex != 0) {
+            const b = size * 0.44;
+            const bx = x + size - b * 0.8;
+            const by = y + size - b * 0.8;
+            cv.rect(bx - 2, by - 2, b + 4, b + 4, b * 0.3 + 2, Color.hex(0x10141c).alpha(0.9));
+            cv.image(app_tex, bx, by, b, b, b * 0.3);
+        }
+        return true;
+    }
+    if (app_tex != 0) {
+        cv.image(app_tex, x, y, size, size, size * 0.24);
+        return true;
+    }
+    return false;
+}
+
+fn appIconTex(app: *App, n: *const Notif) c.GLuint {
+    const e = app.launcher.findApp(n.entryName()) orelse app.launcher.findApp(n.appName()) orelse return 0;
+    return app.launcher.entryIcon(e);
+}
+
 pub const Notifs = struct {
     app: *App,
     conn: ?*c.DBusConnection = null,
@@ -95,6 +185,12 @@ pub const Notifs = struct {
     timer: loop.Timer,
     hover_idx: ?usize = null,
     unread: u32 = 0,
+    /// 通知の画像(送り主のアイコンなど。通知の id ごと)。履歴から消えたら捨てる
+    images: std.ArrayListUnmanaged(Image) = .{},
+    /// ファイル・アイコン名の画像を読むスレッドの結果
+    loaded_mutex: std.Thread.Mutex = .{},
+    loaded: std.ArrayListUnmanaged(Loaded) = .{},
+    loaded_pipe: [2]c_int = .{ -1, -1 },
 
     pub fn create(app: *App) !*Notifs {
         const self = try app.alloc.create(Notifs);
@@ -105,6 +201,7 @@ pub const Notifs = struct {
             .timer = try loop.Timer.init(),
         };
         try app.loop.add(self.timer.fd, c.EPOLLIN, self, onTimer);
+        if (c.pipe2(&self.loaded_pipe, c.O_CLOEXEC | c.O_NONBLOCK) == 0) try app.loop.add(self.loaded_pipe[0], c.EPOLLIN, self, onLoaded);
         self.connect();
         return self;
     }
@@ -173,7 +270,7 @@ pub const Notifs = struct {
             var arr: c.DBusMessageIter = undefined;
             c.dbus_message_iter_init_append(reply, &it);
             _ = c.dbus_message_iter_open_container(&it, c.DBUS_TYPE_ARRAY, "s", &arr);
-            for ([_][*c]const u8{ "body", "actions", "persistence" }) |cap| {
+            for ([_][*c]const u8{ "body", "actions", "persistence", "icon-static" }) |cap| {
                 var p = cap;
                 _ = c.dbus_message_iter_append_basic(&arr, c.DBUS_TYPE_STRING, @ptrCast(&p));
             }
@@ -217,6 +314,8 @@ pub const Notifs = struct {
         var expire: i32 = -1;
         var has_default = false;
         var urgency: u8 = 1;
+        var app_icon: [*c]const u8 = "";
+        var ex = Extra{};
         var idx: usize = 0;
         while (true) : (idx += 1) {
             const t = c.dbus_message_iter_get_arg_type(&it);
@@ -224,6 +323,7 @@ pub const Notifs = struct {
             switch (idx) {
                 0 => if (t == c.DBUS_TYPE_STRING) c.dbus_message_iter_get_basic(&it, @ptrCast(&app_name)),
                 1 => if (t == c.DBUS_TYPE_UINT32) c.dbus_message_iter_get_basic(&it, &replaces),
+                2 => if (t == c.DBUS_TYPE_STRING) c.dbus_message_iter_get_basic(&it, @ptrCast(&app_icon)),
                 3 => if (t == c.DBUS_TYPE_STRING) c.dbus_message_iter_get_basic(&it, @ptrCast(&summary)),
                 4 => if (t == c.DBUS_TYPE_STRING) c.dbus_message_iter_get_basic(&it, @ptrCast(&body)),
                 5 => if (t == c.DBUS_TYPE_ARRAY) {
@@ -239,7 +339,7 @@ pub const Notifs = struct {
                     }
                 },
                 6 => if (t == c.DBUS_TYPE_ARRAY) {
-                    // hints: a{sv} から urgency(byte) だけ読む
+                    // hints: a{sv} から urgency・desktop-entry・画像(image-data / image-path)を読む
                     var sub: c.DBusMessageIter = undefined;
                     c.dbus_message_iter_recurse(&it, &sub);
                     while (c.dbus_message_iter_get_arg_type(&sub) == c.DBUS_TYPE_DICT_ENTRY) {
@@ -247,11 +347,20 @@ pub const Notifs = struct {
                         c.dbus_message_iter_recurse(&sub, &entry);
                         var key: [*c]const u8 = null;
                         c.dbus_message_iter_get_basic(&entry, @ptrCast(&key));
-                        if (std.mem.eql(u8, std.mem.sliceTo(key, 0), "urgency")) {
-                            _ = c.dbus_message_iter_next(&entry);
-                            var variant: c.DBusMessageIter = undefined;
-                            c.dbus_message_iter_recurse(&entry, &variant);
-                            if (c.dbus_message_iter_get_arg_type(&variant) == c.DBUS_TYPE_BYTE) c.dbus_message_iter_get_basic(&variant, &urgency);
+                        const k = std.mem.sliceTo(key, 0);
+                        _ = c.dbus_message_iter_next(&entry);
+                        var variant: c.DBusMessageIter = undefined;
+                        c.dbus_message_iter_recurse(&entry, &variant);
+                        const vt = c.dbus_message_iter_get_arg_type(&variant);
+                        const eq = std.mem.eql;
+                        if (eq(u8, k, "urgency")) {
+                            if (vt == c.DBUS_TYPE_BYTE) c.dbus_message_iter_get_basic(&variant, &urgency);
+                        } else if (vt == c.DBUS_TYPE_STRING and (eq(u8, k, "desktop-entry") or eq(u8, k, "image-path") or eq(u8, k, "image_path"))) {
+                            var s: [*c]const u8 = null;
+                            c.dbus_message_iter_get_basic(&variant, @ptrCast(&s));
+                            if (k[0] == 'd') ex.entry = std.mem.sliceTo(s, 0) else ex.image = std.mem.sliceTo(s, 0);
+                        } else if (ex.px == null and (eq(u8, k, "image-data") or eq(u8, k, "image_data") or eq(u8, k, "icon_data"))) {
+                            ex.px = readImageData(&variant);
                         }
                         _ = c.dbus_message_iter_next(&sub);
                     }
@@ -263,21 +372,27 @@ pub const Notifs = struct {
         }
         var timeout: u32 = self.app.cfg.notify_timeout_ms;
         if (expire > 0) timeout = @intCast(expire) else if (expire == 0 or urgency == 2) timeout = 0;
-        return self.postFull(std.mem.sliceTo(app_name, 0), std.mem.sliceTo(summary, 0), std.mem.sliceTo(body, 0), replaces, timeout, urgency, has_default);
+        // 画像: image-data → image-path → app_icon。app_icon がファイルなら送り主の画像(Electron のアプリなど)、
+        // アイコン名ならアプリのアイコンとして使う
+        const ai = std.mem.sliceTo(app_icon, 0);
+        if (ex.image.len == 0 and ex.px == null) ex.image = ai;
+        ex.content = ex.px != null or isFile(ex.image);
+        return self.postFull(std.mem.sliceTo(app_name, 0), std.mem.sliceTo(summary, 0), std.mem.sliceTo(body, 0), replaces, timeout, urgency, has_default, ex);
     }
 
     /// ローカルから通知を出す(ame-ctl notify、ロック不可の警告など)
     /// ame-shell 自身の通知(緊急度つき)。urgency 2 は消すまで残り、通知停止中でも出る。返り値の ID で置き換え・消去できる
     pub fn postUrgency(self: *Notifs, app_name: []const u8, summary: []const u8, body: []const u8, replaces: u32, urgency: u8) u32 {
-        return self.postFull(app_name, summary, body, replaces, if (urgency == 2) 0 else self.app.cfg.notify_timeout_ms, urgency, false);
+        return self.postFull(app_name, summary, body, replaces, if (urgency == 2) 0 else self.app.cfg.notify_timeout_ms, urgency, false, .{});
     }
 
     pub fn post(self: *Notifs, app_name: []const u8, summary: []const u8, body: []const u8, replaces: u32) void {
-        _ = self.postFull(app_name, summary, body, replaces, self.app.cfg.notify_timeout_ms, 1, false);
+        _ = self.postFull(app_name, summary, body, replaces, self.app.cfg.notify_timeout_ms, 1, false, .{});
     }
 
-    fn postFull(self: *Notifs, app_name: []const u8, summary: []const u8, body: []const u8, replaces: u32, timeout: u32, urgency: u8, has_default: bool) u32 {
+    fn postFull(self: *Notifs, app_name: []const u8, summary: []const u8, body: []const u8, replaces: u32, timeout: u32, urgency: u8, has_default: bool, ex: Extra) u32 {
         var n = Notif{ .id = 0, .urgency = urgency, .has_default_action = has_default };
+        copyTo(&n.entry, &n.entry_len, ex.entry);
         // 緊急の通知(電池切れ間近など)は枠の縁を赤く光らせる
         if (urgency == 2) theme.flashError(self.app);
         copyTo(&n.app_name, &n.app_len, app_name);
@@ -294,6 +409,7 @@ pub const Notifs = struct {
                 n.slide = a.slide;
                 n.ypos = a.ypos;
                 a.* = n;
+                self.attachImage(replaces, ex);
                 self.armTimer();
                 if (self.surf) |s| s.schedule();
                 return replaces;
@@ -302,6 +418,7 @@ pub const Notifs = struct {
         n.id = self.next_id;
         self.next_id +%= 1;
         if (self.next_id == 0) self.next_id = 1;
+        self.attachImage(n.id, ex);
         n.slide.snap(1);
         n.slide.set(0);
         n.ypos.snap(-20); // 少し上から落ちてくる
@@ -320,7 +437,7 @@ pub const Notifs = struct {
         self.active.insert(0, n) catch return 0;
         // 履歴(通知センター用)
         self.history.insert(0, n) catch {};
-        if (self.history.items.len > HISTORY) _ = self.history.pop();
+        if (self.history.items.len > HISTORY) self.dropImage(self.history.pop().id);
         // ロック中ならロック画面のカードを出す
         self.app.lock.notified(n.id);
         self.unread += 1;
@@ -336,6 +453,90 @@ pub const Notifs = struct {
         self.armTimer();
         self.app.dashboard.dataChanged();
         return n.id;
+    }
+
+    // ---------------------------------------------------------------------
+    // 通知の画像(送り主のアイコンなど)
+    // ---------------------------------------------------------------------
+
+    /// 届いた画像を通知 id に付ける。何も無ければ前のまま(置き換えの通知は画像を送り直さないことがある)
+    fn attachImage(self: *Notifs, id: u32, ex: Extra) void {
+        if (ex.px) |px| return self.setImage(id, px, ex.content);
+        if (ex.image.len == 0) return;
+        // ファイルの読み込み・アイコンの索引作りは重いので別のスレッドで(終わったら pipe で知らせる)
+        const spec = std.heap.c_allocator.dupe(u8, ex.image) catch return;
+        const th = std.Thread.spawn(.{}, loadThread, .{ self, id, spec, ex.content }) catch {
+            std.heap.c_allocator.free(spec);
+            return;
+        };
+        th.detach();
+    }
+
+    fn loadThread(self: *Notifs, id: u32, spec: []u8, content: bool) void {
+        defer std.heap.c_allocator.free(spec);
+        var px: ?[*]u8 = null;
+        if (filePath(spec)) |p| {
+            var zb: [1024]u8 = undefined;
+            if (std.fmt.bufPrintZ(&zb, "{s}", .{p})) |z| px = icons.decode(z, ICON_PX, ICON_PX, true) else |_| {}
+        } else px = icons.load(spec, ICON_PX);
+        const got = px orelse return;
+        self.loaded_mutex.lock();
+        self.loaded.append(std.heap.c_allocator, .{ .id = id, .px = got, .content = content }) catch std.c.free(got);
+        self.loaded_mutex.unlock();
+        _ = c.write(self.loaded_pipe[1], "i", 1);
+    }
+
+    fn onLoaded(ctx: *anyopaque, fd: c_int, _: u32) void {
+        const self: *Notifs = @ptrCast(@alignCast(ctx));
+        var drain: [64]u8 = undefined;
+        while (c.read(fd, &drain, drain.len) > 0) {}
+        self.loaded_mutex.lock();
+        const items = self.loaded.toOwnedSlice(std.heap.c_allocator) catch &.{};
+        self.loaded_mutex.unlock();
+        defer std.heap.c_allocator.free(items);
+        for (items) |l| {
+            // 読んでいる間に履歴から消えた通知の分は捨てる
+            const alive = for (self.history.items) |h| {
+                if (h.id == l.id) break true;
+            } else false;
+            if (alive) self.setImage(l.id, l.px, l.content) else std.c.free(l.px);
+        }
+        if (self.surf) |s| s.schedule();
+        self.app.dashboard.dataChanged();
+        if (self.app.lock.locked) self.app.lock.scheduleAll();
+    }
+
+    fn setImage(self: *Notifs, id: u32, px: [*]u8, content: bool) void {
+        self.dropImage(id);
+        self.images.append(self.app.alloc, .{ .id = id, .px = px, .content = content }) catch std.c.free(px);
+    }
+
+    fn dropImage(self: *Notifs, id: u32) void {
+        for (self.images.items, 0..) |*im, i| if (im.id == id) {
+            if (im.px) |p| std.c.free(p);
+            if (im.tex != 0) c.glDeleteTextures(1, &im.tex);
+            _ = self.images.swapRemove(i);
+            return;
+        };
+    }
+
+    /// 通知の画像のテクスチャ(初めて描くときに作る)。無ければ null
+    fn image(self: *Notifs, id: u32) ?*Image {
+        for (self.images.items) |*im| if (im.id == id) {
+            if (im.tex == 0) if (im.px) |p| {
+                im.tex = gfx.uploadImage(p, ICON_PX, ICON_PX);
+                std.c.free(p);
+                im.px = null;
+            };
+            return if (im.tex != 0) im else null;
+        };
+        return null;
+    }
+
+    /// 通知を開く: アプリに「押された」を伝え(default の操作)、そのアプリの窓があるワークスペースへ移る
+    pub fn open(self: *Notifs, n: *const Notif) void {
+        if (n.has_default_action) self.emitAction(n.id, "default");
+        _ = self.app.focusApp(&.{ n.entryName(), n.appName() });
     }
 
     fn layout(self: *Notifs) void {
@@ -361,6 +562,7 @@ pub const Notifs = struct {
 
     pub fn clearAll(self: *Notifs) void {
         for (self.active.items) |a| if (!a.leaving) self.dismiss(a.id, 2);
+        for (self.history.items) |h| self.dropImage(h.id);
         self.history.clearRetainingCapacity();
         self.unread = 0;
         self.app.dashboard.dataChanged();
@@ -531,11 +733,13 @@ pub const Notifs = struct {
             // 左端のアクセントの帯
             cv.rectGrad(x0 + 10, y + 14, 3, h - 28, 1.5, col.lighten(0.3), col);
             if (hv > 0) cv.rectBorder(x0, y, CARD_W, h, 18, .{ .a = 0 }, col.alpha(0.6), 1.2);
-            _ = cv.text(x0 + 26, y + 26, 12.5, col, a.appName(), .{ .bold = true, .max_w = CARD_W - 120 });
+            // アイコン(送り主の画像 + アプリのアイコン)があれば左に置き、文字は右へずらす
+            const tx: f32 = if (drawIcon(app, a, cv, x0 + 24, y + 18, 40)) 76 else 26;
+            _ = cv.text(x0 + tx, y + 26, 12.5, col, a.appName(), .{ .bold = true, .max_w = CARD_W - tx - 94 });
             _ = cv.text(x0 + CARD_W - 18, y + 26, 12, sub, a.time_str[0..5], .{ .alignment = .right });
-            _ = cv.text(x0 + 26, y + 50, 16, txt, a.summaryText(), .{ .bold = true, .max_w = CARD_W - 50 });
+            _ = cv.text(x0 + tx, y + 50, 16, txt, a.summaryText(), .{ .bold = true, .max_w = CARD_W - tx - 24 });
             if (a.body_len > 0) {
-                cv.textWrap(x0 + 26, y + 73, 13.5, sub, a.bodyText(), CARD_W - 50, 2, 19);
+                cv.textWrap(x0 + tx, y + 73, 13.5, sub, a.bodyText(), CARD_W - tx - 24, 2, 19);
             }
             cv.restore();
             max_y = @max(max_y, y + h + 6);
@@ -566,7 +770,8 @@ pub const Notifs = struct {
         if (ev.kind == .press) {
             const i = h orelse return;
             const a = self.active.items[i];
-            if (ev.button == 0x110 and a.has_default_action) self.emitAction(a.id, "default");
+            // 左クリック: そのアプリの窓へ移る(右クリックは閉じるだけ)
+            if (ev.button == 0x110) self.open(&a);
             self.dismiss(a.id, 2);
         }
     }

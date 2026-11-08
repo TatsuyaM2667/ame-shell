@@ -94,6 +94,8 @@ pub const Lock = struct {
     expand: Spring = Spring.init(0, 0.4, 0.85),
     ring: Spring = Spring.init(0, 0.4, 0.85),
     notif_expanded: bool = false,
+    /// 広げた通知を押した: 解除したらその通知を開く(アプリの窓のワークスペースへ)。0 = 無し
+    open_after: u32 = 0,
     cards: [6]lockui.Card = [_]lockui.Card{.{}} ** 6,
     /// 広げた「再生中」(ジャケットを押すと、真ん中に大きなジャケットと、その色の背景。iPhone / iPad のロック画面のように)
     /// 充電器をつないだときのアニメーション(chargeanim.zig)の経過秒(-1 = 出していない)。ロック中はロック画面の上に描く
@@ -266,6 +268,7 @@ pub const Lock = struct {
         self.auth.snap(0);
         self.auth_mode = false;
         self.notif_expanded = false;
+        self.open_after = 0;
         // 曲のカードに出す音量を今の値にしておく
         self.app.sys.volume = @import("../platform/sys.zig").volume();
         self.expand.snap(0);
@@ -336,6 +339,12 @@ pub const Lock = struct {
         self.session = null;
         self.locked = false;
         if (self.app.musicw) |m| m.update();
+        // 押しておいた通知を開く
+        if (unlock and self.open_after != 0) for (self.app.notifs.history.items) |*n| if (n.id == self.open_after) {
+            self.app.notifs.open(n);
+            break;
+        };
+        self.open_after = 0;
         @memset(&self.pw, 0); // パスワードはメモリに残さない
         self.pw_len = 0;
         _ = c.wl_display_flush(self.app.display);
@@ -697,7 +706,15 @@ pub const Lock = struct {
         }
         if (!self.auth_mode) {
             switch (self.hits.which(ev.x, ev.y)) {
-                .stack => self.notif_expanded = !self.notif_expanded,
+                .stack => {
+                    // 広げているときに押した通知は、解除したあとに開く(iPhone と同じ)
+                    const i = if (self.notif_expanded) self.hits.cardAt(ev.y) else null;
+                    if (i) |k| if (k < self.app.notifs.history.items.len) {
+                        self.open_after = self.app.notifs.history.items[k].id;
+                        self.setAuth(true);
+                    };
+                    if (i == null) self.notif_expanded = !self.notif_expanded;
+                },
                 .uprev, .unext, .session, .reboot, .poweroff => {},
                 .none => self.setAuth(true),
             }

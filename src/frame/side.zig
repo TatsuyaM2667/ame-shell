@@ -13,6 +13,7 @@ const sys = @import("../platform/sys.zig");
 const netdbus = @import("../platform/netdbus.zig");
 const data = @import("data.zig");
 const vbar = @import("vbar.zig");
+const notify = @import("../desktop/notify.zig");
 const Frame = @import("frame.zig").Frame;
 
 pub const Which = enum { dashboard, launcher, notifs, utilities, sidebar, session, osd, popout, net, ai };
@@ -93,10 +94,11 @@ fn drawNotifs(f: *Frame, cv: *gfx.Canvas, w: f32) bool {
         const cw = w - 20;
         cv.rect(x, y, cw, n.height, 14, Color.hex(0xffffff).alpha(0.05 + 0.04 * hv));
         cv.rectGrad(x + 8, y + 12, 3, n.height - 24, 1.5, col.lighten(0.3), col);
-        _ = cv.text(x + 20, y + 24, 12, col, n.appName(), .{ .bold = true, .max_w = cw - 100 });
+        const tx: f32 = if (notify.drawIcon(app, n, cv, x + 18, y + 16, 38)) 66 else 20;
+        _ = cv.text(x + tx, y + 24, 12, col, n.appName(), .{ .bold = true, .max_w = cw - tx - 80 });
         _ = cv.text(x + cw - 12, y + 24, 11.5, sub, n.time_str[0..5], .{ .alignment = .right });
-        _ = cv.text(x + 20, y + 47, 15, txt, n.summaryText(), .{ .bold = true, .max_w = cw - 34 });
-        if (n.body_len > 0) cv.textWrap(x + 20, y + 69, 13, sub, n.bodyText(), cw - 34, 2, 18);
+        _ = cv.text(x + tx, y + 47, 15, txt, n.summaryText(), .{ .bold = true, .max_w = cw - tx - 14 });
+        if (n.body_len > 0) cv.textWrap(x + tx, y + 69, 13, sub, n.bodyText(), cw - tx - 14, 2, 18);
         cv.restore();
     }
     return false;
@@ -251,14 +253,16 @@ fn drawSidebar(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
         _ = cv.text(w / 2, h / 2 + 24, 14, sub, "通知はありません", .{ .alignment = .center });
         return false;
     }
-    for (hist) |n| {
+    for (hist, 0..) |*n, i| {
         if (y > h) break;
         if (y + 70 > 50) {
-            cv.rect(12, y, w - 24, 66, 14, Color.hex(0xffffff).alpha(0.05));
-            _ = cv.text(26, y + 21, 11.5, acc, n.appName(), .{ .bold = true, .max_w = w - 110 });
+            const hv: f32 = if (f.sidev.hover == 200 + @as(i32, @intCast(i))) 1 else 0;
+            cv.rect(12, y, w - 24, 66, 14, Color.hex(0xffffff).alpha(0.05 + 0.05 * hv));
+            const tx: f32 = if (notify.drawIcon(app, n, cv, 22, y + 15, 36)) 68 else 26;
+            _ = cv.text(tx, y + 21, 11.5, acc, n.appName(), .{ .bold = true, .max_w = w - tx - 84 });
             _ = cv.text(w - 26, y + 21, 11, sub, n.time_str[0..5], .{ .alignment = .right });
-            _ = cv.text(26, y + 41, 14, txt, n.summaryText(), .{ .bold = true, .max_w = w - 52 });
-            _ = cv.text(26, y + 58, 12, sub, n.bodyText(), .{ .max_w = w - 52 });
+            _ = cv.text(tx, y + 41, 14, txt, n.summaryText(), .{ .bold = true, .max_w = w - tx - 26 });
+            _ = cv.text(tx, y + 58, 12, sub, n.bodyText(), .{ .max_w = w - tx - 26 });
         }
         y += 74;
     }
@@ -412,6 +416,14 @@ pub fn pointer(f: *Frame, which: Which, ev: surface.PointerEvent, lx: f32, ly: f
             const w = f.side.w.x;
             if (ly >= 14 and ly < 42 and lx >= w - 112 and lx < w - 16) hov = 100;
             if (ly >= 14 and ly < 42 and lx >= w - 160 and lx < w - 120) hov = 101;
+            // 通知の行(58 から 74 ずつ、高さ 66)
+            if (ly >= 50) {
+                const ry = ly - 58 + st.scroll;
+                if (ry >= 0) {
+                    const k: i32 = @intFromFloat(ry / 74);
+                    if (ry - @as(f32, @floatFromInt(k)) * 74 < 66 and k < app.notifs.history.items.len) hov = 200 + k;
+                }
+            }
         },
         .osd => {
             const n: f32 = if (app.sys.brightness != null) 2 else 1;
@@ -427,6 +439,7 @@ pub fn pointer(f: *Frame, which: Which, ev: surface.PointerEvent, lx: f32, ly: f
         .press => switch (which) {
             .notifs => if (hov >= 0) {
                 const n = app.notifs.active.items[@intCast(hov)];
+                if (ev.button == 0x110) app.notifs.open(&n);
                 app.notifs.dismiss(n.id, 2);
             },
             .utilities => if (hov >= 0) utilPress(f, @intCast(hov)),
@@ -434,6 +447,11 @@ pub fn pointer(f: *Frame, which: Which, ev: surface.PointerEvent, lx: f32, ly: f
             .sidebar => {
                 if (hov == 100) app.notifs.clearAll();
                 if (hov == 101) app.dashboard.dnd = !app.dashboard.dnd;
+                if (hov >= 200) {
+                    const n = app.notifs.history.items[@intCast(hov - 200)];
+                    f.toggleSidebar();
+                    app.notifs.open(&n);
+                }
             },
             .osd => if (hov >= 0) {
                 st.osd_drag = hov;

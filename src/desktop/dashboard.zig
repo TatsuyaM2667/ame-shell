@@ -21,6 +21,7 @@ const netdbus = @import("../platform/netdbus.zig");
 const wasm = @import("../widget/wasm.zig");
 const abi = @import("../widget/widget_abi.zig");
 const bar = @import("bar.zig");
+const notify = @import("notify.zig");
 
 const PANEL_W: f32 = 420;
 const SW: u32 = 460;
@@ -443,12 +444,13 @@ pub const Dashboard = struct {
             _ = cv.text(px + PANEL_W / 2, y + 26, 13, sub, "新しい通知はありません", .{ .alignment = .center });
             y += 50;
         }
-        for (hist) |n| {
+        for (hist) |*n| {
             cv.rect(px + PAD, y, inner_w, 62, 14, Color.hex(0xffffff).alpha(0.05));
-            _ = cv.text(px + PAD + 12, y + 20, 11.5, acc, n.appName(), .{ .bold = true, .max_w = inner_w - 80 });
+            const tx: f32 = if (notify.drawIcon(app, n, cv, px + PAD + 11, y + 13, 36)) 56 else 12;
+            _ = cv.text(px + PAD + tx, y + 20, 11.5, acc, n.appName(), .{ .bold = true, .max_w = inner_w - tx - 68 });
             _ = cv.text(px + PANEL_W - PAD - 12, y + 20, 11, sub, n.time_str[0..5], .{ .alignment = .right });
-            _ = cv.text(px + PAD + 12, y + 39, 14, txt, n.summaryText(), .{ .bold = true, .max_w = inner_w - 24 });
-            _ = cv.text(px + PAD + 12, y + 56, 12, sub, n.bodyText(), .{ .max_w = inner_w - 24 });
+            _ = cv.text(px + PAD + tx, y + 39, 14, txt, n.summaryText(), .{ .bold = true, .max_w = inner_w - tx - 12 });
+            _ = cv.text(px + PAD + tx, y + 56, 12, sub, n.bodyText(), .{ .max_w = inner_w - tx - 12 });
             y += 70;
         }
         self.content_h = y + self.scroll.x - py;
@@ -553,6 +555,20 @@ pub const Dashboard = struct {
         if (ev.kind == .press and ch) {
             self.app.notifs.clearAll();
             redraw = true;
+        }
+        // 通知の行を押す: そのアプリの窓へ(行は notif_y + 34 から 70 ずつ、高さ 62)
+        if (ev.kind == .press and !ch and ci == null and ev.button == 0x110 and ev.x >= px and ev.x <= px + PANEL_W) {
+            const ry = ev.y - (self.notif_y + 34);
+            const hist = self.app.notifs.history.items;
+            if (ry >= 0) {
+                const k: usize = @intFromFloat(ry / 70);
+                if (k < hist.len and ry - @as(f32, @floatFromInt(k)) * 70 < 62) {
+                    const n = hist[k];
+                    self.close();
+                    self.app.notifs.open(&n);
+                    return;
+                }
+            }
         }
         if (ev.kind == .press and (ev.x < px or ev.x > px + PANEL_W)) self.close();
         if (redraw) s.schedule();

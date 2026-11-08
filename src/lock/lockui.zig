@@ -21,6 +21,7 @@ const Lock = lockmod.Lock;
 const App = @import("../core/app.zig").App;
 const Surface = @import("../core/surface.zig").Surface;
 const musiccard = @import("../media/musiccard.zig");
+const notify = @import("../desktop/notify.zig");
 
 const white = Color.hex(0xffffff);
 const black = Color.hex(0x000000);
@@ -52,6 +53,8 @@ fn inRect(r: [4]f32, x: f32, y: f32) bool {
 /// クリックできる場所(描くたびに作り直す。座標は surface の論理 px)
 pub const Hits = struct {
     stack: [4]f32 = .{ 0, 0, 0, 0 },
+    /// 広げた通知の並び(上端・1 枚の高さ・間隔・枚数)。広げていなければ枚数 0
+    cards: struct { top: f32 = 0, h: f32 = 0, pitch: f32 = 0, n: usize = 0 } = .{},
     // ログイン画面だけ: ユーザーの切り替え・セッション・再起動・電源オフ
     uprev: [4]f32 = .{ 0, 0, 0, 0 },
     unext: [4]f32 = .{ 0, 0, 0, 0 },
@@ -68,6 +71,15 @@ pub const Hits = struct {
         if (inRect(self.poweroff, x, y)) return .poweroff;
         if (inRect(self.stack, x, y)) return .stack;
         return .none;
+    }
+
+    /// 広げた通知のうち y にあるもの(上から何枚目か)
+    pub fn cardAt(self: *const Hits, y: f32) ?usize {
+        const cd = self.cards;
+        if (cd.n == 0 or cd.pitch <= 0 or y < cd.top) return null;
+        const k: usize = @intFromFloat((y - cd.top) / cd.pitch);
+        if (k >= cd.n or y - cd.top - @as(f32, @floatFromInt(k)) * cd.pitch > cd.h) return null;
+        return k;
     }
 };
 
@@ -313,27 +325,22 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
                 const ia = if (i == 0) 1 else clamp01((ex - 0.3) / 0.7);
                 cv.save();
                 cv.opacity(ia);
-                // アプリのアイコン(ランチャーの索引から。無ければベル)
+                // 左に大きなアイコン(送り主の画像があれば丸く、右下にアプリのアイコン。無ければアプリのアイコン → ベル)
+                const isz: f32 = 40;
                 const ix = cx0 + 16;
-                const iy = yy + 15;
-                var drew = false;
-                if (app.launcher.findApp(n.appName())) |e| {
-                    const tex = app.launcher.entryIcon(e);
-                    if (tex != 0) {
-                        cv.image(tex, ix, iy, 22, 22, 6);
-                        drew = true;
-                    }
+                const iy = yy + (card_h - isz) / 2;
+                if (!notify.drawIcon(app, n, cv, ix, iy, isz)) {
+                    cv.rect(ix, iy, isz, isz, 11, acc.alpha(0.85));
+                    _ = cv.text(ix + isz / 2, iy + 28, 20, white, I_BELL, .{ .alignment = .center });
                 }
-                if (!drew) {
-                    cv.rect(ix, iy, 22, 22, 6, acc.alpha(0.85));
-                    _ = cv.text(ix + 11, iy + 16, 13, white, I_BELL, .{ .alignment = .center });
-                }
-                _ = cv.text(ix + 32, iy + 15, 12, white.alpha(0.65), n.appName(), .{ .max_w = card_w - 140 });
-                _ = cv.text(cx0 + card_w - 16, iy + 15, 11.5, white.alpha(0.55), n.time_str[0..5], .{ .alignment = .right });
-                _ = cv.text(cx0 + 16, yy + 53, 14.5, white.alpha(0.95), n.summaryText(), .{ .bold = true, .max_w = card_w - 32 });
+                const tx = ix + isz + 13;
+                const tw = cx0 + card_w - 16 - tx;
+                _ = cv.text(tx, yy + 25, 12, white.alpha(0.65), n.appName(), .{ .max_w = tw - 50 });
+                _ = cv.text(cx0 + card_w - 16, yy + 25, 11.5, white.alpha(0.55), n.time_str[0..5], .{ .alignment = .right });
+                _ = cv.text(tx, yy + 50, 14.5, white.alpha(0.95), n.summaryText(), .{ .bold = true, .max_w = tw });
                 if (n.body_len > 0) {
                     var lb: [256]u8 = undefined;
-                    _ = cv.text(cx0 + 16, yy + 73, 13.5, white.alpha(0.72), firstLine(n.bodyText(), &lb), .{ .max_w = card_w - 32 });
+                    _ = cv.text(tx, yy + 70, 13.5, white.alpha(0.72), firstLine(n.bodyText(), &lb), .{ .max_w = tw });
                 }
                 cv.restore();
             }
@@ -341,6 +348,8 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         }
         const stack_h = lerp(card_h + @min(@as(f32, @floatFromInt(ns - 1)), 2) * 9, @as(f32, @floatFromInt(ns)) * (card_h + 10) - 10, ex);
         self.hits.stack = .{ cx0, stack_top, card_w, stack_h };
+        // 広げきったときだけ、1 枚ずつ押せる
+        self.hits.cards = if (ex > 0.95) .{ .top = stack_top, .h = card_h, .pitch = card_h + 10, .n = ns } else .{};
         if (ns > 1 and ex < 0.5) {
             var cb: [32]u8 = undefined;
             _ = cv.text(W / 2, stack_top + stack_h + 22, 12, white.alpha(0.6 * (1 - ex * 2)), std.fmt.bufPrint(&cb, "ほか {d} 件の通知", .{ns - 1}) catch "", .{ .alignment = .center });

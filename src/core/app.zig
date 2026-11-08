@@ -745,6 +745,20 @@ pub const App = struct {
         self.riverCommand(&.{ "set-focused-tags", s });
     }
 
+    /// 名前(desktop-entry・アプリ名の順に試す)に合う窓のワークスペースへ移ってフォーカスする。見つからなければ false
+    pub fn focusApp(self: *App, names: []const []const u8) bool {
+        if (self.wm) |w| return w.focusApp(names);
+        // River 0.3: foreign-toplevel の activate(River がその窓のタグへ移ってフォーカスする)
+        const t = self.toplevels orelse return false;
+        const seat = self.seat orelse return false;
+        const appid = @import("ame_lib").appid;
+        for (names) |n| for (t.items.items) |x| if (appid.matches(x.appId(), n)) {
+            c.zwlr_foreign_toplevel_handle_v1_activate(x.handle, seat);
+            return true;
+        };
+        return false;
+    }
+
     pub const WsApp = struct { app_id: []const u8, title: []const u8 };
 
     /// ワークスペース(タグ)ごとの開いているアプリ。River 0.5 は内蔵 WM の正確な情報、0.3 は推測

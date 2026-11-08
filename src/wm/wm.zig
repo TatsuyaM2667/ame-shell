@@ -204,6 +204,8 @@ pub const Action = union(enum) {
     // 外部から(バー・ame-ctl)
     set_tags_on: struct { out: ?*WOut, mask: u32 },
     focus_window: *Window,
+    /// その窓のワークスペースへ移ってフォーカスする(通知を押したとき)
+    show_window: *Window,
     // ハンド操作(hand/hand.zig): River のポインタ操作を使わず、手の動いた量で窓を動かす
     hand_grab,
     hand_drag: struct { dx: i32, dy: i32, scale: f32 = 1 },
@@ -351,6 +353,24 @@ pub const Wm = struct {
 
     fn seat(self: *Wm) ?*WSeat {
         return if (self.seats.items.len > 0) self.seats.items[0] else null;
+    }
+
+    /// 名前(通知の desktop-entry・アプリ名)に合う窓のワークスペースへ移ってフォーカスする。見つからなければ false。
+    /// 同じアプリの窓が複数あれば、今見えているもの → 最後に開いたもの
+    pub fn focusApp(self: *Wm, names: []const []const u8) bool {
+        const appid = @import("ame_lib").appid;
+        var best: ?*Window = null;
+        for (names) |n| {
+            for (self.windows.items) |w| {
+                if (w.closing or !appid.matches(w.app_id[0..w.app_id_len], n)) continue;
+                const visible = if (w.out) |oo| oo.tags & w.tags != 0 else false;
+                if (best == null or visible) best = w;
+                if (visible) break;
+            }
+            if (best != null) break;
+        }
+        self.push(.{ .show_window = best orelse return false });
+        return true;
     }
 
     pub fn focusedWindow(self: *Wm) ?*Window {
@@ -715,6 +735,19 @@ pub const Wm = struct {
             .focus_window => |w| if (s) |ss| {
                 ss.focused = w;
                 ss.force_focus = true;
+            },
+            .show_window => |w| {
+                // 待っている間に閉じられた窓は無視する
+                if (std.mem.indexOfScalar(*Window, self.windows.items, w) == null or w.closing) return;
+                // 見えていなければ、その窓のワークスペースへ(Discord などの特別なワークスペースならそこ、複数なら一番左)
+                if (w.out) |oo| if (oo.tags & w.tags == 0) {
+                    const t = w.tags & (SCRATCH_TAG | 0x1ff);
+                    self.setTags(oo, if (t & SCRATCH_TAG != 0) SCRATCH_TAG else if (t != 0) t & (~t +% 1) else w.tags);
+                };
+                if (s) |ss| {
+                    ss.focused = w;
+                    ss.force_focus = true;
+                }
             },
         }
     }

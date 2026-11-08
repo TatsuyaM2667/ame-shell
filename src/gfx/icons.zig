@@ -332,3 +332,40 @@ test "scaleRgba averages by area without colour bleeding" {
     defer std.c.free(out);
     try std.testing.expectEqualSlices(u8, &.{ 255, 0, 0, 255, 0, 255, 0, 64 }, out[0..8]);
 }
+
+/// 生の画素(通知の image-data など。RGB / RGBA・8 ビット・1 行 stride バイト)を size 四方の RGBA に。
+/// 送り主の値は信用せず、大きさを確かめてから読む。vals = 幅・高さ・stride・アルファの有無・ビット数・チャンネル数
+pub fn rawToRgba(vals: [6]i32, data: []const u8, size: usize) ?[*]u8 {
+    const w = vals[0];
+    const h = vals[1];
+    const stride = vals[2];
+    const ch = vals[5];
+    if (w <= 0 or h <= 0 or w > 4096 or h > 4096 or vals[4] != 8 or (ch != 3 and ch != 4)) return null;
+    const uw: usize = @intCast(w);
+    const uh: usize = @intCast(h);
+    const uc: usize = @intCast(ch);
+    if (stride < w * ch) return null;
+    const us: usize = @intCast(stride);
+    if (data.len < us * (uh - 1) + uw * uc) return null;
+    const rgba: [*]u8 = @ptrCast(std.c.malloc(uw * uh * 4) orelse return null);
+    defer std.c.free(rgba);
+    for (0..uh) |y| for (0..uw) |x| {
+        const s = y * us + x * uc;
+        const d = (y * uw + x) * 4;
+        rgba[d] = data[s];
+        rgba[d + 1] = data[s + 1];
+        rgba[d + 2] = data[s + 2];
+        rgba[d + 3] = if (uc == 4) data[s + 3] else 255;
+    };
+    return scaleRgba(rgba, uw, uh, size, size, true);
+}
+
+test "image-data to rgba" {
+    // 2×1 の RGB(1 行 8 バイト。余りは詰め物)
+    const px = rawToRgba(.{ 2, 1, 8, 0, 8, 3 }, &.{ 255, 0, 0, 0, 0, 255, 9, 9 }, 4).?;
+    defer std.c.free(px);
+    try std.testing.expectEqual(@as(u8, 255), px[3]);
+    try std.testing.expect(rawToRgba(.{ 2, 1, 8, 0, 8, 3 }, &.{ 1, 2, 3 }, 4) == null); // 画素が足りない
+    try std.testing.expect(rawToRgba(.{ 2, 1, 2, 0, 8, 3 }, &.{ 1, 2, 3, 4, 5, 6 }, 4) == null); // 1 行が短すぎる
+    try std.testing.expect(rawToRgba(.{ 0, 1, 8, 0, 8, 3 }, &.{}, 4) == null);
+}
