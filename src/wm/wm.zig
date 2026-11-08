@@ -1,7 +1,4 @@
-// ame-shell 内蔵のウィンドウマネージャ(River 0.4 以降の river-    /// 壁紙が隠れているか(全画面の窓がある)。タイルの窓は透けていることがある(透明な端末など)ので止めない
-    fn covered(self: *Wm, o: *WOut) bool {
-        for (self.windows.items) |w| {
-            if (w.out == o and w.visible() and !w.closing and w.fullscreen) return true;indow-management-v1)。
+// ame-shell 内蔵のウィンドウマネージャ(River 0.4 以降の river-window-management-v1)。
 //
 // River 0.4 以降は「合成(描画・入力)」が River、「どこに何を置くか」がウィンドウマネージャ(WM)
 // という分担になっている。ame-shell はシェル(バー・ドロワー)と同じプロセスで WM も担当する。
