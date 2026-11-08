@@ -759,6 +759,13 @@ pub const App = struct {
 
     pub fn spawn(self: *App, cmd: [:0]const u8) void {
         _ = self;
+        // Flatpak のアプリ: 文書ポータルのマウントが外れていたら直してから(少し待って)起動する
+        if (std.mem.indexOf(u8, cmd, "flatpak") != null and sys.repairDocPortal()) {
+            std.log.warn("Flatpak の文書ポータルが外れていたので、起動し直してからアプリを起動します", .{});
+            var b: [1100]u8 = undefined;
+            const z = std.fmt.bufPrintZ(&b, "sleep 0.5; exec {s}", .{cmd}) catch return sys.spawnDetached(cmd.ptr);
+            return sys.spawnDetached(z.ptr);
+        }
         sys.spawnDetached(cmd.ptr);
     }
 

@@ -576,3 +576,48 @@ pub fn spawnDuplex(argv: []const ?[*:0]const u8, env: []const [*:0]const u8, in_
     out_pid.* = pid;
     return out[0];
 }
+
+/// 文書ポータルのマウントが外れているか(rd/doc はあるのに、マウントされていれば必ずある rd/doc/by-app が無い)
+pub fn docPortalBroken(rd: []const u8) bool {
+    var b: [512]u8 = undefined;
+    const doc = std.fmt.bufPrint(&b, "{s}/doc", .{rd}) catch return false;
+    std.fs.cwd().access(doc, .{}) catch return false; // ポータルを使っていない
+    const by = std.fmt.bufPrint(&b, "{s}/doc/by-app", .{rd}) catch return false;
+    if (std.fs.cwd().access(by, .{})) |_| return false else |_| return true;
+}
+
+/// Flatpak の文書ポータル(xdg-document-portal の FUSE、$XDG_RUNTIME_DIR/doc)が外れていたら、そのポータルを止める。
+/// 次に Flatpak のアプリが使うときに D-Bus がポータルを起動し直し、マウントし直す。
+/// (外れたままだと bwrap が「Can't find source path …/doc/by-app/…」で失敗し、Flatpak のアプリが全部起動しない)
+/// 止めたら true(呼ぶ側は、少し待ってからアプリを起動する)
+pub fn repairDocPortal() bool {
+    if (is_bsd) return false;
+    if (!docPortalBroken(std.posix.getenv("XDG_RUNTIME_DIR") orelse return false)) return false;
+    var d = std.fs.cwd().openDir("/proc", .{ .iterate = true }) catch return false;
+    defer d.close();
+    var it = d.iterate();
+    var stopped = false;
+    while (it.next() catch null) |e| {
+        const pid = std.fmt.parseInt(c_int, e.name, 10) catch continue;
+        var pb: [64]u8 = undefined;
+        const p = std.fmt.bufPrintZ(&pb, "/proc/{s}/cmdline", .{e.name}) catch continue;
+        var cb: [256]u8 = undefined;
+        const cmd = readFile(p.ptr, &cb) orelse continue;
+        const exe = std.mem.sliceTo(cmd, 0);
+        if (!std.mem.eql(u8, std.fs.path.basename(exe), "xdg-document-portal")) continue;
+        if (c.kill(pid, c.SIGTERM) == 0) stopped = true; // 自分のプロセスだけ止まる
+    }
+    return stopped;
+}
+
+test "doc portal broken" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var pb: [512]u8 = undefined;
+    const rd = try tmp.dir.realpath(".", &pb);
+    try std.testing.expect(!docPortalBroken(rd)); // ポータルを使っていない
+    try tmp.dir.makePath("doc");
+    try std.testing.expect(docPortalBroken(rd)); // 外れている
+    try tmp.dir.makePath("doc/by-app");
+    try std.testing.expect(!docPortalBroken(rd)); // 正常
+}
