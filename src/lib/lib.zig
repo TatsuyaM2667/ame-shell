@@ -5,6 +5,7 @@ pub const ai = @import("ai.zig");
 pub const mcp = @import("mcp.zig");
 pub const agentfmt = @import("agentfmt.zig");
 pub const appid = @import("appid.zig");
+pub const config = @import("config.zig");
 
 test {
     _ = lrc;
@@ -12,4 +13,5 @@ test {
     _ = mcp;
     _ = agentfmt;
     _ = appid;
+    _ = config;
 }

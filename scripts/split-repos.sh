@@ -16,7 +16,8 @@ if [ "${1:-}" = "--dry-run" ]; then DRY=1; shift; fi
 # 名前|使う部品(src/lib のファイル名、空白区切り)|外部コマンド|説明
 COMPONENTS='ame-lyrics|lrc|curl|曲の同期歌詞(LRC)を探す小さなコマンド(LRCLIB・NetEase・Kugou、キャッシュつき)
 ame-ai|ai mcp|curl|いろいろな会社の AI と標準入出力で話す小さなコマンド(MCP のツール呼び出しつき)
-ame-agent|agentfmt||コーディング CLI(Claude Code・Gemini・Codex・OpenCode・Kimi)の出力を共通の JSON の行に直すフィルタ'
+ame-agent|agentfmt||コーディング CLI(Claude Code・Gemini・Codex・OpenCode・Kimi)の出力を共通の JSON の行に直すフィルタ
+ame-config|config||ame-shell の設定ファイル(config.ame)の文法と値を確かめる小さなコマンド'
 
 REV=$(git -C "$ROOT" rev-parse --short HEAD)
 if [ -n "$(git -C "$ROOT" status --porcelain -- src/cmd src/lib)" ]; then

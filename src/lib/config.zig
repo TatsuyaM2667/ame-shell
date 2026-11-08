@@ -241,7 +241,7 @@ const Lexer = struct {
 };
 
 pub const Diag = struct {
-    buf: [512]u8 = undefined,
+    buf: [2048]u8 = undefined,
     len: usize = 0,
     fn add(self: *Diag, comptime fmt: []const u8, args: anytype) void {
         const s = std.fmt.bufPrint(self.buf[self.len..], fmt ++ "\n", args) catch return;
@@ -252,6 +252,14 @@ pub const Diag = struct {
     }
 };
 
+/// 使う設定ファイルの場所: $AME_CONFIG → $XDG_CONFIG_HOME/ame-shell/config.ame → ~/.config/ame-shell/config.ame。
+/// (ここに無ければ、ame-shell は入れた場所の既定の config.ame を使う)
+pub fn userPath(buf: []u8) []const u8 {
+    if (std.posix.getenv("AME_CONFIG")) |p| return p;
+    if (std.posix.getenv("XDG_CONFIG_HOME")) |x| if (x.len > 0) return std.fmt.bufPrint(buf, "{s}/ame-shell/config.ame", .{x}) catch "";
+    return std.fmt.bufPrint(buf, "{s}/.config/ame-shell/config.ame", .{std.posix.getenv("HOME") orelse "/"}) catch "";
+}
+
 /// src を解析して base に上書きする。
 pub fn parse(src: []const u8, base: Config, diag: *Diag) Config {
     var cfg = base;
@@ -260,11 +268,13 @@ pub fn parse(src: []const u8, base: Config, diag: *Diag) Config {
     var depth: usize = 0;
     var words: [8][]const u8 = undefined;
     var nw: usize = 0;
+    var key_line: usize = 1; // いま読んでいるキーの行(区切りの改行を読んだあとの lx.line は次の行になっている)
     var pending_section: ?[]const u8 = null;
     while (true) {
         const t = lx.next();
         switch (t) {
             .word, .string => |w| {
+                if (nw == 0) key_line = lx.line;
                 if (nw < words.len) {
                     words[nw] = w;
                     nw += 1;
@@ -277,18 +287,23 @@ pub fn parse(src: []const u8, base: Config, diag: *Diag) Config {
                 nw = 0;
             },
             .rbrace, .sep, .eof => {
+                if (nw >= 2 and depth == 0) diag.add("line {d}: '{s}' is outside of a section", .{ key_line, words[0] });
                 if (nw >= 2 and depth > 0) {
-                    apply(&cfg, section, words[0], words[1], diag, lx.line);
+                    apply(&cfg, section, words[0], words[1], diag, key_line);
                 } else if (nw == 1 and depth > 0) {
                     // 値の無いキー = true(例: "show-seconds")
-                    apply(&cfg, section, words[0], "true", diag, lx.line);
+                    apply(&cfg, section, words[0], "true", diag, key_line);
                 }
                 nw = 0;
                 if (t == .rbrace) {
+                    if (depth == 0) diag.add("line {d}: unmatched '}}'", .{lx.line});
                     if (depth > 0) depth -= 1;
                     section = "";
                 }
-                if (t == .eof) break;
+                if (t == .eof) {
+                    if (depth > 0) diag.add("line {d}: missing '}}' (section '{s}' is not closed)", .{ lx.line, pending_section orelse "" });
+                    break;
+                }
             },
         }
     }
@@ -486,6 +501,19 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
         if (eq(u8, key, "enabled")) cfg.lock_enabled = boolean(val) orelse true else ok = false;
     } else ok = false;
     if (!ok) diag.add("line {d}: unknown or invalid '{s}.{s} {s}'", .{ line, sec, key, val });
+}
+
+test "structure warnings" {
+    var d = Diag{};
+    _ = parse("accent #ffffff\ntheme {\n  radius 4\n}\n}\nbar {\n  height 30\n", .{}, &d);
+    const g = d.get();
+    try std.testing.expect(std.mem.indexOf(u8, g, "line 1: 'accent' is outside") != null);
+    try std.testing.expect(std.mem.indexOf(u8, g, "unmatched '}'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, g, "missing '}' (section 'bar'") != null);
+    // 警告の行番号は、そのキーの行
+    var d2 = Diag{};
+    _ = parse("theme {\n  radius 4\n  bogus 1\n}\n", .{}, &d2);
+    try std.testing.expect(std.mem.startsWith(u8, d2.get(), "line 3: "));
 }
 
 test "parse basic" {

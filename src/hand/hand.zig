@@ -239,7 +239,7 @@ pub fn mode() Mode {
     return st.mode;
 }
 
-pub const Mode = @import("../core/config.zig").HandMode;
+pub const Mode = @import("ame_lib").config.HandMode;
 
 /// 動き方の名前(バナー・ボタン)
 pub fn modeLabel(md: Mode) []const u8 {

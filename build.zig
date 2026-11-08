@@ -182,7 +182,7 @@ pub fn build(b: *std.Build) void {
     }
     b.installArtifact(ctl);
 
-    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai", "ame-agent" };
+    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai", "ame-agent", "ame-config" };
     // --- 画面を持たない小さな道具(標準入出力でやりとりする。src/cmd/。libc だけ)---
     for (cmds) |name| {
         const t = b.addExecutable(.{

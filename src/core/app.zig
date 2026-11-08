@@ -9,7 +9,7 @@ const Audio = @import("../media/audio.zig").Audio;
 const Avatar = @import("../desktop/avatar.zig").Avatar;
 const Bar = @import("../desktop/bar.zig").Bar;
 const c = @import("../c.zig");
-const cfgmod = @import("config.zig");
+const cfgmod = @import("ame_lib").config;
 const Dashboard = @import("../desktop/dashboard.zig").Dashboard;
 const Frame = @import("../frame/frame.zig").Frame;
 const gfx = @import("../gfx/gfx.zig");
@@ -478,16 +478,7 @@ pub const App = struct {
         // 探索順: $AME_CONFIG → ~/.config/ame-shell/config.ame → <share>/config.ame
         self.resolveShareDir();
         var path_buf: [512]u8 = undefined;
-        var path: []const u8 = "";
-        if (std.posix.getenv("AME_CONFIG")) |p| {
-            path = p;
-        } else {
-            const home = std.posix.getenv("HOME") orelse "/";
-            if (std.posix.getenv("XDG_CONFIG_HOME")) |x|
-                path = std.fmt.bufPrint(&path_buf, "{s}/ame-shell/config.ame", .{x}) catch ""
-            else
-                path = std.fmt.bufPrint(&path_buf, "{s}/.config/ame-shell/config.ame", .{home}) catch "";
-        }
+        const path = cfgmod.userPath(&path_buf);
         self.config_path_len = @min(path.len, self.config_path.len);
         @memcpy(self.config_path[0..self.config_path_len], path[0..self.config_path_len]);
 

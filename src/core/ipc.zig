@@ -6,7 +6,7 @@ const c = @import("../c.zig");
 const App = @import("app.zig").App;
 const sys = @import("../platform/sys.zig");
 const theme = @import("../gfx/theme.zig");
-const cfgmod = @import("config.zig");
+const cfgmod = @import("ame_lib").config;
 
 pub const socketPath = @import("ipc_path.zig").socketPath;
 

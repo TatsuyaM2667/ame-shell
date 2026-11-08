@@ -26,7 +26,7 @@ const surface = @import("../core/surface.zig");
 const Surface = surface.Surface;
 const sys = @import("../platform/sys.zig");
 const loop = @import("../platform/loop.zig");
-const cfgmod = @import("../core/config.zig");
+const cfgmod = @import("ame_lib").config;
 const icons = @import("../gfx/icons.zig");
 const video = @import("video.zig");
 
