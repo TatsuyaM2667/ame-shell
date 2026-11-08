@@ -27,9 +27,9 @@ const SLEEP_MS = 90_000;
 /// カーソルが止まってから、また自分できょろきょろし始めるまで
 const IDLE_MS = 4000;
 
-const Peek = enum { none, notif, done };
+const Peek = enum { none, notif, done, event };
 /// 手: 手を振る / 両手を上げて喜ぶ / 両手で目を隠す(つつかれた)
-const Gesture = enum { none, wave, yay, cover };
+const Gesture = enum { none, wave, yay, cover, stretch };
 const WS_MS = 1400;
 
 const State = struct {
@@ -64,6 +64,12 @@ const State = struct {
     peek_text: [200]u8 = undefined,
     peek_text_len: usize = 0,
     was_busy: bool = false,
+    /// 充電器のつなぎ外し(変わったときに反応する)
+    prev_ac: ?bool = null,
+    /// 起動の伸びが終わった(目を開けて跳ねた)
+    stretched: bool = false,
+    /// 今日の飾り(季節・記念日)。描くたびに決める
+    decor: Decor = .none,
     busy_name: [64]u8 = undefined,
     busy_name_len: usize = 0,
     rec_since: u64 = 0,
@@ -90,6 +96,9 @@ fn ensure(app: *App) void {
     st.next_blink = now + 2500;
     st.next_glance = now + 6000;
     st.last_activity = now;
+    // 起動: 眠った顔から、んーっと伸びをして目を覚ます
+    st.gesture = .stretch;
+    st.gesture_t0 = now;
     arm();
 }
 
@@ -107,7 +116,7 @@ fn arm() void {
     if (st.rec_since != 0) next = @min(next, now + 1000 - (now - st.rec_since) % 1000);
     if (st.following) next = @min(next, st.last_move + IDLE_MS);
     if (st.ws_until != 0) next = @min(next, st.ws_until);
-    if (!st.sleepy) next = @min(next, st.last_activity + SLEEP_MS);
+    if (!st.sleepy) next = @min(next, st.last_activity + sleepMs());
     t.arm(@max(1, next -| now), 0);
 }
 
@@ -122,7 +131,7 @@ fn onTimer(_: *anyopaque, _: c_int, _: u32) void {
         st.look_y.set(0);
         st.next_glance = now + 1500;
     }
-    if (!st.sleepy and now >= st.last_activity + SLEEP_MS) {
+    if (!st.sleepy and now >= st.last_activity + sleepMs()) {
         st.sleepy = true;
         st.look_x.set(0);
         st.look_y.set(0.3); // うとうと: 少し下を向く
@@ -147,7 +156,13 @@ fn onTimer(_: *anyopaque, _: c_int, _: u32) void {
             } else {
                 st.look_x.set(0);
                 st.look_y.set(0);
-                st.next_glance = now + 5000 + r.uintLessThan(u64, 7000);
+                // 電池が少ないと焦って、きょろきょろが速い(とても少ないと、びくっと目が泳ぐ)
+                st.next_glance = switch (battery()) {
+                    .ok => now + 5000 + r.uintLessThan(u64, 7000),
+                    .low => now + 600 + r.uintLessThan(u64, 900),
+                    .critical => now + 300 + r.uintLessThan(u64, 500),
+                };
+                if (battery() == .critical) react(-0.12, 70);
             }
         } else st.next_glance = now + 4000;
     }
@@ -306,6 +321,16 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
         }
     } else st.rec_since = 0;
 
+    // 充電器をつないだ: 喜ぶ
+    const ac = app.sys.battery.on_ac;
+    if (st.prev_ac) |pa| if (!pa and ac) {
+        react(0.3, 220);
+        gesture(.yay);
+    };
+    st.prev_ac = ac;
+    // 今日の飾り(季節・記念日)
+    const td = today(clock());
+    st.decor = if (td) |d| d.decor else .none;
     var sp = [_]*Spring{ &st.look_x, &st.look_y, &st.squash, &st.hop };
     if (anim.stepAll(&sp, 1.0 / 60.0)) animating = true;
     const blink: f32 = if (now -| st.blink_t0 < BLINK_MS) blk: {
@@ -322,9 +347,33 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
     switch (kindOf(f)) {
         .idle => {
             const covered = st.gesture == .cover and handsActive(now);
-            const low = app.sys.battery.present and !app.sys.battery.on_ac and app.sys.battery.percent <= 15;
-            const mood: Mood = if (covered) .squint else if (st.hover) .happy else if (st.sleepy) .sleepy else if (low) .worried else .normal;
+            const low = battery() != .ok;
+            var mood: Mood = if (covered) .squint else if (st.hover) .happy else if (st.sleepy) .sleepy else if (low) .worried else .normal;
+            // 起動の伸び: すやすや → んーっ(目をぎゅっ・縦に伸びる)→ ぱっと目を開けて跳ねる
+            if (st.gesture == .stretch and handsActive(now)) {
+                const p = @as(f32, @floatFromInt(now - st.gesture_t0)) / 2600.0;
+                if (p < 0.3) mood = .sleepy else if (p < 0.72) {
+                    mood = .squint;
+                    const v = 0.4 * @sin((p - 0.3) / 0.42 * std.math.pi);
+                    st.squash.x = v;
+                    st.squash.target = v;
+                    st.squash.v = 0;
+                } else if (!st.stretched) {
+                    st.stretched = true;
+                    react(0.45, 300);
+                    // 記念日なら「今日は○○」
+                    if (td) |d| {
+                        st.peek = .event;
+                        st.peek_until = now + PEEK_MS;
+                        set(&st.peek_app, &st.peek_app_len, "今日は");
+                        set(&st.peek_text, &st.peek_text_len, d.name);
+                        arm();
+                    }
+                }
+            }
             drawEyes(cv, w / 2, h / 2 - 1, 1, blink, mood, acc);
+            if (low and mood != .sleepy) drawSweat(cv, w / 2 + 30, h / 2 - 12, 1);
+            drawDecor(cv, w / 2, h / 2 - 1, 1, now, acc);
             if (drawHands(cv, w / 2, h / 2 - 1, 1, now, acc)) animating = true;
         },
         .workspace => {
@@ -382,7 +431,8 @@ const Mood = enum { normal, happy, sleepy, worried, squint };
 /// 目: (cx, cy) が真ん中、k が大きさ。open = まぶたの開き(1 で全開)
 fn drawEyes(cv: *gfx.Canvas, cx: f32, cy: f32, k: f32, open: f32, mood: Mood, acc: Color) void {
     const white = Color.hex(0xffffff);
-    const tint = Color.mix(white, acc.lighten(0.45), 0.35);
+    const orange = Color.hex(0xffa040);
+    const tint = if (st.decor == .halloween) orange else Color.mix(white, acc.lighten(0.45), 0.35);
     const gap = 17 * k;
     const s = std.math.clamp(st.squash.x, -0.6, 0.8);
     // 伸びると細く、つぶれると太く(体積を保つように)
@@ -392,7 +442,8 @@ fn drawEyes(cv: *gfx.Canvas, cx: f32, cy: f32, k: f32, open: f32, mood: Mood, ac
     const oy = st.look_y.x * 4 * k + st.hop.x * k;
     for ([_]f32{ -1, 1 }) |side| {
         // 見ている方の目を少し大きく(顔ごと向いたように)
-        const pk = 1 + side * st.look_x.x * 0.1;
+        var pk = 1 + side * st.look_x.x * 0.1;
+        if (st.decor == .fool) pk *= if (side < 0) 0.75 else 1.25; // エイプリルフール: 左右で大きさがちぐはぐ
         const x = cx + side * gap + ox * 1.15;
         const y = cy + oy;
         switch (mood) {
@@ -416,10 +467,14 @@ fn drawEyes(cv: *gfx.Canvas, cx: f32, cy: f32, k: f32, open: f32, mood: Mood, ac
                 cv.line(x, y + 3 * k, x + a, y, 2.6 * k, tint);
             },
             .normal, .worried => {
+                if (st.decor == .heart and mood == .normal) {
+                    heart(cv, x, y, 15 * k * pk, Color.hex(0xff7aa8));
+                    continue;
+                }
                 const w2 = ew * pk * (1 + 0.25 * (1 - open)); // まばたきの間は少し横に広がる
                 const h2 = @max(eh * pk * open, 3 * k);
                 // ほんのり光る、まるい縦長の目。上は白、下は少し色づく
-                cv.shadow(x - w2 / 2, y - h2 / 2, w2, h2, w2 / 2, 9 * k, acc.lighten(0.4).alpha(0.38));
+                cv.shadow(x - w2 / 2, y - h2 / 2, w2, h2, w2 / 2, 9 * k, (if (st.decor == .halloween) orange else acc.lighten(0.4)).alpha(0.38));
                 cv.rectGrad(x - w2 / 2, y - h2 / 2, w2, h2, w2 / 2, white, tint);
                 if (mood == .worried) {
                     // 困り眉(内側が上がる「八」の字)
@@ -491,7 +546,9 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
             2 => app.media.next(),
             else => f.openDashTab(1), // メディアのタブ
         },
-        .peek => if (st.peek == .done) {
+        .peek => if (st.peek == .event) {
+            st.peek = .none;
+        } else if (st.peek == .done) {
             if (!f.aiOpen()) f.toggleAi();
             st.peek = .none;
         } else {
@@ -530,6 +587,7 @@ fn gestureMs(g: Gesture) u64 {
         .wave => 1500,
         .yay => 1300,
         .cover => 1400,
+        .stretch => 2600,
     };
 }
 
@@ -573,6 +631,15 @@ fn drawHands(cv: *gfx.Canvas, cx: f32, cy: f32, k: f32, now: u64, acc: Color) bo
             paw(cv, cx - side_x + 4 * k, cy - 8 * k - bob, k * sc, -0.4, acc);
             paw(cv, cx + side_x - 4 * k, cy - 8 * k - bob, k * sc, 0.4, acc);
         },
+        .stretch => {
+            // 両手を上げて、ぷるぷる伸びる(すやすやの間は出さない)
+            const q = std.math.clamp((p - 0.25) / 0.55, 0, 1);
+            if (q <= 0 or q >= 1) return true;
+            const up = @sin(q * std.math.pi);
+            const tremble = @sin(p * std.math.pi * 30) * 1.2 * k * up;
+            paw(cv, cx - side_x * 0.85 + tremble, cy + 8 * k - up * 22 * k, k * up, -0.3, acc);
+            paw(cv, cx + side_x * 0.85 - tremble, cy + 8 * k - up * 22 * k, k * up, 0.3, acc);
+        },
         .cover => {
             const shake = @sin(p * std.math.pi * 16) * 2 * k;
             paw(cv, cx - gap + shake, cy + 1 * k, k * sc * 1.25, 0.2, acc);
@@ -596,5 +663,167 @@ fn paw(cv: *gfx.Canvas, x: f32, y: f32, k: f32, tilt: f32, acc: Color) void {
         const bx = x + (i * 3.6 + tilt * 1.5) * k;
         const by = y - 4.2 * k + @abs(i) * 1.2 * k;
         cv.rect(bx - 1.3 * k, by - 1.3 * k, 2.6 * k, 2.6 * k, 1.3 * k, pink);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PC の状態・時間・記念日
+// ---------------------------------------------------------------------------
+
+const Battery = enum { ok, low, critical };
+
+fn battery() Battery {
+    const app = st.app orelse return .ok;
+    const b = app.sys.battery;
+    if (!b.present or b.on_ac) return .ok;
+    if (b.percent <= 5) return .critical;
+    if (b.percent <= 15) return .low;
+    return .ok;
+}
+
+const Clock = struct { month: u8, day: u8, hour: u8 };
+
+/// 今の日付と時刻(試験用: AME_DEBUG があれば AME_ISLAND_DATE="MM-DD" で日付を変えられる)
+fn clock() Clock {
+    const c = @import("../c.zig");
+    var t: c.time_t = c.time(null);
+    var tm: c.struct_tm = undefined;
+    _ = c.localtime_r(&t, &tm);
+    var r = Clock{ .month = @intCast(tm.tm_mon + 1), .day = @intCast(tm.tm_mday), .hour = @intCast(tm.tm_hour) };
+    if (std.posix.getenv("AME_DEBUG") != null) if (std.posix.getenv("AME_ISLAND_DATE")) |d| if (d.len == 5) {
+        r.month = std.fmt.parseInt(u8, d[0..2], 10) catch r.month;
+        r.day = std.fmt.parseInt(u8, d[3..5], 10) catch r.day;
+    };
+    return r;
+}
+
+/// 夜中(0〜5 時)はすぐ眠くなる
+fn sleepMs() u64 {
+    const h = clock().hour;
+    return if (h < 6) 30_000 else SLEEP_MS;
+}
+
+pub const Decor = enum { none, newyear, sparkle, heart, cat, fool, tanabata, halloween, xmas };
+
+const Day = struct { m: u8, d0: u8, d1: u8, decor: Decor, name: []const u8 };
+
+/// 主な季節の行事・記念日(日本)
+const days = [_]Day{
+    .{ .m = 1, .d0 = 1, .d1 = 3, .decor = .newyear, .name = "お正月" },
+    .{ .m = 2, .d0 = 3, .d1 = 3, .decor = .sparkle, .name = "節分" },
+    .{ .m = 2, .d0 = 14, .d1 = 14, .decor = .heart, .name = "バレンタインデー" },
+    .{ .m = 2, .d0 = 22, .d1 = 22, .decor = .cat, .name = "猫の日" },
+    .{ .m = 3, .d0 = 3, .d1 = 3, .decor = .sparkle, .name = "ひな祭り" },
+    .{ .m = 3, .d0 = 14, .d1 = 14, .decor = .heart, .name = "ホワイトデー" },
+    .{ .m = 4, .d0 = 1, .d1 = 1, .decor = .fool, .name = "エイプリルフール" },
+    .{ .m = 5, .d0 = 5, .d1 = 5, .decor = .sparkle, .name = "こどもの日" },
+    .{ .m = 7, .d0 = 7, .d1 = 7, .decor = .tanabata, .name = "七夕" },
+    .{ .m = 10, .d0 = 25, .d1 = 31, .decor = .halloween, .name = "ハロウィン" },
+    .{ .m = 11, .d0 = 11, .d1 = 11, .decor = .sparkle, .name = "ポッキーの日" },
+    .{ .m = 12, .d0 = 20, .d1 = 25, .decor = .xmas, .name = "クリスマス" },
+    .{ .m = 12, .d0 = 31, .d1 = 31, .decor = .sparkle, .name = "大晦日" },
+};
+
+pub fn today(cl: Clock) ?Day {
+    for (days) |d| if (d.m == cl.month and cl.day >= d.d0 and cl.day <= d.d1) return d;
+    return null;
+}
+
+test "seasonal days" {
+    try std.testing.expectEqual(Decor.halloween, today(.{ .month = 10, .day = 31, .hour = 0 }).?.decor);
+    try std.testing.expectEqual(Decor.xmas, today(.{ .month = 12, .day = 24, .hour = 0 }).?.decor);
+    try std.testing.expect(today(.{ .month = 6, .day = 10, .hour = 0 }) == null);
+}
+
+/// ハート(2 つの丸と、下へすぼまる三角)
+fn heart(cv: *gfx.Canvas, x: f32, y: f32, s: f32, col: Color) void {
+    const r = s * 0.3;
+    cv.shadow(x - s / 2, y - s / 2, s, s, s / 2, s * 0.5, col.alpha(0.4));
+    cv.rect(x - s * 0.5, y - s * 0.42, r * 2, r * 2, r, col);
+    cv.rect(x - s * 0.5 + r * 1.35, y - s * 0.42, r * 2, r * 2, r, col);
+    var t: f32 = 0;
+    while (t < 1) : (t += 0.25) {
+        const hw = s * 0.5 * (1 - t);
+        cv.rect(x - hw, y - s * 0.12 + t * s * 0.55, hw * 2, s * 0.18, s * 0.09, col);
+    }
+}
+
+/// きらっ(十字の光)
+fn sparkle(cv: *gfx.Canvas, x: f32, y: f32, r: f32, col: Color) void {
+    cv.line(x - r, y, x + r, y, r * 0.35, col);
+    cv.line(x, y - r, x, y + r, r * 0.35, col);
+    cv.rect(x - r * 0.3, y - r * 0.3, r * 0.6, r * 0.6, r * 0.3, Color.hex(0xffffff));
+}
+
+/// 冷や汗(右の目の外側に、しずく)
+fn drawSweat(cv: *gfx.Canvas, x: f32, y: f32, k: f32) void {
+    const col = Color.hex(0x9fd8ff);
+    cv.rect(x - 3 * k, y, 6 * k, 7 * k, 3 * k, col);
+    cv.line(x, y - 4 * k, x - 2.4 * k, y + 2 * k, 2 * k, col);
+    cv.line(x, y - 4 * k, x + 2.4 * k, y + 2 * k, 2 * k, col);
+}
+
+/// 季節・記念日の飾り(目のまわり)
+fn drawDecor(cv: *gfx.Canvas, cx: f32, cy: f32, k: f32, now: u64, acc: Color) void {
+    _ = acc;
+    const gap = 17 * k;
+    const white = Color.hex(0xffffff);
+    const gold = Color.hex(0xffd36b);
+    // ゆっくりまたたく(描き直したときに少し変わるだけ。そのために描き続けはしない)
+    const tw = 0.6 + 0.4 * @sin(@as(f32, @floatFromInt(now % 4000)) / 4000.0 * std.math.tau);
+    switch (st.decor) {
+        .none, .heart, .fool => {},
+        .sparkle => {
+            sparkle(cv, cx - gap - 30 * k, cy - 8 * k, 4 * k, Color.hex(0xffb3d9).alpha(tw));
+            sparkle(cv, cx + gap + 30 * k, cy + 6 * k, 3.5 * k, Color.hex(0xb3e5ff).alpha(1.4 - tw));
+        },
+        .newyear => {
+            sparkle(cv, cx - gap - 32 * k, cy - 6 * k, 4.5 * k, gold.alpha(tw));
+            sparkle(cv, cx + gap + 32 * k, cy - 2 * k, 4 * k, gold.alpha(1.4 - tw));
+            sparkle(cv, cx + gap + 46 * k, cy + 9 * k, 2.5 * k, Color.hex(0xff6b6b).alpha(tw));
+        },
+        .tanabata => {
+            for ([_][3]f32{ .{ -52, -8, 3.5 }, .{ -40, 8, 2.5 }, .{ 44, -6, 3 }, .{ 56, 7, 2 } }, 0..) |s, i| {
+                const a = if (i % 2 == 0) tw else 1.4 - tw;
+                sparkle(cv, cx + s[0] * k, cy + s[1] * k, s[2] * k, gold.alpha(a));
+            }
+        },
+        .cat => {
+            // 猫耳(目の上に、ピンクの内側つき)
+            for ([_]f32{ -1, 1 }) |side| {
+                const x = cx + side * (gap + 3 * k);
+                const top = cy - 19 * k;
+                cv.line(x - 7 * k, top + 9 * k, x - side * 1 * k, top, 3.5 * k, white);
+                cv.line(x - side * 1 * k, top, x + 7 * k, top + 9 * k, 3.5 * k, white);
+                cv.line(x - 3 * k, top + 8 * k, x - side * 0.5 * k, top + 3 * k, 2 * k, Color.hex(0xff9dbb));
+            }
+        },
+        .halloween => {
+            // かぼちゃ(右に)
+            const px = cx + gap + 42 * k;
+            const py = cy + 3 * k;
+            const orange = Color.hex(0xff8a1f);
+            cv.shadow(px - 11 * k, py - 9 * k, 22 * k, 18 * k, 9 * k, 6 * k, orange.alpha(0.4));
+            cv.rect(px - 11 * k, py - 9 * k, 22 * k, 18 * k, 9 * k, orange);
+            cv.line(px - 4 * k, py - 8 * k, px - 4 * k, py + 8 * k, 1.2 * k, Color.hex(0xc85f00));
+            cv.line(px + 4 * k, py - 8 * k, px + 4 * k, py + 8 * k, 1.2 * k, Color.hex(0xc85f00));
+            cv.rect(px - 1.5 * k, py - 13 * k, 3 * k, 5 * k, 1.5 * k, Color.hex(0x4caf50));
+        },
+        .xmas => {
+            // サンタ帽(左の目の上に斜めに)と、雪
+            const hx = cx - gap;
+            const hy = cy - 11 * k;
+            const red = Color.hex(0xe53935);
+            var i: f32 = 0;
+            while (i < 4) : (i += 1) {
+                const wv = (16 - i * 3.6) * k;
+                cv.rect(hx - wv / 2 + i * 1.8 * k, hy - i * 3.2 * k, wv, 4.5 * k, 2 * k, red);
+            }
+            cv.rect(hx - 10 * k, hy + 2.5 * k, 20 * k, 4 * k, 2 * k, white);
+            cv.rect(hx + 7.5 * k, hy - 14 * k, 5 * k, 5 * k, 2.5 * k, white);
+            for ([_][2]f32{ .{ 40, -10 }, .{ 52, 4 }, .{ -46, 8 }, .{ 30, 12 } }) |s| {
+                cv.rect(cx + s[0] * k - 1.5 * k, cy + s[1] * k - 1.5 * k, 3 * k, 3 * k, 1.5 * k, white.alpha(0.8));
+            }
+        },
     }
 }
