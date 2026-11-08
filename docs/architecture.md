@@ -21,6 +21,10 @@
 例: `echo 'Zig の comptime を一言で' | ame-ai -p anthropic`、
 `claude -p 直して --output-format stream-json --verbose | ame-agent -C "$PWD" | jq -r 'select(.type=="tool").title'`
 
+ame-lyrics・ame-ai・ame-agent は、単独でビルドできるリポジトリにも切り出してある
+([ame-lyrics](https://github.com/TatsuyaM2667/ame-lyrics)・[ame-ai](https://github.com/TatsuyaM2667/ame-ai)・[ame-agent](https://github.com/TatsuyaM2667/ame-agent))。
+正本はこの ame-shell(全部入り)で、切り出したものは `sh scripts/split-repos.sh` が生成して同期する(道具を直したら実行し直す)。
+
 ## ソースの置き場
 ```
 src/
