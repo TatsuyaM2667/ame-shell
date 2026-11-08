@@ -38,6 +38,8 @@ pub const Media = struct {
     pos_s: f32 = 0,
     pos_at_ms: u64 = 0,
     art_tex: c.GLuint = 0,
+    /// ジャケットの一番鮮やかな色(ジャケットが無ければ null)
+    art_color: ?Color = null,
     curl_fd: c_int = -1,
     curl_pid: c_int = 0,
     curl_path: [512]u8 = undefined,
@@ -125,6 +127,7 @@ pub const Media = struct {
     }
 
     fn dropArt(self: *Media) void {
+        self.art_color = null;
         if (self.art_tex != 0) {
             c.glDeleteTextures(1, &self.art_tex);
             self.art_tex = 0;
@@ -187,12 +190,12 @@ pub const Media = struct {
         // 共有コンテキストなので、どのサーフェスにも紐づかない状態でアップロードしてよい
         _ = c.eglMakeCurrent(self.app.gpu.dpy, c.EGL_NO_SURFACE, c.EGL_NO_SURFACE, self.app.gpu.ctx);
         self.art_tex = gfx.uploadImage(px, w, h);
-        if (self.app.cfg.media_accent) {
-            // ジャケットの中で一番鮮やかな色(白地のジャケットでも白にならない)。大きい画像は間引いて計算する
-            const count = w * h;
-            const stride = @max(1, @divTrunc(count, 40_000));
-            theme.setAccent(self.app, theme.accentFromPixels(px, count, stride));
-        }
+        // ジャケットの中で一番鮮やかな色(白地のジャケットでも白にならない)。大きい画像は間引いて計算する。
+        // ダイナミックアイランドの色にも使う(アクセントにするかは設定次第)
+        const count = w * h;
+        const stride = @max(1, @divTrunc(count, 40_000));
+        self.art_color = theme.accentFromPixels(px, count, stride);
+        if (self.app.cfg.media_accent) theme.setAccent(self.app, self.art_color);
         self.app.dashboard.dataChanged();
         self.app.redrawBars();
     }

@@ -66,6 +66,13 @@ const State = struct {
     was_busy: bool = false,
     /// 充電器のつなぎ外し(変わったときに反応する)
     prev_ac: ?bool = null,
+    /// 島の色(ジャケットの色へ少しずつ寄る)
+    col: Color = .{},
+    col_init: bool = false,
+    /// リズム: 直前の低音の強さ・最後に跳ねた時刻・揺れる向き
+    prev_bass: f32 = 0,
+    last_beat: u64 = 0,
+    sway: f32 = 1,
     /// 起動の伸びが終わった(目を開けて跳ねた)
     stretched: bool = false,
     /// 今日の飾り(季節・記念日)。描くたびに決める
@@ -163,6 +170,7 @@ fn onTimer(_: *anyopaque, _: c_int, _: u32) void {
                     .critical => now + 300 + r.uintLessThan(u64, 500),
                 };
                 if (battery() == .critical) react(-0.12, 70);
+                if (battery() == .ok) fidget(r);
             }
         } else st.next_glance = now + 4000;
     }
@@ -285,7 +293,13 @@ pub fn size(f: *Frame) ?[2]f32 {
 
 pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
     const app = f.app;
-    const acc = theme.accent(app);
+    // 再生中は、ジャケットの色に少しずつ染まる
+    const playing = app.media.status == .playing;
+    const want_col = if (app.media.status != .none) (app.media.art_color orelse theme.accent(app)) else theme.accent(app);
+    const col_moving = !sameColor(st.col, want_col);
+    st.col = if (st.col_init) Color.mix(st.col, want_col, 0.12) else want_col;
+    st.col_init = true;
+    const acc = st.col;
     const txt = theme.text(app);
     const sub = theme.subtext(app);
     const now = loop.nowMs();
@@ -344,6 +358,28 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
     const fit = std.math.clamp(@min(w / tw[0], h / tw[1]), 0, 1);
     if (fit < 0.75) return true;
     cv.opacity((fit - 0.75) * 4);
+    if (col_moving) animating = true;
+    // 再生中: 島の中をジャケットの色でほんのり染める(上の角は枠の外なので、上へはみ出して描く)
+    if (app.media.status != .none) {
+        const R = f.R();
+        cv.rectGrad(0, -R, w, h + R, R, acc.alpha(0.10), acc.alpha(0.32));
+    }
+    // リズムに乗る: 低音が強く来たら、ぴょこっと跳ねて体を左右に揺らす
+    if (playing and f.spectrum.running()) {
+        const v = f.spectrum.values;
+        const b = @max(v[0], @max(v[1], v[2]));
+        if (b > st.prev_bass + 0.16 and b > 0.35 and now -| st.last_beat > 200) {
+            st.last_beat = now;
+            st.sway = -st.sway;
+            st.squash.x = 0.1 + 0.25 * b;
+            st.squash.set(0);
+            st.hop.v = -(90 + 140 * b);
+            st.hop.set(0);
+            if (!st.following) st.look_x.set(st.sway * 0.35);
+        }
+        st.prev_bass = b;
+        animating = true;
+    }
     switch (kindOf(f)) {
         .idle => {
             const covered = st.gesture == .cover and handsActive(now);
@@ -826,4 +862,46 @@ fn drawDecor(cv: *gfx.Canvas, cx: f32, cy: f32, k: f32, now: u64, acc: Color) vo
             }
         },
     }
+}
+
+fn sameColor(a: Color, b: Color) bool {
+    return @abs(a.r - b.r) < 0.004 and @abs(a.g - b.g) < 0.004 and @abs(a.b - b.b) < 0.004;
+}
+
+/// 再生中で島が出ているときは、リズムに乗るために音のスペクトラムを取る(frame.zig)
+pub fn wantsSpectrum(f: *Frame) bool {
+    return f.app.cfg.island and f.app.media.status == .playing and f.island.visible() and !f.dash.visible();
+}
+
+/// ひまなときの癖(よそ見から前を向いたときに、ときどき)
+fn fidget(r: std.Random) void {
+    const x = r.float(f32);
+    if (x < 0.10) {
+        // ぷるぷるっと首を振る
+        st.look_x.v = 6;
+        st.look_x.set(0);
+        react(-0.15, 60);
+    } else if (x < 0.18) {
+        // ふと何かに気づいて、ぴょんと跳ねる
+        react(0.3, 220);
+    } else if (x < 0.22) {
+        // 小さく手を振る(誰かいないかな)
+        gesture(.wave);
+    }
+}
+
+/// 窓が開いた・閉じた(wm.zig)。(gx, gy) は窓の真ん中(グローバル)。開いたら そちらを見て喜び、閉じたら しゅんとする
+pub fn windowEvent(app: *App, outs: anytype, gx: i32, gy: i32, opened: bool) void {
+    if (!app.cfg.island or st.timer == null) return;
+    wake();
+    for (outs) |wo| {
+        const ao = wo.ame orelse continue;
+        const f = ao.frame orelse continue;
+        if (!f.island.visible() or gx < wo.x or gx >= wo.x + wo.w) continue;
+        lookAt(f, @as(f32, @floatFromInt(gx - wo.x)), @as(f32, @floatFromInt(gy - wo.y)));
+    }
+    st.following = true; // 少しの間そちらを見て、また前を向く
+    st.last_move = loop.nowMs() -| (IDLE_MS - 1500);
+    if (opened) react(0.3, 200) else react(-0.25, 40);
+    arm();
 }

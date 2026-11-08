@@ -904,6 +904,8 @@ pub const Frame = struct {
             if (dash.draw(self, cv, dt)) animating = true;
             cv.restore();
             cv.setClip(0, 0, 0, 0);
+        } else if (island.wantsSpectrum(self)) {
+            if (!self.spectrum.running()) self.spectrum.start();
         } else if (self.spectrum.running()) self.spectrum.stop();
         if (self.island.visible() and self.island.vis[3] > 1) {
             cv.save();

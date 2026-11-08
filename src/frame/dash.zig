@@ -411,6 +411,28 @@ fn drawMedia(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
             k += 1;
         }
     }
+    // 盤といっしょに回るもの: 溝の一部がうっすら光る筋と、小さなほこり(溝は同心円なので、これが無いと回って見えない)
+    {
+        const marks = [_][3]f32{ .{ 0.0, 0.30, 0.9 }, .{ 1.3, 0.62, 0.6 }, .{ 2.4, 0.45, 1.1 }, .{ 3.6, 0.80, 0.5 }, .{ 4.7, 0.20, 0.8 }, .{ 5.5, 0.55, 0.7 } };
+        for (marks) |mk| {
+            const r = wax + 4 + (R - 10 - wax) * mk[1];
+            const a0 = mk[0] + v.vinyl_angle;
+            const span = 0.35 * mk[2];
+            const segs = 8;
+            for (0..segs) |si| {
+                const s0 = @as(f32, @floatFromInt(si)) / segs;
+                const s1 = @as(f32, @floatFromInt(si + 1)) / segs;
+                const mid = 1 - @abs((s0 + s1) / 2 - 0.5) * 2;
+                const b0 = a0 + s0 * span;
+                const b1 = a0 + s1 * span;
+                cv.line(cx + @cos(b0) * r, cy + @sin(b0) * r, cx + @cos(b1) * r, cy + @sin(b1) * r, 2.2, white.alpha(0.16 * mid));
+            }
+            // ほこり
+            const da = a0 + span * 1.8;
+            const dr = r + 6 * (mk[2] - 0.8);
+            cv.rect(cx + @cos(da) * dr - 1.1, cy + @sin(da) * dr - 1.1, 2.2, 2.2, 1.1, white.alpha(0.4));
+        }
+    }
     // 光の映り込み: 溝に沿った細い弧の光が、左上と右下に向かい合って出る(盤が回っても動かない)
     {
         const segs = 14;

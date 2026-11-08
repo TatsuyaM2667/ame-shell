@@ -1047,6 +1047,7 @@ pub const Wm = struct {
                     moving = true;
                     continue;
                 }
+                @import("../frame/island.zig").windowEvent(self.app, self.outputs.items, @intFromFloat(w.tx + w.tw / 2), @intFromFloat(w.ty + w.th / 2), true);
                 // 初めて表示: その場で「中心から広がる」(Hyprland の popin)
                 w.placed = true;
                 w.px.snap(w.tx);
@@ -1398,6 +1399,7 @@ const mgr_listener = c.struct_river_window_manager_v1_listener{
 fn wClosed(data: ?*anyopaque, obj: ?*c.struct_river_window_v1) callconv(.C) void {
     const w: *Window = @ptrCast(@alignCast(data.?));
     const self = w.wm;
+    if (w.placed) @import("../frame/island.zig").windowEvent(self.app, self.outputs.items, @intFromFloat(w.tx + w.tw / 2), @intFromFloat(w.ty + w.th / 2), false);
     for (self.seats.items) |s| {
         // 次の manage で、このワークスペースで直前に使っていた窓へフォーカスが戻る
         if (s.focused == w) s.focused = null;
