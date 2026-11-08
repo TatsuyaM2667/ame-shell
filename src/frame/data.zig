@@ -7,7 +7,7 @@ const std = @import("std");
 const c = @import("../c.zig");
 const sys = @import("../platform/sys.zig");
 const loop = @import("../platform/loop.zig");
-const App = @import("../app.zig").App;
+const App = @import("../core/app.zig").App;
 const is_bsd = @import("builtin").os.tag == .freebsd;
 const bsd = @import("../platform/bsd.zig");
 
@@ -205,7 +205,7 @@ pub const Weather = struct {
     /// wttr.in の天気記号 → Nerd Font アイコン
     pub fn icon(self: *const Weather) []const u8 {
         const s = self.symbol[0..self.symbol_len];
-        const hour = @import("../bar.zig").localTime().tm_hour;
+        const hour = @import("../desktop/bar.zig").localTime().tm_hour;
         const night = hour < 6 or hour >= 18;
         if (std.mem.eql(u8, s, "o")) return if (night) "\u{F0594}" else "\u{F0599}"; // 晴れ
         if (std.mem.eql(u8, s, "m")) return if (night) "\u{F0F31}" else "\u{F0595}"; // 晴れ時々曇り
@@ -443,7 +443,7 @@ pub const Spectrum = struct {
         self.mutex.unlock();
         var work: [2 * FFT_N]f32 = undefined;
         var bands: [BARS]f32 = undefined;
-        @import("../anim.zig").ame_spectrum(&samples, FFT_N, &t.window, &t.tw, &work, &t.edges, BARS, &bands);
+        @import("../gfx/anim.zig").ame_spectrum(&samples, FFT_N, &t.window, &t.tw, &work, &t.edges, BARS, &bands);
         // dB にして、最近の大きい音を基準に 0..1 へ(静かな曲でも見えるように自動でそろえる)
         var loudest: f32 = -120;
         var db: [BARS]f32 = undefined;

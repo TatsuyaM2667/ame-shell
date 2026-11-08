@@ -11,12 +11,12 @@
 // 撮影できない(古い River など)ときは何もしない(普通に動く)。
 const std = @import("std");
 const c = @import("../c.zig");
-const gfx = @import("../gfx.zig");
-const anim = @import("../anim.zig");
-const appmod = @import("../app.zig");
+const gfx = @import("../gfx/gfx.zig");
+const anim = @import("../gfx/anim.zig");
+const appmod = @import("../core/app.zig");
 const App = appmod.App;
 const Output = appmod.Output;
-const surface = @import("../surface.zig");
+const surface = @import("../core/surface.zig");
 const Surface = surface.Surface;
 
 const log = std.log.scoped(.wobble);

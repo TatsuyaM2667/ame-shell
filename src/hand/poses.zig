@@ -13,7 +13,7 @@
 //       tp tp action screenshot        … 両手で電話の形でスクリーンショット
 //       0 0 command ame-ctl lock       … 両手の握りこぶしでコマンド
 const std = @import("std");
-const App = @import("../app.zig").App;
+const App = @import("../core/app.zig").App;
 const custom = @import("custom.zig");
 
 pub const NONE: u8 = 0xff;
@@ -322,7 +322,7 @@ pub fn run(app: *App, bn: *const Binding) void {
             app.spawn(z);
         },
         .action => {
-            const ipc = @import("../ipc.zig");
+            const ipc = @import("../core/ipc.zig");
             const hand = @import("hand.zig");
             switch (bn.op) {
                 .launcher => app.launcher.toggle(),

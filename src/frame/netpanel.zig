@@ -7,12 +7,12 @@
 // 引数はシェルを通さず渡すので、SSID やパスワードにどんな文字が入っていても安全。
 const std = @import("std");
 const c = @import("../c.zig");
-const anim = @import("../anim.zig");
+const anim = @import("../gfx/anim.zig");
 const Spring = anim.Spring;
 const Color = anim.Color;
-const gfx = @import("../gfx.zig");
-const theme = @import("../theme.zig");
-const surface = @import("../surface.zig");
+const gfx = @import("../gfx/gfx.zig");
+const theme = @import("../gfx/theme.zig");
+const surface = @import("../core/surface.zig");
 const sys = @import("../platform/sys.zig");
 const loop = @import("../platform/loop.zig");
 const netdbus = @import("../platform/netdbus.zig");
@@ -192,7 +192,7 @@ fn onRead(ctx: *anyopaque, fd: c_int, _: u32) void {
         .wifi_connect, .wifi_down, .bt_action, .bt_power => true,
         else => false,
     };
-    if (action and st.status_err) @import("../theme.zig").flashError(f.app);
+    if (action and st.status_err) @import("../gfx/theme.zig").flashError(f.app);
     pump(st);
     f.schedule();
 }

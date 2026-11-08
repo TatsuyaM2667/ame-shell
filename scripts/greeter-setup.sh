@@ -1,6 +1,6 @@
 #!/bin/sh
 # greeter-setup.sh: ログイン画面を ame-shell(greetd + ame-greeter)にする。root で実行。POSIX sh。
-# SDDM は使わなくなる(消してもよい)。見た目と動きはロック画面と同じ(src/greeter.zig)。
+# SDDM は使わなくなる(消してもよい)。見た目と動きはロック画面と同じ(src/lock/greeter.zig)。
 #
 #   doas sh scripts/greeter-setup.sh [--user 名前] [--prefix DIR] [--manifest FILE] [--dry-run]
 #   doas sh scripts/greeter-setup.sh --undo      SDDM に戻す(config.toml を元に戻し、サービスを入れ替える)

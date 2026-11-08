@@ -16,10 +16,10 @@
 // manage sequence を起こしてから処理する。
 const std = @import("std");
 
-const anim = @import("../anim.zig");
+const anim = @import("../gfx/anim.zig");
 const Spring = anim.Spring;
 const Color = anim.Color;
-const appmod = @import("../app.zig");
+const appmod = @import("../core/app.zig");
 const App = appmod.App;
 const c = @import("../c.zig");
 const MOD_SHIFT = c.RIVER_SEAT_V1_MODIFIERS_SHIFT;
@@ -28,7 +28,7 @@ const MOD_ALT = c.RIVER_SEAT_V1_MODIFIERS_MOD1;
 const MOD_SUPER = c.RIVER_SEAT_V1_MODIFIERS_MOD4;
 const loop = @import("../platform/loop.zig");
 const sys = @import("../platform/sys.zig");
-const theme = @import("../theme.zig");
+const theme = @import("../gfx/theme.zig");
 const binds = @import("binds.zig");
 const wobble = @import("wobble.zig");
 
@@ -539,7 +539,7 @@ pub const Wm = struct {
                 const z = std.fmt.bufPrintZ(&buf, "{s}", .{cmd}) catch return;
                 sys.spawnDetached(z.ptr);
             },
-            .ame => |cmd| @import("../ipc.zig").runCommand(self.app, cmd),
+            .ame => |cmd| @import("../core/ipc.zig").runCommand(self.app, cmd),
             .close => if (fw) |w| {
                 // まず縮むアニメーション、縮み終わったら manage で close
                 w.closing = true;

@@ -26,14 +26,14 @@
 
 | 部品 | 参考の振る舞い | ame-shell |
 |---|---|---|
-| バー | ワークスペース・時計・システム状態 | `src/bar.zig`(液体インジケータ、タイトルのクロスフェード) |
-| ランチャー | アプリ検索 | `src/launcher.zig`(Odin ファジー、連鎖スプリング) |
-| 通知 | ポップアップ + 履歴 | `src/notify.zig`(D-Bus 内蔵)+ ダッシュボード下部の履歴 |
-| コントロールセンター/ダッシュボード | トグル・スライダー・メディア・カレンダー | `src/dashboard.zig` + WASM ウィジェット 5 種 |
-| メディア | MPRIS、アートの色を配色に | `src/media.zig`(Odin で主色抽出 → アクセント遷移) |
-| OSD | 音量・明るさ | `src/osd.zig` |
-| ロック画面 | 独自 UI + PAM | `src/lock.zig`(ext-session-lock-v1、子プロセスで PAM) |
-| アニメ壁紙 | 画像/動画壁紙 | `src/wallpaper.zig`(シェーダ: オーロラ/雨、画像の波紋トランジション) |
+| バー | ワークスペース・時計・システム状態 | `src/desktop/bar.zig`(液体インジケータ、タイトルのクロスフェード) |
+| ランチャー | アプリ検索 | `src/desktop/launcher.zig`(Odin ファジー、連鎖スプリング) |
+| 通知 | ポップアップ + 履歴 | `src/desktop/notify.zig`(D-Bus 内蔵)+ ダッシュボード下部の履歴 |
+| コントロールセンター/ダッシュボード | トグル・スライダー・メディア・カレンダー | `src/desktop/dashboard.zig` + WASM ウィジェット 5 種 |
+| メディア | MPRIS、アートの色を配色に | `src/media/media.zig`(Odin で主色抽出 → アクセント遷移) |
+| OSD | 音量・明るさ | `src/desktop/osd.zig` |
+| ロック画面 | 独自 UI + PAM | `src/lock/lock.zig`(ext-session-lock-v1、子プロセスで PAM) |
+| アニメ壁紙 | 画像/動画壁紙 | `src/desktop/wallpaper.zig`(シェーダ: オーロラ/雨、画像の波紋トランジション) |
 | サイドバー | 右サイドバー | ダッシュボードが右サイドバーを兼ねる |
 
 参考になかった/未実装のもの(dock, overview, on-screen keyboard, 設定 GUI)は `docs/blockers.md` に記載。

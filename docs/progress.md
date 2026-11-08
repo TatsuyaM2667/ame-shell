@@ -52,10 +52,10 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 ## 2026-10-27
 - 表示倍率 `shell { ui-scale }`(既定 1.25)。枠 UI を仮想座標で組み、描画・入力・排他領域を倍率で変換。
 - Super キー単体のタップでランチャー: River 0.3 の -release マッピングは組み合わせの後でも発火するため使えない → evdev(/dev/input、input グループ)を読むだけで「Super を押して他のキーを挟まず 600ms 以内に離した」ときに開く(platform/supertap.zig)。デバイスの抜き差しに追従。
-- アイコン: 全テーマの索引(ユーザー設定テーマ → hicolor → breeze-dark → breeze → Adwaita → oxygen、カテゴリ問わず)+ SVG を nanosvg で描画 + "-symbolic" を明るく塗り直し(src/icons.zig)。表示できなかった Alacritty / GNOME 系 / helix 等が表示されるようになった。
+- アイコン: 全テーマの索引(ユーザー設定テーマ → hicolor → breeze-dark → breeze → Adwaita → oxygen、カテゴリ問わず)+ SVG を nanosvg で描画 + "-symbolic" を明るく塗り直し(src/gfx/icons.zig)。表示できなかった Alacritty / GNOME 系 / helix 等が表示されるようになった。
 - 縦バーのロゴ: /etc/os-release の LOGO=(chimera-logo)を表示。
-- 壁紙ピッカー(src/wallpick.zig): ilyamiro の serpantinum を読んで(コードは使わず)、斜めの平行四辺形カード・選択カードの拡大・パララックス・時間差で飛び上がる出現を実装。切り替え演出(wallpaper シェーダ)に円(カード位置から、光るリング+屈折)/ 斜めワイプ(光の筋)/ 短冊、新しい壁紙のズーム着地を追加。選んだ壁紙は ~/.local/state/ame-shell/wallpaper に保存して次回起動時も使う。
-- メディア: 歌詞(src/lyrics.zig、LRCLIB から同期歌詞を非同期取得・キャッシュ、動画タイトルの飾りを除去して検索)。メディアタブを作り直し: ぼかしたジャケットの背景、回るレコード(ジャケットがラベル)+ cava の放射スペクトラム + 再生/停止で上下するトーンアーム、シャッフル/リピート、カラオケ風に塗られていく同期歌詞(スプリングでスクロール)。ダッシュボードの小さなメディア欄にも今の一節を表示。
+- 壁紙ピッカー(src/desktop/wallpick.zig): ilyamiro の serpantinum を読んで(コードは使わず)、斜めの平行四辺形カード・選択カードの拡大・パララックス・時間差で飛び上がる出現を実装。切り替え演出(wallpaper シェーダ)に円(カード位置から、光るリング+屈折)/ 斜めワイプ(光の筋)/ 短冊、新しい壁紙のズーム着地を追加。選んだ壁紙は ~/.local/state/ame-shell/wallpaper に保存して次回起動時も使う。
+- メディア: 歌詞(src/media/lyrics.zig、LRCLIB から同期歌詞を非同期取得・キャッシュ、動画タイトルの飾りを除去して検索)。メディアタブを作り直し: ぼかしたジャケットの背景、回るレコード(ジャケットがラベル)+ cava の放射スペクトラム + 再生/停止で上下するトーンアーム、シャッフル/リピート、カラオケ風に塗られていく同期歌詞(スプリングでスクロール)。ダッシュボードの小さなメディア欄にも今の一節を表示。
 - 試験: `debug-media`(AME_DEBUG 時のみ)で再生中の状態を作り、ライラック(Mrs. GREEN APPLE)の同期歌詞が位置に合わせて進むことを確認。
 
 ## 2026-10-27(追記 2)
@@ -83,7 +83,7 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - ダッシュボード: 開くアニメーションより速くカーソルを下ろすと「外に出た」と判定されて閉じていた → 開いている間は開き切った大きさで判定し、入力領域も開き切った範囲にする。
 - ユーザーの写真: ~/.config/ame-shell/avatar(パス)→ ~/.face → AccountsService の順。ダッシュボードの丸をクリックすると ~/Pictures の写真をカードで選べる(壁紙ピッカーの写真モード)。ロック画面にも表示。
 - Super+L でロック(River 0.5 の内蔵 WM と River 0.3 の river.sh の両方)。配置の比率は Super+Ctrl+H / L へ。
-- 動画・GIF の壁紙(src/video.zig): libmpv を dlopen し、描画 API で FBO に描いて壁紙のシーンへ。新しいコマの通知が来たときだけ描く。サムネイルは ffmpeg で 1 コマ。注意: mpv に wl_display を渡すと VA-API のラウンドトリップとイベントループの読み込み準備が噛み合って固まる(渡さない → DRM 経由)。720p30 で CPU 約 4.7%、RSS は libmpv 分 +130MB(使うときだけ読み込む)。
+- 動画・GIF の壁紙(src/desktop/video.zig): libmpv を dlopen し、描画 API で FBO に描いて壁紙のシーンへ。新しいコマの通知が来たときだけ描く。サムネイルは ffmpeg で 1 コマ。注意: mpv に wl_display を渡すと VA-API のラウンドトリップとイベントループの読み込み準備が噛み合って固まる(渡さない → DRM 経由)。720p30 で CPU 約 4.7%、RSS は libmpv 分 +130MB(使うときだけ読み込む)。
 - ワークスペース欄にアプリのアイコンと名前: River 0.5 は内蔵 WM、River 0.3 は wlr-foreign-toplevel で窓を知り、タグは推測(開いた時のタグ・フォーカス時に見えているタグ・窓数の増減)。
 - 配色: アクセントは「一番多い色」ではなく「一番鮮やかな色」の色相から作り、見栄えの良い色相(コーラル・琥珀・ティール・空・青・ペリウィンクル・紫・ピンク)へ寄せる。黄緑〜緑は避ける。アルバムアートも同様(白地のジャケットで白くならない)。充電中の緑はアクセントに。
 - エラーは theme.danger()(はっきりした赤)。Wi-Fi/Bluetooth の操作失敗・緊急通知で枠の縁が赤く光る(theme.flashError)。
@@ -92,7 +92,7 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 
 ## 2026-10-27(追記 5)
 - AirPods が Bluetooth では繋がっているのに音がスピーカーのまま: bluetoothd の再起動(bt-airpods-fix.sh)後に WirePlumber が BlueZ へ登録し直しておらず、PipeWire に音の機器(bluez_card)が現れていなかった。WirePlumber の再起動で解消。bt-connect.sh は「繋がったのに音の機器が出ない」ときに自動で WirePlumber を再起動する。接続後、既定の入力がイヤホンのマイクなら内蔵マイクに戻す(録音のたびに通話用の低音質へ切り替わるのを防ぐ)。
-- 音量のポップアウト(縦バーの音量アイコン)に出力先・入力先の一覧。クリックで切り替え(再生中・録音中の音も移す)、音量バーのクリックで音量、右クリックでミュート。pactl の JSON は日本語の機器名で壊れるのでテキスト形式を読む(src/audio.zig、別スレッド)。
+- 音量のポップアウト(縦バーの音量アイコン)に出力先・入力先の一覧。クリックで切り替え(再生中・録音中の音も移す)、音量バーのクリックで音量、右クリックでミュート。pactl の JSON は日本語の機器名で壊れるのでテキスト形式を読む(src/media/audio.zig、別スレッド)。
 
 ## 2026-10-27(追記 6)
 - GitHub で公開: https://github.com/TatsuyaM2667/ame-shell(GPL-3.0)。
@@ -161,7 +161,7 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 - レコード: ラベルを直径の約 1/3 に、細い溝・曲間の帯・デッドワックス・左上と右下の光の映り込み・軸。トーンアームに台座・重り・金属の光・オフセット角のヘッドシェル・指かけ、持ち上がると影が離れる。針先は 102°(最初の溝)→ 119°(最後の溝)を曲の進みで移動し、停止中は 86°(盤の外)。
 - music-tui の歌詞: music-tui は歌詞を取得してから $XDG_RUNTIME_DIR/lyrics/<player>.lrc を書くが、曲の情報は変わったときしか通知しないので、ame-shell が読むきっかけが無かった。lyrics ディレクトリを inotify で見張る。
 - バッテリー: 充電中は残量ごとの充電アイコン(11 段階)、電源につながって充電が止まっている(満充電・保護モード)はコンセント、10% 以下・5% 以下は警告。status=Full を充電中と扱っていたのを修正。残り時間 / 満充電までの時間(energy/power または charge/current、FreeBSD は hw.acpi.battery.time)をポップアップとユーティリティに表示。
-- 電源・ネットワーク・Bluetooth の変化を即時に: src/syswatch.zig(Linux はカーネルの uevent、Wi-Fi・BT はシステムの D-Bus の NetworkManager / BlueZ のシグナル、150 ms まとめて読み直す)。以前は 20 秒ごと / 開いたときだけ。起動時にも 1 回読む(バーの Bluetooth のアイコンがホバーするまで「オフ」だった)。
+- 電源・ネットワーク・Bluetooth の変化を即時に: src/desktop/syswatch.zig(Linux はカーネルの uevent、Wi-Fi・BT はシステムの D-Bus の NetworkManager / BlueZ のシグナル、150 ms まとめて読み直す)。以前は 20 秒ごと / 開いたときだけ。起動時にも 1 回読む(バーの Bluetooth のアイコンがホバーするまで「オフ」だった)。
 - Wi-Fi のパネル: 開くたびに nmcli --rescan auto(約 5 秒、その間ほかの操作も列で待つ)だったのを、覚えている一覧(約 14 ms)をすぐ出し、スキャンは頼むだけ(nmcli dev wifi rescan、約 30 ms)にして完了のシグナルで一覧を更新。Bluetooth のスキャン(10 秒)は列の外で動かす。bluetoothd が動いていないと bluetoothctl が返らず列が詰まるので、D-Bus で org.bluez の有無を先に確かめる。ダッシュボードの Wi-Fi / BT の切り替えは待たずに表示を先に変える。
 - アプリのアイコン: ランチャーは 30 秒以上たつと開くたびに一覧を読み直し、そのたびに全アイコン・サムネイルのテクスチャを捨てて読み直していた(動画の壁紙のサムネイル(ffmpeg)の後ろに並ぶので遅い)。テクスチャをアイコン名 / パスで保持して使い回し、アイコンとサムネイルは別のスレッドで読む。
 - そのほか: XDG_RUNTIME_DIR が長くて ame-ctl のソケットのパスが入らないと起動時に落ちていたのを、ame-ctl を無効にして続行するように。動画のサムネイルのパスを作るときに同じバッファから読んで書いていた(Debug ビルドで abort)のを修正。

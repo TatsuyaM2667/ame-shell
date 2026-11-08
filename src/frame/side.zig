@@ -3,12 +3,12 @@
 //   OSD(右中央、音量・明るさの縦スライダー)/ バーのポップアウト(左)
 const std = @import("std");
 const c = @import("../c.zig");
-const anim = @import("../anim.zig");
+const anim = @import("../gfx/anim.zig");
 const Spring = anim.Spring;
 const Color = anim.Color;
-const gfx = @import("../gfx.zig");
-const theme = @import("../theme.zig");
-const surface = @import("../surface.zig");
+const gfx = @import("../gfx/gfx.zig");
+const theme = @import("../gfx/theme.zig");
+const surface = @import("../core/surface.zig");
 const sys = @import("../platform/sys.zig");
 const netdbus = @import("../platform/netdbus.zig");
 const data = @import("data.zig");
@@ -114,7 +114,7 @@ const N_BIG = 8;
 fn utilButtons(f: *Frame) [N_UTIL]struct { b: UtilBtn, icon: []const u8, label: []const u8, on: bool } {
     const d = f.app.dashboard;
     const hand_on = @import("../hand/hand.zig").enabled();
-    const ap_on = @import("../airpods.zig").enabled();
+    const ap_on = @import("../device/airpods.zig").enabled();
     return .{
         .{ .b = .wifi, .icon = "\u{F05A9}", .label = "Wi-Fi", .on = d.store.wifi_on != 0 },
         .{ .b = .bt, .icon = "\u{F00AF}", .label = "Bluetooth", .on = d.store.bt_on != 0 },
@@ -154,13 +154,13 @@ fn drawUtil(f: *Frame, cv: *gfx.Canvas, w: f32) bool {
     const st = &app.sys;
     var buf: [160]u8 = undefined;
     var tb: [48]u8 = undefined;
-    const bt = @import("../bar.zig").batteryTime(&tb, st.battery);
+    const bt = @import("../desktop/bar.zig").batteryTime(&tb, st.battery);
     // 「バッテリー 46%」(太字)+ 状態と残り時間(細字)。放電中は状態の言葉を省いて時間だけ
     const bat = if (st.battery.present) (std.fmt.bufPrint(&buf, "バッテリー {d}%", .{st.battery.percent}) catch "") else "バッテリーなし";
     const bx = 16 + cv.text(16, 28, 13, txt, bat, .{ .bold = true }) + 10;
     if (st.battery.present) {
         var db: [96]u8 = undefined;
-        const state = if (st.battery.on_ac or st.battery.percent <= 10) @import("../bar.zig").batteryState(st.battery) else "";
+        const state = if (st.battery.on_ac or st.battery.percent <= 10) @import("../desktop/bar.zig").batteryState(st.battery) else "";
         const detail = std.fmt.bufPrint(&db, "{s}{s}{s}", .{ state, if (state.len > 0 and bt.len > 0) "・" else "", bt }) catch "";
         _ = cv.text(bx, 28, 11.5, if (st.battery.charging) theme.accent(app) else sub, detail, .{ .max_w = w - 16 - bx });
     } else _ = cv.text(w - 16, 28, 11.5, sub, "ユーティリティ", .{ .alignment = .right });
@@ -216,10 +216,10 @@ fn utilPress(f: *Frame, i: usize) void {
         .screenshot => {
             f.closeAll();
             // パネルが閉じ終わってから範囲を選ぶ(保存してコピー。足りないコマンドは通知で知らせる)
-            @import("../shot.zig").take(app, .region, 400);
+            @import("../desktop/shot.zig").take(app, .region, 400);
         },
         .hand => @import("../hand/hand.zig").toggle(app),
-        .airpods => @import("../airpods.zig").toggle(app),
+        .airpods => @import("../device/airpods.zig").toggle(app),
         .saver => data.setPowerProfile(.saver),
         .balanced => data.setPowerProfile(.balanced),
         .perf => data.setPowerProfile(.performance),

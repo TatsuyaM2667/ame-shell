@@ -9,14 +9,14 @@
 // 待機中に描き続けない: まばたき・よそ見・表示を戻す時刻は timerfd で「次に変わる時刻」にだけ起きる。
 // 目はカーソル(WM のカーソル位置)を見る。しばらく動かさなければ、また自分できょろきょろする。
 const std = @import("std");
-const anim = @import("../anim.zig");
+const anim = @import("../gfx/anim.zig");
 const Spring = anim.Spring;
 const Color = anim.Color;
-const gfx = @import("../gfx.zig");
-const theme = @import("../theme.zig");
-const surface = @import("../surface.zig");
+const gfx = @import("../gfx/gfx.zig");
+const theme = @import("../gfx/theme.zig");
+const surface = @import("../core/surface.zig");
 const loop = @import("../platform/loop.zig");
-const App = @import("../app.zig").App;
+const App = @import("../core/app.zig").App;
 const Frame = @import("frame.zig").Frame;
 
 const PEEK_MS = 4000;
@@ -219,9 +219,9 @@ pub fn pointerMoved(app: *App, outs: anytype, gx: i32, gy: i32) void {
 }
 
 /// ame-shell のサーフェス(壁紙・枠)の上のカーソル。窓の上の動きは WM から(窓に入ったときなど)しか届かない
-pub fn surfacePointer(app: *App, s: *const @import("../surface.zig").Surface, x: f32, y: f32) void {
+pub fn surfacePointer(app: *App, s: *const @import("../core/surface.zig").Surface, x: f32, y: f32) void {
     if (!app.cfg.island or st.timer == null) return;
-    const ao: *@import("../app.zig").Output = @ptrCast(@alignCast(s.output orelse return));
+    const ao: *@import("../core/app.zig").Output = @ptrCast(@alignCast(s.output orelse return));
     const f = ao.frame orelse return;
     // 画面全体を覆う面(枠・壁紙)だけ: 座標が画面の論理座標そのまま
     const full = s == f.surf or (if (ao.wall) |w| s == w.surf else false);
@@ -257,8 +257,8 @@ fn lookAt(f: *Frame, x: f32, y: f32) void {
 const Kind = enum { idle, music, busy, recording, peek, workspace, music_big };
 
 fn agentBusy() bool {
-    const agent = @import("../agent.zig");
-    return agent.busy() or @import("../ai.zig").busy();
+    const agent = @import("../ai/agent.zig");
+    return agent.busy() or @import("../ai/ai.zig").busy();
 }
 
 fn kindOf(f: *Frame) Kind {
@@ -319,7 +319,7 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
     // AI の作業が終わった: 少しだけ知らせる
     const busy = agentBusy();
     if (busy) {
-        const agent = @import("../agent.zig");
+        const agent = @import("../ai/agent.zig");
         set(&st.busy_name, &st.busy_name_len, if (agent.isActive()) agent.name(agent.current()) else "AI");
     } else if (st.was_busy) {
         st.peek = .done;

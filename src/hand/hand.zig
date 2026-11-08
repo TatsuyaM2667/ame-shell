@@ -23,16 +23,16 @@
 // $XDG_DATA_HOME/ame-shell/models に置く。オフにするとスレッド・カメラ・モデルのメモリを全部返す。
 const std = @import("std");
 const c = @import("../c.zig");
-const appmod = @import("../app.zig");
+const appmod = @import("../core/app.zig");
 const App = appmod.App;
 const Output = appmod.Output;
-const surface = @import("../surface.zig");
+const surface = @import("../core/surface.zig");
 const Surface = surface.Surface;
-const gfx = @import("../gfx.zig");
-const anim = @import("../anim.zig");
+const gfx = @import("../gfx/gfx.zig");
+const anim = @import("../gfx/anim.zig");
 const Color = anim.Color;
 const Spring = anim.Spring;
-const theme = @import("../theme.zig");
+const theme = @import("../gfx/theme.zig");
 const loop = @import("../platform/loop.zig");
 const sys = @import("../platform/sys.zig");
 // 手の認識そのもの(推論エンジン・追跡・ジェスチャー・カメラ)は別のリポジトリ ame-hand
@@ -239,7 +239,7 @@ pub fn mode() Mode {
     return st.mode;
 }
 
-pub const Mode = @import("../config.zig").HandMode;
+pub const Mode = @import("../core/config.zig").HandMode;
 
 /// 動き方の名前(バナー・ボタン)
 pub fn modeLabel(md: Mode) []const u8 {
@@ -818,7 +818,7 @@ fn choose(app: *App, h: i32) void {
     st.hold_done = true; // 開いた手のままでも、すぐまたメニューが開かないように
     st.open_blocked = true;
     if (h >= 100) return gotoWorkspace(app, @intCast(h - 100 + 1));
-    const ipc = @import("../ipc.zig");
+    const ipc = @import("../core/ipc.zig");
     switch (items[@intCast(h)].it) {
         .launcher => ipc.runCommand(app, "launcher open"),
         .dashboard => ipc.runCommand(app, "dashboard toggle"),
@@ -826,7 +826,7 @@ fn choose(app: *App, h: i32) void {
         .float => winOp(app, .float),
         .bigger => winScale(app, 1.2),
         .smaller => winScale(app, 1.0 / 1.2),
-        .screenshot => @import("../shot.zig").take(app, .full, 450),
+        .screenshot => @import("../desktop/shot.zig").take(app, .full, 450),
         .close => winOp(app, .close),
         .poses => @import("posegui.zig").open(app),
     }

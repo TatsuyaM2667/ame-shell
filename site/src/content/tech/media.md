@@ -1,6 +1,6 @@
 # メディア・歌詞・音・動画
 
-<p class="file">対象: src/media.zig(331 行)/ src/lyrics.zig(319 行)/ src/audio.zig(223 行)/ src/video.zig(501 行)</p>
+<p class="file">対象: src/media/media.zig(331 行)/ src/media/lyrics.zig(319 行)/ src/media/audio.zig(223 行)/ src/desktop/video.zig(501 行)</p>
 
 :::easy このページを読む前に
 音楽を再生していると、ダッシュボードに曲名やアルバムアートや歌詞が出ます。これは、プレーヤーが「今この曲を、ここまで再生している」と知らせる約束事([[mpris]])を ame-shell が聞いているからです。
@@ -11,7 +11,7 @@
 ## 再生中の曲: D-Bus の MPRIS を直接聞く {#mpris}
 
 ```zig
-// src/mpris.zig
+// src/media/mpris.zig
 // 起動時に org.mpris.MediaPlayer2.* の一覧を取り、各プレイヤーの状態(GetAll)を読む。
 // 以後は信号だけで追う: PropertiesChanged(曲・再生状態など)、Seeked(再生位置)、
 // NameOwnerChanged(プレイヤーが増えた・消えた)。ポーリングしない
@@ -53,7 +53,7 @@ cava は使いません。メディアのタブ・ロック画面で曲が流れ
 ## 同期歌詞: LRCLIB {#lyrics}
 
 ```zig
-// src/lyrics.zig
+// src/media/lyrics.zig
 //   1. キャッシュ(~/.cache/ame-shell/lyrics/<曲のハッシュ>)があればそれを使う
 //   2. 無ければ curl で /api/get(アーティスト名 + 曲名 + 長さ)→ 見つからなければ /api/search
 //      を非同期に叩き、完了を pipe の EOF で知る(シェルを通さず引数で渡すので曲名に何が入っていても安全)
@@ -148,7 +148,7 @@ pub fn trySidecar(self: *Lyrics, player: []const u8) void {
 ## 音の出力先: pactl のテキストを読む {#audio}
 
 ```zig
-// src/audio.zig
+// src/media/audio.zig
 // pactl の JSON 出力は日本語の機器名(AirPods の名前など)で壊れるので、テキスト形式を読む。
 // 一覧の取得・切り替えは別スレッドで行い(pactl は数十 ms かかる)、終わったら pipe でメインループへ知らせる。
 // 切り替えたときは、再生中・録音中のストリームも新しい機器へ移す。
@@ -162,7 +162,7 @@ pub fn trySidecar(self: *Lyrics, player: []const u8) void {
 ## 動画の壁紙: libmpv の描画 API {#video}
 
 ```zig
-// src/video.zig
+// src/desktop/video.zig
 // 動画・GIF のライブ壁紙(libmpv の描画 API を dlopen で使う)。
 // libmpv(C ライブラリ)は実行時に読み込むので、ビルドにヘッダや開発パッケージは要らない。
 const h = std.c.dlopen("libmpv.so.2", std.c.RTLD.LAZY) orelse std.c.dlopen("libmpv.so", std.c.RTLD.LAZY) orelse { … };

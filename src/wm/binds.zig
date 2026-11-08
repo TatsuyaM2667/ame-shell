@@ -2,7 +2,7 @@
 // ランチャー・ロック等は ame-shell の機能を直接呼ぶ(ame-ctl を起動するより速い)。
 const std = @import("std");
 
-const App = @import("../app.zig").App;
+const App = @import("../core/app.zig").App;
 const c = @import("../c.zig");
 const SHIFT = c.RIVER_SEAT_V1_MODIFIERS_SHIFT;
 const CTRL = c.RIVER_SEAT_V1_MODIFIERS_CTRL;

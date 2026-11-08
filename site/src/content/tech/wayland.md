@@ -1,6 +1,6 @@
 # Wayland とサーフェス
 
-<p class="file">対象: src/app.zig(1090 行)/ src/surface.zig(307 行)</p>
+<p class="file">対象: src/core/app.zig(1090 行)/ src/core/surface.zig(307 行)</p>
 
 :::easy このページを読む前に
 [[wayland|Wayland]] では、アプリは自分で絵を描いて、[[compositor|コンポジタ]](ame-shell の場合は [[river|River]])に渡します。ame-shell のバーや壁紙も、そうやって渡された「絵」です。
@@ -38,7 +38,7 @@ layer-shell の約束で、最初のコミットは中身(バッファ)なしで
 ## 描画はフレームコールバックで {#frame}
 
 ```zig
-// src/surface.zig
+// src/core/surface.zig
 // 描画は必ず wl_surface.frame コールバック駆動:
 //   状態が変わる → schedule() でフレームコールバックを要求
 //   → コンポジタが次の vblank で done を送る → draw() → まだ動いていれば次を要求
@@ -83,7 +83,7 @@ fn onFrameDone(data: ?*anyopaque, cb: ?*c.struct_wl_callback, time: u32) callcon
 - **描いた後の次のフレームの要求は、`eglSwapBuffers` のコミットに相乗り**させます(`render` の中で `requestFrame` してから swap)。余計な `wl_surface_commit` を出しません。
 
 ```zig
-// src/surface.zig ensureEgl
+// src/core/surface.zig ensureEgl
 // フレームコールバックで同期するので、eglSwapBuffers 自体は待たせない。
 // (待たせると複数サーフェスで互いの vblank を待ってカクつく)
 _ = c.eglSwapInterval(self.app.gpu.dpy, 0);

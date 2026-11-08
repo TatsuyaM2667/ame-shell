@@ -44,10 +44,10 @@
 - 他のアプリのウィンドウ越しのブラーは、River 0.3.5 が `ext_background_effect` を出していないため不可能(確認済み)。ウィンドウ上に出るポップアップは色を濃くして対応。
 
 ## WASM ウィジェット
-- ABI: `src/widget_abi.zig`(ホストとウィジェットの両方が import)。
+- ABI: `src/widget/widget_abi.zig`(ホストとウィジェットの両方が import)。
 - ウィジェットは自分のメモリにコマンド配列とストアを持ち、ホストはそれを `m3_GetMemory` で直接読み書きする(ゼロコピー)。
 - import は `ame.action(i32, f32)` だけ。WASI 無効、メモリ 1MiB 固定。不正なコマンド種別は無視、文字列は境界チェック。
 - ホットリロード: inotify で `.wasm` の更新を検知 → `ame_state()` の領域を退避 → 再インスタンス化 → サイズが同じなら書き戻す。
 
 ## 設定
-`config.ame`(KDL/TOML 風 DSL、`src/config.zig`)。ディレクトリを inotify で監視し、保存した瞬間に再読込。
+`config.ame`(KDL/TOML 風 DSL、`src/core/config.zig`)。ディレクトリを inotify で監視し、保存した瞬間に再読込。

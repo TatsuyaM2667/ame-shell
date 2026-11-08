@@ -222,7 +222,7 @@ pub fn build(b: *std.Build) void {
     odin_wasm.addFileInput(b.path("anim/anim.odin"));
     odin_wasm.addFileInput(b.path("anim/fft.odin"));
     odin_wasm.addFileInput(b.path("anim/image.odin"));
-    const abi_mod = b.createModule(.{ .root_source_file = b.path("src/widget_abi.zig") });
+    const abi_mod = b.createModule(.{ .root_source_file = b.path("src/widget/widget_abi.zig") });
     const wasm_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
     for ([_][]const u8{ "clock", "sysmon", "media", "calendar", "controls" }) |name| {
         const w = b.addExecutable(.{

@@ -76,7 +76,7 @@ Chimera Linux x86_64 / musl / dinit / AMD Ryzen 7 7735HS (16 スレッド) / Rad
 - River 0.3.x には外部 WM プロトコル(river-window-management-v1)が無く、ウィンドウの位置はコンポジタ内部で決まる。layout-v3 はレイアウトの寸法を返すだけで補間フレームを挟めない → 実装不可。`docs/blockers.md` に River 0.4 移行時の手順を記載。
 
 ## クロスターゲット
-- `zig test src/config.zig -target {x86_64-linux-gnu, aarch64-linux-musl, x86_64-linux-musl} --test-no-exec`: 全て成功。
+- `zig test src/core/config.zig -target {x86_64-linux-gnu, aarch64-linux-musl, x86_64-linux-musl} --test-no-exec`: 全て成功。
 - `ame-ctl` を x86_64-linux-gnu(glibc, Arch 相当)でビルド: 成功。
 - `ame-shell` 本体の glibc ビルドは、glibc 環境のシステムライブラリ(wayland/EGL/freetype 等)に対してリンクする必要があるため、Arch 実機でのビルドを想定(build.zig は glibc/musl の差に依存しない書き方)。
 - `Debug` 以外はバイナリを strip(ame-shell 626KB, ame-ctl 14KB)。

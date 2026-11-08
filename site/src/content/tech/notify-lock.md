@@ -1,6 +1,6 @@
 # 通知とロック画面
 
-<p class="file">対象: src/notify.zig(589 行)/ src/lock.zig(408 行)</p>
+<p class="file">対象: src/desktop/notify.zig(589 行)/ src/lock/lock.zig(408 行)</p>
 
 :::easy このページを読む前に
 アプリが「お知らせ」を出したいとき、決まった宛先([[dbus|D-Bus]] の `org.freedesktop.Notifications`)にメッセージを送ります。ame-shell はその宛先になって、お知らせをガラスのカードとして出します。
@@ -11,7 +11,7 @@
 ## 通知サーバを内蔵する {#notify}
 
 ```zig
-// src/notify.zig
+// src/desktop/notify.zig
 // 通知: org.freedesktop.Notifications を内蔵実装し、右上にガラスのカードを積む。
 //
 // D-Bus は libdbus を private 接続で使い、その fd を epoll に載せる(スレッド不要)。
@@ -61,7 +61,7 @@ epoll で起きたら、たまっているメッセージを**待たずに**全�
 ## ロック画面: 閉じ込めないことを最優先に {#lock}
 
 ```zig
-// src/lock.zig
+// src/lock/lock.zig
 // ロック画面: ext-session-lock-v1 + PAM。
 //
 // 閉じ込め防止のため、ロックする「前」に認証が成立し得る構成かを確認する:

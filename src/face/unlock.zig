@@ -13,7 +13,7 @@
 //   顔の特徴 … OpenCV Zoo の SFace(Apache-2.0、ONNX。ame-face の onnx.zig で自作のエンジンの形に直す)
 const std = @import("std");
 const c = @import("../c.zig");
-const App = @import("../app.zig").App;
+const App = @import("../core/app.zig").App;
 const loop = @import("../platform/loop.zig");
 const sys = @import("../platform/sys.zig");
 // 顔の検出・特徴・照合の決まりは別のリポジトリ ame-face

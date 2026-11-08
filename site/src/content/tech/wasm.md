@@ -1,6 +1,6 @@
 # WebAssembly ウィジェット
 
-<p class="file">対象: src/wasm.zig(223 行)/ src/widget_abi.zig(71 行)/ widgets/ame.zig(SDK、193 行)/ widgets/*.zig(5 つ)</p>
+<p class="file">対象: src/widget/wasm.zig(223 行)/ src/widget/widget_abi.zig(71 行)/ widgets/ame.zig(SDK、193 行)/ widgets/*.zig(5 つ)</p>
 
 ダッシュボードの時計・メディア・クイックコントロール・システムモニタ・カレンダーは、**Zig で書いて wasm32 にビルドしたウィジェット**です。ame-shell の中の [wasm3](https://github.com/wasm3/wasm3) で動きます。
 
@@ -22,7 +22,7 @@
 ## ランタイム: wasm3 {#runtime}
 
 ```zig
-// src/wasm.zig
+// src/widget/wasm.zig
 // wasm3 を選んだ理由: 純 C で依存なし、musl でもそのままビルドでき、
 // インタプリタでも十分速い(ウィジェットは1フレーム数十命令〜数千命令程度)。WAMR は JIT/AOT
 // を使うと速いが、ビルド構成が大きく CMake 前提なので「zig build 一発」の方針に合わない。
@@ -44,7 +44,7 @@ wasm3 は**関数を初めて呼んだときに内部形式へ変換**します�
 ## 約束(ABI): 1 つのファイルを両側が import {#abi}
 
 ```zig
-// src/widget_abi.zig
+// src/widget/widget_abi.zig
 // ホスト(ame-shell)と WASM ウィジェットが共有するメモリレイアウト。
 // 両側がこの1ファイルを import するので、構造体の食い違いが起きない。
 // 非網羅的(_)にしておく: 壊れた/悪意あるウィジェットが未知の値を書いてもホストは無視するだけ

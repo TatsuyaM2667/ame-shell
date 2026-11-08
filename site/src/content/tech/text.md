@@ -1,6 +1,6 @@
 # 文字の描画
 
-<p class="file">対象: src/text.zig(363 行)/ gfx.zig の文字のシェーダ</p>
+<p class="file">対象: src/gfx/text.zig(363 行)/ gfx.zig の文字のシェーダ</p>
 
 ```
 fontconfig(書体を選ぶ) → HarfBuzz(並べる) → FreeType(輪郭を画像に) → SDF(距離場に変換) → 2048² のアトラス 1 枚 → シェーダ

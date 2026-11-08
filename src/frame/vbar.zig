@@ -3,15 +3,15 @@
 // 項目にマウスを乗せると、右側(枠の外)にポップアウトが生えてくる。
 const std = @import("std");
 const c = @import("../c.zig");
-const anim = @import("../anim.zig");
+const anim = @import("../gfx/anim.zig");
 const Spring = anim.Spring;
 const Color = anim.Color;
-const gfx = @import("../gfx.zig");
-const theme = @import("../theme.zig");
-const surface = @import("../surface.zig");
+const gfx = @import("../gfx/gfx.zig");
+const theme = @import("../gfx/theme.zig");
+const surface = @import("../core/surface.zig");
 const sys = @import("../platform/sys.zig");
 const loop = @import("../platform/loop.zig");
-const barmod = @import("../bar.zig");
+const barmod = @import("../desktop/bar.zig");
 const Frame = @import("frame.zig").Frame;
 
 pub const Pop = enum { none, window, clock, volume, network, bluetooth, battery };
@@ -396,7 +396,7 @@ pub fn popSize(f: *Frame, kind: Pop) [2]f32 {
     };
 }
 
-const audio = @import("../audio.zig");
+const audio = @import("../media/audio.zig");
 const ROW_A: f32 = 32;
 
 /// 音量ポップアウトの当たり判定(最後に描いた位置)
@@ -590,7 +590,7 @@ fn osLogoGlyph() ?struct { glyph: []const u8, color: ?Color } {
 fn loadOsLogo() c.GLuint {
     // AME_OS_ID で別の OS のロゴを試しているときは画像のロゴを使わない
     if (std.posix.getenv("AME_OS_ID") != null) return 0;
-    const icons = @import("../icons.zig");
+    const icons = @import("../gfx/icons.zig");
     var b: [1024]u8 = undefined;
     var name: []const u8 = "";
     if (sys.readFile("/etc/os-release", &b)) |s| {

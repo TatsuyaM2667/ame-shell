@@ -1,6 +1,6 @@
 # 起動とイベントループ
 
-<p class="file">対象: src/main.zig(80 行)/ src/platform/loop.zig(96 行)/ src/app.zig の run・onWarmTimer</p>
+<p class="file">対象: src/main.zig(80 行)/ src/platform/loop.zig(96 行)/ src/core/app.zig の run・onWarmTimer</p>
 
 :::easy このページを読む前に
 ame-shell は、画面の合図・時計・音量の変化・通知・設定ファイルの保存など、たくさんのことを同時に「待って」います。

@@ -2,16 +2,16 @@
 // タブを切り替えるとドロワー自体の大きさがスプリングで変わり、中身はクロスフェードする。
 const std = @import("std");
 const c = @import("../c.zig");
-const anim = @import("../anim.zig");
+const anim = @import("../gfx/anim.zig");
 const Spring = anim.Spring;
 const Color = anim.Color;
-const gfx = @import("../gfx.zig");
-const theme = @import("../theme.zig");
-const surface = @import("../surface.zig");
+const gfx = @import("../gfx/gfx.zig");
+const theme = @import("../gfx/theme.zig");
+const surface = @import("../core/surface.zig");
 const sys = @import("../platform/sys.zig");
-const barmod = @import("../bar.zig");
+const barmod = @import("../desktop/bar.zig");
 const data = @import("data.zig");
-const abi = @import("../widget_abi.zig");
+const abi = @import("../widget/widget_abi.zig");
 const Frame = @import("frame.zig").Frame;
 const loop = @import("../platform/loop.zig");
 
@@ -845,7 +845,7 @@ fn drawWorkspaces(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         const fg = if (focused) Color.hex(0x08101e) else if (occ) txt else sub;
         _ = cv.text(x + 24, y + tile_h / 2 + 12, 32, fg, lab[0..], .{ .bold = true });
         // このワークスペースで開いているアプリ: アイコン(最大 4 つ)+ 名前
-        var apps: [12]@import("../app.zig").App.WsApp = undefined;
+        var apps: [12]@import("../core/app.zig").App.WsApp = undefined;
         const na = app.workspaceApps(f.out, @intCast(i), &apps);
         if (na == 0) {
             _ = cv.text(x + tile_w - 16, y + tile_h / 2 + 6, 12, fg.alpha(0.8), if (occ) "ウィンドウあり" else "空", .{ .alignment = .right });
@@ -970,7 +970,7 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
         }
         if (ev.kind == .press and ev.button == 0x110) if (lh) |idx| {
             for (v.lyr_hits[0..v.n_lyr_hits]) |hh| if (hh.idx == idx) {
-                @import("../media.zig").seekTo(app.media, hh.t);
+                @import("../media/media.zig").seekTo(app.media, hh.t);
             };
             // 行を選んだら、スクロールをやめてその行から通常どおり
             v.lyr_touch_ms = 0;

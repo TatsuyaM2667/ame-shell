@@ -3,7 +3,7 @@
 // River のキーバインドから `riverctl map normal Super D spawn "ame-ctl launcher toggle"` のように呼ぶ。
 const std = @import("std");
 
-const ipc_path = @import("ipc_path.zig");
+const ipc_path = @import("core/ipc_path.zig");
 
 const c = @cImport({
     @cInclude("sys/socket.h");

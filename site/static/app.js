@@ -336,7 +336,7 @@ function fuzzyDemo(el) {
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
 // ---------------------------------------------------------------------------
-// デモ 3: 壁紙から配色(src/theme.zig の schemeFromPixels と同じ計算)
+// デモ 3: 壁紙から配色(src/gfx/theme.zig の schemeFromPixels と同じ計算)
 //   ガラス・文字の色合い … Odin の ame_dominant_color(anim.wasm をそのまま呼ぶ)
 //   アクセント         … Zig の vividHue → accentHue → fromHsl を JavaScript に移したもの
 // ---------------------------------------------------------------------------

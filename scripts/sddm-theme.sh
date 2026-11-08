@@ -13,7 +13,7 @@
 #  1. テーマ(Main.qml など)を SDDM のテーマの場所へ。theme.conf には共有の置き場(sharedir)を書く
 #  2. 共有の置き場 /var/lib/ame-shell/greeter/<ユーザー>(FreeBSD は /var/db/…)を、その人が書けるように作る。
 #     ame-shell がここへ、ロック画面の背景(backdrop.bmp)・写真(avatar.bmp)・アクセント色(state)を書き出し、
-#     次のログイン画面からそのまま使われる(root は要らない。src/sddmshare.zig)
+#     次のログイン画面からそのまま使われる(root は要らない。src/desktop/sddmshare.zig)
 #  3. 壁紙が画像・動画なら、それを background.jpg に(共有の置き場がまだ空のときの背景)
 #  4. SDDM の設定を上書きする(/etc/sddm.conf.d/zz-ame.conf。/usr/lib の既定と conf.d の他のファイルより後に読まれる):
 #     テーマ = ame、state を読むための QML_XHR_ALLOW_FILE_READ=1、
@@ -74,7 +74,7 @@ trap 'rm -rf "$TMP"' EXIT
 # ---- 1. テーマ本体(更新があれば入れ直す。背景は残す)----
 put "$SRC_THEME/Main.qml" "$DIR/Main.qml" 644
 put "$SRC_THEME/metadata.desktop" "$DIR/metadata.desktop" 644
-{ cat "$SRC_THEME/theme.conf"; echo "# ame-shell が書き出す背景・写真・アクセント色の置き場(src/sddmshare.zig)"; echo "sharedir=$SHARE"; } > "$TMP/theme.conf"
+{ cat "$SRC_THEME/theme.conf"; echo "# ame-shell が書き出す背景・写真・アクセント色の置き場(src/desktop/sddmshare.zig)"; echo "sharedir=$SHARE"; } > "$TMP/theme.conf"
 put "$TMP/theme.conf" "$DIR/theme.conf" 644
 
 # ---- 2. 共有の置き場(その人だけが書ける、ログイン画面(sddm ユーザー)が読める)----

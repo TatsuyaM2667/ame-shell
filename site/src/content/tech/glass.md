@@ -1,6 +1,6 @@
 # ガラス・壁紙・配色
 
-<p class="file">対象: src/gfx.zig(Backdrop・ガラスと壁紙のシェーダ)/ src/wallpaper.zig(463 行)/ src/theme.zig(310 行)</p>
+<p class="file">対象: src/gfx/gfx.zig(Backdrop・ガラスと壁紙のシェーダ)/ src/desktop/wallpaper.zig(463 行)/ src/gfx/theme.zig(310 行)</p>
 
 :::easy このページを読む前に
 すりガラスは「後ろの景色がぼやけて透けて見える」板です。画面でこれを作るには、パネルの後ろにある絵を知っていて、それをぼかす必要があります。
@@ -15,7 +15,7 @@ ame-shell は壁紙を自分で描いているので、パネルの後ろの壁�
 ガラス(すりガラスのパネル)を作るには、パネルの**後ろにある絵**をぼかす必要があります。普通のアプリは、自分の後ろに何があるかを知りません(Wayland では、ほかのクライアントの画面を読むことはできません)。ame-shell は**壁紙を自分で描いている**ので、パネルの後ろの壁紙を正確に知っています。これがガラスの土台です。
 
 ```zig
-// src/gfx.zig
+// src/gfx/gfx.zig
 /// 1つの出力の壁紙と、そのブラー済みテクスチャ。
 pub const Backdrop = struct {
     scene: Target = .{},
@@ -118,7 +118,7 @@ self.blurred = src.tex;
 - **雨**: 3 層の「夜の街のボケ」(セルごとの円)、3 層の雨の筋(列ごとに速さを変える)、下の 22% に水たまりの波紋。円がセルの境界をはみ出すと四角く欠けるので、「中心のずれ + 半径 < 0.5」に収めています(シェーダのコメントにある工夫)。
 
 ```zig
-// src/wallpaper.zig
+// src/desktop/wallpaper.zig
 // 省電力: ライブ壁紙はフレームコールバックを毎回は要求せず、timerfd で設定 FPS ごとに1回だけ
 // 描く。AC 電源から外れたら battery-fps に落とし、解像度も 3/4 にする。画像壁紙は
 // 切り替えのトランジション中しか描かないので待機時の負荷は 0。
@@ -160,7 +160,7 @@ if (u_trans == 1) {
 ## 配色: 壁紙から作る {#theme}
 
 ```zig
-// src/theme.zig
+// src/gfx/theme.zig
 pub fn schemeFromPixels(rgba: [*]const u8, w: c_int, h: c_int) Scheme {
     var work: [4096 * 4]u32 = undefined;
     const count = w * h;

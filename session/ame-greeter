@@ -1,6 +1,6 @@
 #!/bin/sh
 # ame-greeter: ame-shell のログイン画面。greetd が greeter のユーザー(Chimera: _greetd)で起動する(POSIX sh)。
-# River 0.5 の中で ame-shell をログイン画面のモード(AME_GREETER=1、src/greeter.zig)で動かす。
+# River 0.5 の中で ame-shell をログイン画面のモード(AME_GREETER=1、src/lock/greeter.zig)で動かす。
 # 見た目はロック画面と同じ。パスワードが合うと greetd がセッション(既定は「Ame Shell」)を始め、
 # ame-shell と River はここで終わる。
 #

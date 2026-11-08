@@ -1,6 +1,6 @@
 # ランチャーとアイコン
 
-<p class="file">対象: src/launcher.zig(1219 行)/ src/icons.zig(212 行)/ src/wallpick.zig(383 行)/ src/platform/sys.zig の spawnDetached</p>
+<p class="file">対象: src/desktop/launcher.zig(1219 行)/ src/gfx/icons.zig(212 行)/ src/desktop/wallpick.zig(383 行)/ src/platform/sys.zig の spawnDetached</p>
 
 :::easy このページを読む前に
 ランチャーは、アプリを名前で探して起動する部品です。「vsc」と打つだけで「Visual Studio Code」が見つかるのは、入力の文字が名前の中に順番どおりに出てくるかを調べているからです([[fuzzy-matching]])。
@@ -89,7 +89,7 @@ pub fn spawnDetached(cmdline: [*:0]const u8) void {
 ## アイコン: 全テーマの索引を 1 回だけ作る {#icons}
 
 ```zig
-// src/icons.zig
+// src/gfx/icons.zig
 // 検索: 入っている全アイコンテーマ(ユーザー設定のテーマ → hicolor → breeze-dark → breeze →
 // Adwaita → oxygen …)を一度だけ走査して「名前 → 一番良いファイル」の索引を作る。
 // テーマの中ではカテゴリ(apps / devices / preferences …)を問わず、SVG(拡大しても綺麗)を
@@ -129,7 +129,7 @@ fn run(self: *IconWorker, jobs: []IconJob, gen: u32) void {
 ## 壁紙ピッカー {#wallpick}
 
 ```zig
-// src/wallpick.zig
+// src/desktop/wallpick.zig
 // 全画面のオーバーレイに、斜め(平行四辺形)のカードを横一列に並べる。選択中のカードだけが
 // スプリングで大きく広がり、ほかは細い短冊になって暗くなる。カードの中の画像は横位置に応じて
 // 少しずれる(パララックス)。開くときはカードが下から時間差で飛び上がり、閉じるときは沈む。

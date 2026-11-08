@@ -17,7 +17,7 @@ pub const Store = abi.Store;
 pub const Action = abi.Action;
 pub const PointerKind = abi.PointerKind;
 
-// ---- ホストと共有するレイアウト(src/widget_abi.zig) ----
+// ---- ホストと共有するレイアウト(src/widget/widget_abi.zig) ----
 extern "ame" fn action(id: u32, value: f32) void;
 
 pub fn act(a: Action, v: f32) void {

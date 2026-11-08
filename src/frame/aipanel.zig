@@ -5,16 +5,16 @@
 //   キー     … API キーを貼り付けて保存(~/.config/ame-shell/ai-keys、0600)
 const std = @import("std");
 const c = @import("../c.zig");
-const anim = @import("../anim.zig");
+const anim = @import("../gfx/anim.zig");
 const Color = anim.Color;
-const gfx = @import("../gfx.zig");
-const textmod = @import("../text.zig");
-const theme = @import("../theme.zig");
-const surface = @import("../surface.zig");
+const gfx = @import("../gfx/gfx.zig");
+const textmod = @import("../gfx/text.zig");
+const theme = @import("../gfx/theme.zig");
+const surface = @import("../core/surface.zig");
 const loop = @import("../platform/loop.zig");
-const ai = @import("../ai.zig");
-const agent = @import("../agent.zig");
-const mcp = @import("../mcp.zig");
+const ai = @import("../ai/ai.zig");
+const agent = @import("../ai/agent.zig");
+const mcp = @import("../ai/mcp.zig");
 const Frame = @import("frame.zig").Frame;
 
 pub const W: f32 = 440;
@@ -86,8 +86,8 @@ pub fn onOpen(f: *Frame) void {
     ai.ensure(f.app);
     agent.ensure(f.app);
     mcp.ensure(f.app);
-    @import("../clipboard.zig").prepare(f.app);
-    @import("../ime.zig").update(f.app);
+    @import("../desktop/clipboard.zig").prepare(f.app);
+    @import("../desktop/ime.zig").update(f.app);
     st.frame = f;
     st.mode = .chat;
     st.scroll = 0;
@@ -1091,7 +1091,7 @@ fn goMode(m: Mode) void {
     }
     if (m == .sessions) rebuildSessions();
     if (m == .mcp) mcp.ensure(st.frame.?.app);
-    if (st.frame) |f| @import("../ime.zig").update(f.app);
+    if (st.frame) |f| @import("../desktop/ime.zig").update(f.app);
 }
 
 fn submit() void {

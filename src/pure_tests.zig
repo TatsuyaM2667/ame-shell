@@ -1,23 +1,23 @@
 // OS/GPU に依存しない部分のテスト(`zig build test`)。クロスターゲットでも走らせられる。
 const std = @import("std");
-const anim = @import("anim.zig");
+const anim = @import("gfx/anim.zig");
 test {
-    _ = @import("config.zig");
-    _ = @import("portal.zig");
-    _ = @import("greeter.zig");
-    _ = @import("png.zig");
-    _ = @import("icons.zig");
-    _ = @import("lyrics.zig");
+    _ = @import("core/config.zig");
+    _ = @import("desktop/portal.zig");
+    _ = @import("lock/greeter.zig");
+    _ = @import("gfx/png.zig");
+    _ = @import("gfx/icons.zig");
+    _ = @import("media/lyrics.zig");
     _ = @import("ame_lib");
-    _ = @import("chargeanim.zig");
-    _ = @import("airpods.zig");
-    _ = @import("airpodspopup.zig");
-    _ = @import("btresume.zig");
+    _ = @import("desktop/chargeanim.zig");
+    _ = @import("device/airpods.zig");
+    _ = @import("device/airpodspopup.zig");
+    _ = @import("device/btresume.zig");
     _ = @import("hand/poses.zig");
     _ = @import("hand/custom.zig");
-    _ = @import("ai.zig");
-    _ = @import("agent.zig");
-    _ = @import("mcp.zig");
+    _ = @import("ai/ai.zig");
+    _ = @import("ai/agent.zig");
+    _ = @import("ai/mcp.zig");
     _ = @import("platform/sys.zig");
     _ = @import("frame/island.zig");
 }

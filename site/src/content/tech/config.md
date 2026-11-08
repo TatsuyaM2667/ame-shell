@@ -1,6 +1,6 @@
 # 設定と ame-ctl
 
-<p class="file">対象: src/config.zig(345 行)/ src/ipc.zig(242 行)/ src/ctl.zig(59 行)/ app.zig の inotify</p>
+<p class="file">対象: src/core/config.zig(345 行)/ src/core/ipc.zig(242 行)/ src/ctl.zig(59 行)/ app.zig の inotify</p>
 
 :::easy このページを読む前に
 ame-shell の設定は、`config.ame` というテキストファイルに書きます。`theme { accent #7ab8ff }` のように、色も引用符なしで書けます。ファイルを保存した瞬間に反映されます([[inotify]])。
@@ -11,7 +11,7 @@ ame-shell の設定は、`config.ame` というテキストファイルに書き
 ## 設定の言語: 小さな DSL {#dsl}
 
 ```zig
-// src/config.zig
+// src/core/config.zig
 // 設定 DSL(KDL/TOML 風の小さな言語)のパーサ。
 //
 //   // コメント(# の後に空白、でも可)
@@ -92,7 +92,7 @@ self.loop.add(self.inotify_fd, c.EPOLLIN, self, onInotify) catch {};
 ## ame-ctl: Unix ソケットに 1 行 {#ctl}
 
 ```zig
-// src/ipc.zig
+// src/core/ipc.zig
 // ame-ctl からの操作を受ける Unix ソケット。
 // パス: $XDG_RUNTIME_DIR/ame-shell-$WAYLAND_DISPLAY.sock(ネストしたテスト用インスタンスと衝突しないよう
 // Wayland ディスプレイ名を含める)。1行1コマンド、応答も1行(複数行の場合あり)で返して切断する。

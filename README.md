@@ -67,7 +67,7 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
   - ame-shell が WM を兼ねるセッション(River 0.5。FreeBSD は常にこれ)では窓そのものをつかんで動かし・ズームします。River 0.3 のセッション(Chimera・Arch で内蔵 WM を使わないとき)では、ワークスペース・閉じる・全画面・浮かせる・大きく/小さく を riverctl と同じ命令で行い、つまんで動かすのは左ボタンのドラッグになります
 - **充電のアニメーション**: 充電器をつなぐと、iPhone の MagSafe のように画面全体に光の輪と残り % のリングを出す。外したときは光の輪が吸い込まれ、リングの色が抜ける。このときは抜き差しの通知は出さない(ロック中も。`shell { charge-animation off }` で出さない)
 - **ホーム画面の曲のウィジェット**: ロック画面と同じ曲のカードを、デスクトップの四隅のどこかに置く(同期歌詞つき)。ジャケットを押すと、ロック画面と同じく「再生中」を画面いっぱいに広げる(窓の下。ドラッグで近い隅へ動かせ、覚える。`ame-ctl widget music <隅>`、`music-widget { corner … }`)
-- **ロック画面**(Super+L、ext-session-lock + PAM。iOS / iPadOS のロック画面のような作り、`src/lockui.zig`):
+- **ロック画面**(Super+L、ext-session-lock + PAM。iOS / iPadOS のロック画面のような作り、`src/lock/lockui.zig`):
   - 眺める画面: くっきりした壁紙(オーロラ・雨はロック中も動き続ける)の上に日付・特大の時計・電池、
     再生中の曲(右下の小さなカード。ジャケットを押すと、iPhone / iPad のように真ん中の大きなジャケットとその色の背景に広がる: 回るレコードと液体のビジュアライザー、進み具合(クリック・ドラッグで移動)、前・再生・次のボタン、音量のつまみ(ドラッグ・ホイール、スピーカーで消音)。音量・曲送りのキーもそのまま効く。歌詞はダッシュボードと同じ見せ方で上に浮かぶ)、
     通知(通知センターと同じ履歴。新しい順に重なり、押すと広がる)、光が流れる「解除するには…」とホームバー
@@ -144,7 +144,7 @@ Bluetooth のイヤホンの音には `pipewire-audio`、バーのアイコン�
   FreeBSD はインストーラが I2C(ig4・iichid・hmt)と PS/2(psm の Synaptics / Elantech)のドライバを設定します。後からは `doas sh scripts/freebsd-touchpad.sh`(再起動後に有効)、状態の確認は `sh scripts/freebsd-touchpad.sh --check`。
 - **Bluetooth(FreeBSD)**: インストーラと ame-update が、内蔵アダプタのファームウェア(Realtek: rtlbt-firmware / Intel: iwmbt-firmware)・ng_ubt・hcsecd / sdpd / bthidd を設定します。後からは `doas sh scripts/freebsd-bluetooth.sh`、確認は `--check`。機器のペアリングは今のところ端末で `doas bluetooth-config scan`(マウス・キーボード)。
 - **無線のブロック解除**: Linux ではセッションの開始時に `rfkill unblock all`(と `bluetoothctl power on`)。ログイン直後は `/dev/rfkill` の権限がまだ付いていないことがあるので、裏で数秒おきに試します。Bluetooth の電源を設定パネル・サイドバーから入れるときも、先にブロックを外します。
-- **ログイン画面**: ame-shell 自身が描く(greetd + `ame-greeter`、`src/greeter.zig`)。**ロック画面と同じ見た目と動き**で、SDDM は要りません。
+- **ログイン画面**: ame-shell 自身が描く(greetd + `ame-greeter`、`src/lock/greeter.zig`)。**ロック画面と同じ見た目と動き**で、SDDM は要りません。
   - greetd が greeter 用のユーザー(Chimera: `_greetd`)で River 0.5 + ame-shell をログイン画面のモードで起動し、パスワードが合うと greetd がセッション(既定は「Ame Shell」)を始めます
   - 写真の左右の ‹ › でユーザー、左下でセッションを切り替え、右下に再起動・電源オフ。最後にログインした人が最初に出ます
   - 背景と写真は、ユーザーごとの置き場 `/var/lib/ame-shell/greeter/<ユーザー>`(FreeBSD は `/var/db/…`)から。ame-shell が起動したとき・壁紙を変えたとき・ロックしたときに、壁紙(画像なら絵、オーロラ・雨なら種類だけ)・ぼかした背景・写真・アクセント色をそこへ書きます(root は要りません。この置き場は誰でも読めます)

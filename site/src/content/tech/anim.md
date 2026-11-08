@@ -1,6 +1,6 @@
 # ばねとアニメーションの中核
 
-<p class="file">対象: anim/anim.odin(192 行)/ src/anim.zig(126 行)/ src/pure_tests.zig</p>
+<p class="file">対象: anim/anim.odin(192 行)/ src/gfx/anim.zig(126 行)/ src/pure_tests.zig</p>
 
 ame-shell のすべての動きは、`ame_spring_step` という 1 つの関数で計算しています。窓・パネル・通知・歌詞・トーンアーム・壁紙の切り替え・WebAssembly のウィジェットまで、同じ関数です。[アニメーション](#/animation)のページのデモは、この関数そのものをブラウザで動かしています。
 
@@ -125,7 +125,7 @@ MAX_STEP :: f32(0.001)
 ## 途中で行き先が変わっても速度を保つ {#retarget}
 
 ```zig
-// src/anim.zig
+// src/gfx/anim.zig
 /// 目標を変える。現在の位置と速度はそのまま(速度連続)。
 pub fn set(self: *Spring, t: f32) void {
     self.target = t;

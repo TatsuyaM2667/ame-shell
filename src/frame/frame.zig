@@ -13,19 +13,19 @@
 // (全面アンカーのサーフェスには排他領域を設定できないため)。
 const std = @import("std");
 
-const anim = @import("../anim.zig");
+const anim = @import("../gfx/anim.zig");
 const Spring = anim.Spring;
 const Color = anim.Color;
-const appmod = @import("../app.zig");
+const appmod = @import("../core/app.zig");
 const App = appmod.App;
 const Output = appmod.Output;
 const c = @import("../c.zig");
-const gfx = @import("../gfx.zig");
+const gfx = @import("../gfx/gfx.zig");
 const loop = @import("../platform/loop.zig");
 const sys = @import("../platform/sys.zig");
-const surface = @import("../surface.zig");
+const surface = @import("../core/surface.zig");
 const Surface = surface.Surface;
-const theme = @import("../theme.zig");
+const theme = @import("../gfx/theme.zig");
 const dash = @import("dash.zig");
 const data = @import("data.zig");
 const netpanel = @import("netpanel.zig");
@@ -328,7 +328,7 @@ pub const Frame = struct {
             aipanel.onOpen(self);
         }
         self.afterOpenChange();
-        @import("../ime.zig").update(self.app);
+        @import("../desktop/ime.zig").update(self.app);
     }
     /// キーボードがこの枠に来た: AI チャットの「開いた直後の排他」を解く
     pub fn keyboardEntered(self: *Frame) void {

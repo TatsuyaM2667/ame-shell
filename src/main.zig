@@ -1,7 +1,7 @@
 // ame-shell エントリポイント。
 const std = @import("std");
 const c = @import("c.zig");
-const App = @import("app.zig").App;
+const App = @import("core/app.zig").App;
 
 pub const std_options: std.Options = .{ .log_level = .info };
 

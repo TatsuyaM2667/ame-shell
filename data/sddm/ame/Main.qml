@@ -1,10 +1,10 @@
-// ame-shell の SDDM テーマ(ログイン画面)。Super+L のロック画面(src/lock.zig)と同じ見た目:
+// ame-shell の SDDM テーマ(ログイン画面)。Super+L のロック画面(src/lock/lock.zig)と同じ見た目:
 // ぼかした壁紙の上に、アクセント色で光る大きな時計・日付・丸いユーザーの写真・ガラスの丸い入力欄、
 // 入力した文字は ● ではなくアクセント色の丸で表す。大きさ・位置は lock.zig と同じ数値(論理 px)。
 // QML は ame-shell では使わない決まりだが、SDDM のテーマは QML でしか書けないので、ここだけの例外。
 //
 // 背景・写真・アクセント色は、ame-shell がユーザーごとの置き場(theme.conf の sharedir/<ユーザー名>/)に
-// 書き出したものを使う(src/sddmshare.zig): backdrop.bmp・avatar.bmp・state(accent= と tinted=)。
+// 書き出したものを使う(src/desktop/sddmshare.zig): backdrop.bmp・avatar.bmp・state(accent= と tinted=)。
 // ロックしたときに書き出した背景(tinted=1)は、ロック画面の背景そのもの。無ければ background.jpg
 // (scripts/sddm-theme.sh が壁紙から作る)をぼかし、それも無ければオーロラ風の背景。
 // state を読むため、SDDM の設定で QML_XHR_ALLOW_FILE_READ=1 を渡している(scripts/sddm-theme.sh)。

@@ -9,16 +9,16 @@
 // 手でも操作できる(ハンド操作のカーソルでつまむとクリックになるため)。
 // 開く: ランチャーの「ハンドのポーズ」・手のメニューの「ポーズの設定」・ame-ctl hand poses
 const std = @import("std");
-const anim = @import("../anim.zig");
+const anim = @import("../gfx/anim.zig");
 const Spring = anim.Spring;
 const Color = anim.Color;
-const appmod = @import("../app.zig");
+const appmod = @import("../core/app.zig");
 const App = appmod.App;
 const Output = appmod.Output;
 const c = @import("../c.zig");
-const gfx = @import("../gfx.zig");
-const theme = @import("../theme.zig");
-const surface = @import("../surface.zig");
+const gfx = @import("../gfx/gfx.zig");
+const theme = @import("../gfx/theme.zig");
+const surface = @import("../core/surface.zig");
 const Surface = surface.Surface;
 const poses = @import("poses.zig");
 const custom = @import("custom.zig");
