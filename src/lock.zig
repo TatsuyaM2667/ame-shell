@@ -94,8 +94,6 @@ pub const Lock = struct {
     expand: Spring = Spring.init(0, 0.4, 0.85),
     ring: Spring = Spring.init(0, 0.4, 0.85),
     notif_expanded: bool = false,
-    /// これより新しい ID の通知をロック画面に出す(ロックしてから来たもの)
-    first_notif_id: u32 = 0,
     cards: [6]lockui.Card = [_]lockui.Card{.{}} ** 6,
     /// 広げた「再生中」(ジャケットを押すと、真ん中に大きなジャケットと、その色の背景。iPhone / iPad のロック画面のように)
     /// 充電器をつないだときのアニメーション(chargeanim.zig)の経過秒(-1 = 出していない)。ロック中はロック画面の上に描く
@@ -275,7 +273,6 @@ pub const Lock = struct {
         self.music.reset(self.app);
         self.np_open = false;
         self.np.snap(0);
-        self.first_notif_id = self.app.notifs.next_id;
         for (&self.cards) |*cd| cd.* = .{};
         self.updateSpectrum();
         self.unlock_s.snap(0);

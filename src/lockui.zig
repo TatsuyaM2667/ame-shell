@@ -273,12 +273,11 @@ pub fn draw(self: *Lock, s: *Surface, out_backdrop: ?*gfx.Backdrop, cv: *gfx.Can
         self.music.drawNowPlaying(app, cv, W, H, date_y + 128 * clock_scale + 40, self.np.x, np_e, self.np_from, self.np_open, acc);
     }
 
-    // ---- 通知(ロック中に来たもの。新しい順に重ねる。押すと広げる)----
+    // ---- 通知(通知センターと同じ履歴。新しい順に重ねる。押すと広げる)----
     var shown: [6]*const @import("notify.zig").Notif = undefined;
     var ns: usize = 0;
     for (app.notifs.history.items) |*n| {
         if (self.greeter) break; // ログイン画面には出さない
-        if (n.id < self.first_notif_id) break;
         if (ns >= shown.len) break;
         shown[ns] = n;
         ns += 1;
