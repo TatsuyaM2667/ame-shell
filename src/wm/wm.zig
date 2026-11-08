@@ -870,6 +870,7 @@ pub const Wm = struct {
         // 右のタグへ移るなら、今の窓は左へ出て、新しい窓は右から入る
         const dir: f32 = if (@ctz(mask) > @ctz(old)) -1 else 1;
         const dist = @as(f32, @floatFromInt(o.w)) + 40;
+        @import("../frame/island.zig").workspace(self.app, @intCast(@ctz(mask) + 1), -dir);
         o.prev_tags = old;
         o.tags = mask;
         for (self.windows.items) |w| {

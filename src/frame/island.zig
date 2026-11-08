@@ -1,5 +1,7 @@
 // ダイナミックアイランド: 枠の上の中央から生える小さな島。状況に合わせて、ばねで伸び縮みする。
-//   ふだん      … AI の目(ときどきまばたき・きょろきょろ。カーソルが近づくとそちらを見る)。押すと AI チャット
+//   ふだん      … AI の目(まばたき・きょろきょろ・カーソルを見る・眠る)。乗せると手を振る、右クリックでつつくと目を隠す。
+//                 押すと AI チャット。電池が少ないと困り眉
+//   ワークスペース … 切り替えたとき番号を少し出す(目は移った方を見る)
 //   再生中      … ジャケットと曲名と目。乗せると広がって、進み具合と 前 / 再生 / 次
 //   通知        … 4 秒だけ広がって、アプリ名と要約(目は嬉しい形)。押すと通知センター
 //   AI の作業中 … 回るしるし(終わったら「終わりました」を少し出す)。押すと AI チャット
@@ -26,6 +28,9 @@ const SLEEP_MS = 90_000;
 const IDLE_MS = 4000;
 
 const Peek = enum { none, notif, done };
+/// 手: 手を振る / 両手を上げて喜ぶ / 両手で目を隠す(つつかれた)
+const Gesture = enum { none, wave, yay, cover };
+const WS_MS = 1400;
 
 const State = struct {
     timer: ?loop.Timer = null,
@@ -40,6 +45,12 @@ const State = struct {
     /// 最後に何か起きた時刻(カーソル・通知・乗せる)。しばらく何もなければ眠くなる
     last_activity: u64 = 0,
     sleepy: bool = false,
+    /// 手の動き(出番のときだけ出てくる)
+    gesture: Gesture = .none,
+    gesture_t0: u64 = 0,
+    /// ワークスペースを切り替えた: 島に番号を少し出す(目は移った方を見る)
+    ws_num: u8 = 0,
+    ws_until: u64 = 0,
     next_blink: u64 = 0,
     blink_t0: u64 = 0,
     next_glance: u64 = 0,
@@ -95,6 +106,7 @@ fn arm() void {
     if (st.peek != .none) next = @min(next, st.peek_until);
     if (st.rec_since != 0) next = @min(next, now + 1000 - (now - st.rec_since) % 1000);
     if (st.following) next = @min(next, st.last_move + IDLE_MS);
+    if (st.ws_until != 0) next = @min(next, st.ws_until);
     if (!st.sleepy) next = @min(next, st.last_activity + SLEEP_MS);
     t.arm(@max(1, next -| now), 0);
 }
@@ -140,6 +152,10 @@ fn onTimer(_: *anyopaque, _: c_int, _: u32) void {
         } else st.next_glance = now + 4000;
     }
     if (st.peek != .none and now >= st.peek_until) st.peek = .none;
+    if (st.ws_until != 0 and now >= st.ws_until) {
+        st.ws_until = 0;
+        if (!st.following) st.look_x.set(0);
+    }
     arm();
     redrawAll();
 }
@@ -157,6 +173,7 @@ pub fn peekNotif(app: *App, app_name: []const u8, summary: []const u8) void {
     set(&st.peek_app, &st.peek_app_len, app_name);
     // びっくりして目を見開き、ぴょんと跳ねる
     react(0.4, 260);
+    gesture(.yay);
     set(&st.peek_text, &st.peek_text_len, summary);
     arm();
     redrawAll();
@@ -214,7 +231,7 @@ fn lookAt(f: *Frame, x: f32, y: f32) void {
 // 大きさと描画
 // ---------------------------------------------------------------------------
 
-const Kind = enum { idle, music, busy, recording, peek, music_big };
+const Kind = enum { idle, music, busy, recording, peek, workspace, music_big };
 
 fn agentBusy() bool {
     const agent = @import("../agent.zig");
@@ -226,6 +243,7 @@ fn kindOf(f: *Frame) Kind {
     const playing = app.media.status != .none;
     if (st.hover and playing) return .music_big;
     if (st.peek != .none) return .peek;
+    if (st.ws_until != 0) return .workspace;
     if (f.sidev.recording) return .recording;
     if (agentBusy()) return .busy;
     if (playing) return .music;
@@ -240,11 +258,12 @@ pub fn size(f: *Frame) ?[2]f32 {
     // ダッシュボードを開いている間は引っ込む(同じ場所)
     if (f.dash.visible()) return null;
     return switch (kindOf(f)) {
-        .idle => .{ 132, 42 },
+        .idle => .{ 210, 46 },
+        .workspace => .{ 250, 46 },
         .music => .{ 272, 38 },
         .busy => .{ 250, 34 },
         .recording => .{ 176, 34 },
-        .peek => .{ 380, 66 },
+        .peek => .{ 400, 66 },
         .music_big => .{ 400, 148 },
     };
 }
@@ -265,6 +284,7 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
         if (hv) {
             wake();
             react(0.25, 200);
+            gesture(.wave);
         }
     }
     // AI の作業が終わった: 少しだけ知らせる
@@ -274,6 +294,7 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
         set(&st.busy_name, &st.busy_name_len, if (agent.isActive()) agent.name(agent.current()) else "AI");
     } else if (st.was_busy) {
         st.peek = .done;
+        gesture(.yay);
         st.peek_until = now + DONE_MS;
         arm();
     }
@@ -299,16 +320,28 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
     if (fit < 0.75) return true;
     cv.opacity((fit - 0.75) * 4);
     switch (kindOf(f)) {
-        .idle => drawEyes(cv, w / 2, h / 2 - 1, 1, blink, if (st.hover) .happy else if (st.sleepy) .sleepy else .normal, acc),
+        .idle => {
+            const covered = st.gesture == .cover and handsActive(now);
+            const low = app.sys.battery.present and !app.sys.battery.on_ac and app.sys.battery.percent <= 15;
+            const mood: Mood = if (covered) .squint else if (st.hover) .happy else if (st.sleepy) .sleepy else if (low) .worried else .normal;
+            drawEyes(cv, w / 2, h / 2 - 1, 1, blink, mood, acc);
+            if (drawHands(cv, w / 2, h / 2 - 1, 1, now, acc)) animating = true;
+        },
+        .workspace => {
+            drawEyes(cv, 46, h / 2 - 1, 0.75, blink, .normal, acc);
+            var b: [48]u8 = undefined;
+            _ = cv.text(92, h / 2 + 6, 15, txt, std.fmt.bufPrint(&b, "ワークスペース {d}", .{st.ws_num}) catch "", .{ .bold = true });
+        },
         .peek => {
-            drawEyes(cv, 34, h / 2, 0.8, blink, .happy, acc);
+            drawEyes(cv, 54, h / 2, 0.8, blink, .happy, acc);
+            if (drawHands(cv, 54, h / 2, 0.8, now, acc)) animating = true;
             if (st.peek == .done) {
                 var b: [120]u8 = undefined;
-                _ = cv.text(64, h / 2 - 4, 13.5, txt, std.fmt.bufPrint(&b, "{s} が終わりました", .{st.busy_name[0..st.busy_name_len]}) catch "", .{ .bold = true, .max_w = w - 80 });
-                _ = cv.text(64, h / 2 + 15, 12, sub, "押すと結果を見られます", .{ .max_w = w - 80 });
+                _ = cv.text(104, h / 2 - 4, 13.5, txt, std.fmt.bufPrint(&b, "{s} が終わりました", .{st.busy_name[0..st.busy_name_len]}) catch "", .{ .bold = true, .max_w = w - 120 });
+                _ = cv.text(104, h / 2 + 15, 12, sub, "押すと結果を見られます", .{ .max_w = w - 120 });
             } else {
-                _ = cv.text(64, h / 2 - 4, 12, acc.lighten(0.3), st.peek_app[0..st.peek_app_len], .{ .bold = true, .max_w = w - 80 });
-                _ = cv.text(64, h / 2 + 15, 13.5, txt, st.peek_text[0..st.peek_text_len], .{ .max_w = w - 80 });
+                _ = cv.text(104, h / 2 - 4, 12, acc.lighten(0.3), st.peek_app[0..st.peek_app_len], .{ .bold = true, .max_w = w - 120 });
+                _ = cv.text(104, h / 2 + 15, 13.5, txt, st.peek_text[0..st.peek_text_len], .{ .max_w = w - 120 });
             }
         },
         .busy => {
@@ -344,7 +377,7 @@ pub fn draw(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32) bool {
 }
 
 /// 目: (cx, cy) が真ん中。open = まぶたの開き(1 で全開)、happy = にっこり(^ ^)
-const Mood = enum { normal, happy, sleepy };
+const Mood = enum { normal, happy, sleepy, worried, squint };
 
 /// 目: (cx, cy) が真ん中、k が大きさ。open = まぶたの開き(1 で全開)
 fn drawEyes(cv: *gfx.Canvas, cx: f32, cy: f32, k: f32, open: f32, mood: Mood, acc: Color) void {
@@ -370,18 +403,29 @@ fn drawEyes(cv: *gfx.Canvas, cx: f32, cy: f32, k: f32, open: f32, mood: Mood, ac
                 cv.line(x, y - 5 * k, x + a, y + 3 * k, 3.4 * k, white);
                 cv.shadow(x + side * 8 * k - 7 * k, y + 7 * k, 14 * k, 6 * k, 3 * k, 7 * k, Color.hex(0xff8fb3).alpha(0.8));
             },
+            .squint => {
+                // ぎゅっ(> <)
+                const a = ew * 0.55;
+                cv.line(x - side * a, y - 5 * k, x + side * a, y, 3 * k, white);
+                cv.line(x + side * a, y, x - side * a, y + 5 * k, 3 * k, white);
+            },
             .sleepy => {
                 // すやすや(閉じた目の ‿)
                 const a = ew * 0.55;
                 cv.line(x - a, y, x, y + 3 * k, 2.6 * k, tint);
                 cv.line(x, y + 3 * k, x + a, y, 2.6 * k, tint);
             },
-            .normal => {
+            .normal, .worried => {
                 const w2 = ew * pk * (1 + 0.25 * (1 - open)); // まばたきの間は少し横に広がる
                 const h2 = @max(eh * pk * open, 3 * k);
                 // ほんのり光る、まるい縦長の目。上は白、下は少し色づく
                 cv.shadow(x - w2 / 2, y - h2 / 2, w2, h2, w2 / 2, 9 * k, acc.lighten(0.4).alpha(0.38));
                 cv.rectGrad(x - w2 / 2, y - h2 / 2, w2, h2, w2 / 2, white, tint);
+                if (mood == .worried) {
+                    // 困り眉(内側が上がる「八」の字)
+                    const bx = w2 * 0.7;
+                    cv.line(x + side * bx, y - h2 / 2 - 3 * k, x - side * bx * 0.3, y - h2 / 2 - 8 * k, 2.4 * k, tint);
+                }
             },
         }
     }
@@ -433,6 +477,13 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
     const changed = b != st.hover_btn;
     st.hover_btn = b;
     if (ev.kind != .press) return changed or ev.kind == .enter or ev.kind == .motion;
+    // 右クリック: つつく(両手で目を隠して、ぷるぷる)
+    if (ev.button == 0x111 and kind == .idle) {
+        wake();
+        gesture(.cover);
+        react(-0.3, 120);
+        return true;
+    }
     switch (kind) {
         .music_big => switch (b) {
             0 => app.media.prev(),
@@ -448,8 +499,7 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
             f.toggleSidebar();
         },
         .idle, .busy => f.toggleAi(),
-        .music => {},
-        .recording => {},
+        .music, .recording, .workspace => {},
     }
     return true;
 }
@@ -472,4 +522,79 @@ fn wake() void {
     st.look_y.set(0);
     react(0.5, 300);
     arm();
+}
+
+fn gestureMs(g: Gesture) u64 {
+    return switch (g) {
+        .none => 0,
+        .wave => 1500,
+        .yay => 1300,
+        .cover => 1400,
+    };
+}
+
+fn gesture(g: Gesture) void {
+    st.gesture = g;
+    st.gesture_t0 = loop.nowMs();
+    redrawAll();
+}
+
+fn handsActive(now: u64) bool {
+    return st.gesture != .none and now -| st.gesture_t0 < gestureMs(st.gesture);
+}
+
+/// ワークスペースを切り替えた(wm.zig)。dir = +1 で右(次)へ、-1 で左へ
+pub fn workspace(app: *App, n: u8, dir: f32) void {
+    if (!app.cfg.island or st.timer == null) return;
+    st.ws_num = n;
+    st.ws_until = loop.nowMs() + WS_MS;
+    st.look_x.set(dir * 0.9);
+    react(0.2, 180);
+    arm();
+}
+
+/// 手(白いまるい手に、ピンクの肉球)。出番のときだけ、ぴょこっと出て引っ込む。動いている間は true
+fn drawHands(cv: *gfx.Canvas, cx: f32, cy: f32, k: f32, now: u64, acc: Color) bool {
+    if (!handsActive(now)) {
+        st.gesture = .none;
+        return false;
+    }
+    const p = @as(f32, @floatFromInt(now - st.gesture_t0)) / @as(f32, @floatFromInt(gestureMs(st.gesture)));
+    // 出てくる・引っ込む(最初と最後の 15% で大きさを 0 ⇄ 1)
+    const pop = std.math.clamp(@min(p, 1 - p) / 0.15, 0, 1);
+    const sc = pop * (1 + 0.15 * @sin(pop * std.math.pi)); // 出るときに少し大きくなって戻る
+    const gap = 17 * k;
+    const side_x = gap + 34 * k;
+    const wave = @sin(p * std.math.pi * 7);
+    switch (st.gesture) {
+        .wave => paw(cv, cx + side_x + wave * 5 * k, cy - 4 * k - @abs(wave) * 3 * k, k * sc, wave * 0.5, acc),
+        .yay => {
+            const bob = @abs(@sin(p * std.math.pi * 5)) * 5 * k;
+            paw(cv, cx - side_x + 4 * k, cy - 8 * k - bob, k * sc, -0.4, acc);
+            paw(cv, cx + side_x - 4 * k, cy - 8 * k - bob, k * sc, 0.4, acc);
+        },
+        .cover => {
+            const shake = @sin(p * std.math.pi * 16) * 2 * k;
+            paw(cv, cx - gap + shake, cy + 1 * k, k * sc * 1.25, 0.2, acc);
+            paw(cv, cx + gap + shake, cy + 1 * k, k * sc * 1.25, -0.2, acc);
+        },
+        .none => {},
+    }
+    return true;
+}
+
+/// まるい手: 白い手のひらに、ピンクの肉球と 3 つの指の豆。tilt = 傾き(-1〜1、指の豆の並びをずらす)
+fn paw(cv: *gfx.Canvas, x: f32, y: f32, k: f32, tilt: f32, acc: Color) void {
+    if (k < 0.05) return;
+    const r = 8 * k;
+    const white = Color.hex(0xffffff);
+    const pink = Color.hex(0xff9dbb);
+    cv.shadow(x - r, y - r, r * 2, r * 2, r, 8 * k, acc.lighten(0.4).alpha(0.35));
+    cv.rect(x - r, y - r, r * 2, r * 2, r, white);
+    cv.rect(x - 3 * k, y - 0.5 * k, 6 * k, 4.5 * k, 2.25 * k, pink);
+    for ([_]f32{ -1, 0, 1 }) |i| {
+        const bx = x + (i * 3.6 + tilt * 1.5) * k;
+        const by = y - 4.2 * k + @abs(i) * 1.2 * k;
+        cv.rect(bx - 1.3 * k, by - 1.3 * k, 2.6 * k, 2.6 * k, 1.3 * k, pink);
+    }
 }
