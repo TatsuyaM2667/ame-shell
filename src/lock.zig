@@ -120,8 +120,8 @@ pub const Lock = struct {
     face_fails: u8 = 0,
     /// ログイン画面: 顔でのログインを greetd に頼んでいる子プロセスの結果の fd
     face_fd: c_int = -1,
+    face_pid: c_int = 0,
     /// ログイン画面: 顔の確認中に Enter が押された(終わったらパスワードで続ける)
-    auth_pending: bool = false,
     /// ログイン画面: 顔認証の PAM モジュールが入っていない(もう試さない)
     greeter_face_off: bool = false,
     spectrum: framedata.Spectrum,
@@ -257,6 +257,8 @@ pub const Lock = struct {
         self.session = sess;
         _ = c.ext_session_lock_v1_add_listener(sess, &session_listener, self);
         self.locked = true;
+        // 窓で覆われて止めていた壁紙の動画も、ロック画面の下では動かす
+        for (self.app.outputs.items) |o| if (o.wall) |w| w.setCovered(false);
         self.sddm_saved = false;
         self.unlocking = false;
         self.pw_len = 0;
@@ -391,12 +393,14 @@ pub const Lock = struct {
 
     fn startAuth(self: *Lock) void {
         if (self.busy or self.pw_len == 0) return;
-        // ログイン画面: greetd は同時に 1 つしか受けないので、顔の確認が終わってからパスワードで
+        // ログイン画面: パスワードが入ったら、顔の確認は待たずにやめる(顔認証は必須ではない)。
+        // 顔を確かめている子プロセスを止めると、greetd との接続が切れて、その顔のセッションも取り消される
         if (self.greeter and self.face_fd >= 0) {
-            self.auth_pending = true;
-            self.setMsg("顔の確認が終わるのを待っています…");
-            self.scheduleAll();
-            return;
+            _ = c.kill(self.face_pid, c.SIGKILL);
+            self.app.loop.remove(self.face_fd);
+            _ = c.close(self.face_fd);
+            self.face_fd = -1;
+            faceauth.setStatus(.idle, "");
         }
         var fds: [2]c_int = undefined;
         if (c.pipe2(&fds, c.O_CLOEXEC) != 0) return;
@@ -518,6 +522,7 @@ pub const Lock = struct {
             c._exit(0);
         }
         _ = c.close(fds[1]);
+        self.face_pid = pid;
         self.face_fd = fds[0];
         self.app.loop.add(fds[0], c.EPOLLIN | c.EPOLLHUP, self, onGreeterFace) catch {};
         faceauth.setStatus(.scanning, "顔を確認しています…");
@@ -538,7 +543,6 @@ pub const Lock = struct {
                 @import("greeter.zig").saveLastUser();
                 faceauth.setStatus(.matched, "顔を確認しました");
                 self.face_fails = 0;
-                self.auth_pending = false;
                 @memset(&self.pw, 0);
                 self.pw_len = 0;
                 self.setMsg("ようこそ");
@@ -555,10 +559,6 @@ pub const Lock = struct {
                 faceauth.setStatus(.idle, "");
             },
             else => faceauth.setStatus(.failed, if (text.len > 0) text else "顔認証を使えませんでした"),
-        }
-        if (r != 1 and self.auth_pending) {
-            self.auth_pending = false;
-            self.startAuth();
         }
         self.scheduleAll();
     }

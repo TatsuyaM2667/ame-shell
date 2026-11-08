@@ -57,6 +57,8 @@ pub const Wallpaper = struct {
     img_path: [512]u8 = undefined,
     img_path_len: usize = 0,
     fx_origin: [2]f32 = .{ 0.5, 0.5 },
+    /// タイル・全画面の窓で覆われている(WM が決める)。覆われている間は動画・オーロラを止める(GPU を窓に回す)
+    covered: bool = false,
     /// 動画・GIF の壁紙(mode == .video)。切り替え中は前の動画を prev_player に残す(前のコマを表示し続けるため)
     player: ?*video.Player = null,
     prev_player: ?*video.Player = null,
@@ -84,8 +86,7 @@ pub const Wallpaper = struct {
             .output = out.wl,
         });
         self.surf.output = out;
-        // 壁紙は入力を受けない(デスクトップのクリックはコンポジタへ)
-        self.surf.setInputRect(0, 0, 0, 0);
+        // 壁紙もカーソルの動きを受ける(島の目がデスクトップの上のカーソルを見るため)。押しても何もしない
         try app.loop.add(self.timer.fd, c.EPOLLIN, self, onTimer);
         try app.loop.add(self.watch.fd, c.EPOLLIN, self, onWatch);
         // ピッカーで最後に選んだ壁紙があればそれを優先(再起動・再ログイン後も保つ)
@@ -119,7 +120,7 @@ pub const Wallpaper = struct {
 
     fn animated(self: *Wallpaper) bool {
         // 動画は mpv から「新しいコマ」の通知が来たときだけ描くので、タイマーは使わない
-        return self.app.cfg.wall_animate and self.mode != .image and self.mode != .video;
+        return self.app.cfg.wall_animate and self.mode != .image and self.mode != .video and !self.covered;
     }
 
     fn fps(self: *Wallpaper) f32 {
@@ -138,6 +139,16 @@ pub const Wallpaper = struct {
         } else {
             self.timer.disarm();
         }
+    }
+
+    /// 窓で覆われた / 見えるようになった(wm.zig)。ロック中は壁紙が見えるので止めない
+    pub fn setCovered(self: *Wallpaper, covered_in: bool) void {
+        const covered = covered_in and !self.app.lock.locked;
+        if (covered == self.covered) return;
+        self.covered = covered;
+        if (self.player) |p| p.setPaused(covered);
+        self.updateTimer();
+        if (!covered) self.surf.schedule();
     }
 
     pub fn powerChanged(self: *Wallpaper) void {
@@ -210,6 +221,7 @@ pub const Wallpaper = struct {
             video.Player.createFfmpeg(app.alloc, path, max_w, max_h);
         if (player) |p| {
             self.player = p;
+            if (self.covered) p.setPaused(true);
             self.mode = .video;
             self.video_scheme_done = false;
             app.loop.add(p.pipe_r, c.EPOLLIN, self, onVideo) catch {};

@@ -456,7 +456,10 @@ pub const Wm = struct {
         }
 
         // 6. 配置
-        for (self.outputs.items) |o| self.layout(o);
+        for (self.outputs.items) |o| {
+            self.layout(o);
+            if (o.ame) |ao| if (ao.wall) |wl| wl.setCovered(self.covered(o));
+        }
 
         // 7. フォーカス(見えていない窓からは外す)
         if (s) |ss| {
@@ -908,6 +911,14 @@ pub const Wm = struct {
         }
     }
 
+    /// 壁紙が窓で覆われているか(タイルの窓・全画面の窓がある)
+    fn covered(self: *Wm, o: *WOut) bool {
+        for (self.windows.items) |w| {
+            if (w.out == o and w.visible() and !w.closing and (!w.floating or w.fullscreen)) return true;
+        }
+        return false;
+    }
+
     fn visibleList(self: *Wm, o: ?*WOut, tiled_only: bool) []*Window {
         const S = struct {
             var buf: [128]*Window = undefined;
@@ -983,7 +994,9 @@ pub const Wm = struct {
             w.proposed = .{ pw, ph };
         }
         if (w.placed) {
-            // 位置はスプリングで追いかける(移動・入れ替え・レイアウト変化が滑らかに)
+            // 位置はスプリングで追いかける(移動・入れ替え・レイアウト変化が滑らかに)。
+            // 動かないときはアニメーションを始めない(manage ごとに余計な manage → render を 1 回ずつ回さない)
+            if (w.px.target == w.tx and w.py.target == w.ty) return;
             w.px.set(w.tx);
             w.py.set(w.ty);
         }
