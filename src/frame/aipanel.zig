@@ -850,7 +850,7 @@ fn drawSessions(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32, acc: Color, txt: Col
 // ---- MCP サーバ ----
 
 fn drawMcp(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32, acc: Color, txt: Color, sub: Color) void {
-    const app = f.app;
+    _ = f;
     const list = mcp.servers();
     _ = cv.text(PAD, 76, 12, sub, if (usingAgent()) "選んだサーバだけを Claude Code に渡します" else "選んだ stdio のサーバのツールを、モデルが使えます", .{ .max_w = w - 2 * PAD - 40 });
     {
@@ -892,15 +892,9 @@ fn drawMcp(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32, acc: Color, txt: Color, s
             .sse => "SSE",
         };
         const from = if (s.source == .ame) "ame-shell" else "Claude Code";
-        const state_s: []const u8 = switch (s.phase) {
-            .ready => " · 動いています",
-            .starting, .listing => " · 起動中…",
-            .failed => " · 失敗",
-            .off => "",
-        };
         const note = if (s.kind != .stdio and !usingAgent()) " · API のチャットでは使えません(Claude Code 用)" else "";
-        const info = std.fmt.bufPrint(&ib, "{s} · {s}{s}{s}", .{ kind, from, state_s, note }) catch "";
-        _ = cv.text(PAD + 4, y + 42, 11, if (s.phase == .failed) theme.danger(app).lighten(0.3) else sub, if (s.phase == .failed and s.err.len > 0) s.err else info, .{ .max_w = w - 2 * PAD - 80 });
+        const info = std.fmt.bufPrint(&ib, "{s} · {s}{s}", .{ kind, from, note }) catch "";
+        _ = cv.text(PAD + 4, y + 42, 11, sub, info, .{ .max_w = w - 2 * PAD - 80 });
         // スイッチ
         const sx = w - PAD - 50;
         const on: f32 = if (s.enabled) 1 else 0;
