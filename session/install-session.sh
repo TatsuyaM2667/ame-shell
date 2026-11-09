@@ -381,9 +381,13 @@ if [ "$USER_MODE" = 0 ] && [ -f "$OUT/lib/libpam_ame_face.so" ]; then
             [ -n "$NOLOGIN" ] && echo "auth requisite pam_nologin.so"
             echo "$CTRL sufficient $PREFIX/lib/ame-shell/pam_ame_face.so"
             echo "auth include greetd"
+            # 鍵束(gnome-keyring): ログインのパスワードで解錠し、セッションで起動する(Zed などの API キーの保存先)。
+            # モジュールが無ければ飛ばす("-")。顔認証で入ったときはパスワードが無いので、初めて使うときに解錠を聞かれる
+            if [ "$OS" != FreeBSD ]; then echo "-auth optional pam_gnome_keyring.so"; fi
             echo "account include greetd"
             echo "password include greetd"
             echo "session include greetd"
+            if [ "$OS" != FreeBSD ]; then echo "-session optional pam_gnome_keyring.so auto_start"; fi
         } > "$tmp"
         for d in $FACE_PAM_DIRS; do install_file "$tmp" "$d/ame-greetd" 644; done
         rm -f "$tmp"
