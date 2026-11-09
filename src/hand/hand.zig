@@ -15,12 +15,13 @@
 // 操作のたびに水の波紋が広がり、カーソルの後ろには船が通った跡のような V 字の波が残る。
 //
 // 作り:
-//   別スレッド … カメラ(platform/v4l2.zig)→ 暗ければ明るく → 関節 21 点(track.zig + nn.zig)→
-//                形と位置(gesture.zig)を pipe でメインへ
-//   メイン     … 形の続き具合・時間で操作を決め、仮想ポインタ(wlr-virtual-pointer)と WM(wm.zig)に伝える。
-//                オーバーレイ(layer-shell の一番上・入力は透過)にカーソル・波・メニューを描く
-// モデル(MediaPipe の hand_landmarker.task、Apache-2.0)は、初めてオンにしたときに取ってきて
-// $XDG_DATA_HOME/ame-shell/models に置く。オフにするとスレッド・カメラ・モデルのメモリを全部返す。
+//   別のプロセス … ame-handtrack(src/cmd/ame-handtrack.zig。手の認識は ame-hand): カメラ → 暗ければ明るく →
+//                  関節 21 点 → 形と位置を 1 行 1 つの JSON で出す
+//   ame-shell    … その行を読み、形の続き具合・時間で操作を決め、仮想ポインタ(wlr-virtual-pointer)と WM(wm.zig)に
+//                  伝える。オーバーレイ(layer-shell の一番上・入力は透過)にカーソル・波・メニューを描く
+// カメラや推論で詰まっても・落ちても画面は止まらない。モデル(MediaPipe の hand_landmarker.task、Apache-2.0)は
+// ame-handtrack が初めて動いたときに取ってきて $XDG_DATA_HOME/ame-shell/models に置く。
+// オフにすると ame-handtrack を止める(カメラ・モデルのメモリはプロセスごと返る)。
 const std = @import("std");
 const c = @import("../c.zig");
 const appmod = @import("../core/app.zig");
@@ -35,25 +36,18 @@ const Spring = anim.Spring;
 const theme = @import("../gfx/theme.zig");
 const loop = @import("../platform/loop.zig");
 const sys = @import("../platform/sys.zig");
-// 手の認識そのもの(推論エンジン・追跡・ジェスチャー・カメラ)は別のリポジトリ ame-hand
-const handlib = @import("ame-hand");
-const v4l2 = handlib.v4l2;
-const track = handlib.track;
-const nn = handlib.nn;
-const zip = handlib.zip;
-const gesture = handlib.gesture;
+// 手の形の名前(手の認識そのものは ame-handtrack)
+const gesture = @import("ame-hand").gesture;
 const poses = @import("poses.zig");
 const custom = @import("custom.zig");
 
 const log = std.log.scoped(.hand);
 
-const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task";
-
 pub const Gesture = gesture.Gesture;
 
 const Status = enum(u8) { running, downloading, loading, no_camera, no_model, failed };
 
-/// スレッド → メイン(pipe に丸ごと書く。PIPE_BUF より小さいので途中で切れない)
+/// 1 コマ分の手(ame-handtrack の行から作る。ame-ctl debug-hand でも作る)
 const Msg = extern struct {
     kind: u8, // 0 = コマ、1 = 状態
     gesture: u8 = 0,
@@ -122,12 +116,11 @@ const State = struct {
     app: ?*App = null,
     on: bool = false,
     // スレッド
-    thread: ?std.Thread = null,
-    quit: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    rfd: c_int = -1,
-    wfd: c_int = -1,
-    device: [64]u8 = undefined,
-    device_len: usize = 0,
+    /// ame-handtrack の出力と、その行の読みかけ
+    fd: c_int = -1,
+    pid: c_int = 0,
+    line: [16384]u8 = undefined,
+    line_len: usize = 0,
     // 出力とオーバーレイ・仮想ポインタ
     out: ?*Output = null,
     surf: ?*Surface = null,
@@ -281,24 +274,22 @@ pub fn enable(app: *App) void {
         app.osd.info("このコンポジタは仮想ポインタに対応していないので、ハンド操作を使えません");
         return;
     }
-    var fds: [2]c_int = undefined;
-    if (c.pipe2(&fds, c.O_CLOEXEC | c.O_NONBLOCK) != 0) return;
-    st.rfd = fds[0];
-    st.wfd = fds[1];
-    app.loop.add(st.rfd, c.EPOLLIN, app, onMsg) catch {
-        closeFds();
+    // カメラ・推論は別のプロセス(ame-handtrack)。出てくる 1 行 1 つの JSON を読む
+    var db: [64]u8 = undefined;
+    const dev = std.fmt.bufPrintZ(&db, "{s}", .{app.cfg.hand_camera.get()}) catch "";
+    const argv: []const ?[*:0]const u8 = if (dev.len > 0) &.{ "ame-handtrack", "-d", dev.ptr } else &.{"ame-handtrack"};
+    const fd = sys.spawnReader(argv, &st.pid) orelse {
+        app.osd.info("ame-handtrack を起動できませんでした");
         return;
     };
-    st.quit.store(false, .release);
-    const dev = app.cfg.hand_camera.get();
-    st.device_len = @min(dev.len, st.device.len - 1);
-    @memcpy(st.device[0..st.device_len], dev[0..st.device_len]);
-    st.device[st.device_len] = 0;
-    st.thread = std.Thread.spawn(.{ .stack_size = 1 << 20 }, worker, .{}) catch {
-        app.loop.remove(st.rfd);
-        closeFds();
+    _ = c.fcntl(fd, c.F_SETFL, c.fcntl(fd, c.F_GETFL, @as(c_int, 0)) | c.O_NONBLOCK);
+    app.loop.add(fd, c.EPOLLIN | c.EPOLLHUP, app, onRead) catch {
+        _ = c.kill(st.pid, c.SIGTERM);
+        _ = c.close(fd);
         return;
     };
+    st.fd = fd;
+    st.line_len = 0;
     st.on = true;
     st.debug_log = std.posix.getenv("AME_DEBUG") != null;
     makeOverlay(app);
@@ -310,10 +301,8 @@ pub fn disable() void {
     if (!st.on) return;
     const app = st.app.?;
     st.on = false;
-    st.quit.store(true, .release);
-    if (st.thread) |t| t.join();
-    st.thread = null;
-    app.loop.remove(st.rfd);
+    // ame-handtrack は SIGTERM でカメラを閉じて終わる(モデル・推論のメモリもプロセスごと返る)
+    if (st.pid > 0) _ = c.kill(st.pid, c.SIGTERM);
     closeFds();
     endDrag();
     if (st.vptr) |p| c.zwlr_virtual_pointer_v1_destroy(p);
@@ -329,10 +318,11 @@ pub fn disable() void {
 }
 
 fn closeFds() void {
-    if (st.rfd >= 0) _ = c.close(st.rfd);
-    if (st.wfd >= 0) _ = c.close(st.wfd);
-    st.rfd = -1;
-    st.wfd = -1;
+    if (st.fd < 0) return;
+    if (st.app) |app| app.loop.remove(st.fd);
+    _ = c.close(st.fd);
+    st.fd = -1;
+    st.pid = 0;
 }
 
 /// 出力が抜かれた(app.zig)
@@ -387,24 +377,15 @@ fn setBanner(s: []const u8) void {
 // メイン: 手の形と位置から操作を決める
 // ---------------------------------------------------------------------------
 
-fn onMsg(ctx: *anyopaque, fd: c_int, _: u32) void {
-    const app: *App = @ptrCast(@alignCast(ctx));
-    var m: Msg = undefined;
-    while (true) {
-        const n = c.read(fd, &m, @sizeOf(Msg));
-        if (n != @sizeOf(Msg)) break;
-        if (m.kind == 1) {
-            status(app, @enumFromInt(m.status));
-            continue;
-        }
-        if (loop.nowMs() < st.debug_until) continue;
-        if (st.debug_log) {
-            const g: Gesture = if (m.has == 0) .none else @enumFromInt(m.gesture);
-            if (g != st.last_logged) log.info("カメラ: {s} {d}(つまみ {d:.2}、大きさ {d:.2}、位置 {d:.2}, {d:.2})", .{ @tagName(g), m.fingers, m.pinch, m.size, m.cx, m.cy });
-            st.last_logged = g;
-        }
-        frame(app, m);
+/// ame-handtrack の 1 コマ(onRead から)
+fn onMsg(app: *App, m: Msg) void {
+    if (loop.nowMs() < st.debug_until) return;
+    if (st.debug_log) {
+        const g: Gesture = if (m.has == 0) .none else @enumFromInt(m.gesture);
+        if (g != st.last_logged) log.info("カメラ: {s} {d}(つまみ {d:.2}、大きさ {d:.2}、位置 {d:.2}, {d:.2})", .{ @tagName(g), m.fingers, m.pinch, m.size, m.cx, m.cy });
+        st.last_logged = g;
     }
+    frame(app, m);
 }
 
 fn status(app: *App, s: Status) void {
@@ -1186,213 +1167,84 @@ fn draw(_: *anyopaque, s: *Surface, cv: *gfx.Canvas, dt: f32) bool {
 }
 
 // ---------------------------------------------------------------------------
-// スレッド: カメラ → 手の関節 → 形と位置
+// ame-handtrack(src/cmd/ame-handtrack.zig)の出力を読む: カメラ → 手の関節 → 形と位置 は別のプロセス
 // ---------------------------------------------------------------------------
 
-fn send(m: Msg) void {
-    _ = c.write(st.wfd, &m, @sizeOf(Msg));
-}
+const TrackHand = struct {
+    gesture: []const u8 = "none",
+    fingers: u8 = 0,
+    cx: f32 = 0,
+    cy: f32 = 0,
+    px: f32 = 0,
+    py: f32 = 0,
+    pinch: f32 = 9,
+    pinch_mid: f32 = 9,
+    pinch_ring: f32 = 9,
+    ext: u8 = 0,
+    size: f32 = 0.2,
+    right: f32 = 0,
+    pts: [21][3]f32 = undefined,
+};
+const TrackLine = struct { event: []const u8, status: []const u8 = "", w: f32 = 640, h: f32 = 480, hands: []const TrackHand = &.{} };
 
-fn sendStatus(s: Status) void {
-    send(.{ .kind = 1, .status = @intFromEnum(s) });
-}
-
-fn worker() void {
-    // 推論のメモリは全部この worker 専用の領域から取り、終わるときに丸ごと OS に返す。
-    // c_allocator(musl の malloc)だと、細かいテンソルの領域がオフにしたあともヒープに残っていた
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    // モデルのファイル(7MB)は読み終えたらすぐ返したいので、別に mmap で取る
-    const fa = std.heap.page_allocator;
-    const bytes = loadModel(fa) orelse return;
-    var det_b: []const u8 = undefined;
-    var lmk_b: []const u8 = undefined;
-    if (!zip.unzipStored(bytes, "hand_detector.tflite", &det_b) or !zip.unzipStored(bytes, "hand_landmarks_detector.tflite", &lmk_b)) {
-        fa.free(bytes);
-        log.err("モデルの中身が読めません", .{});
-        sendStatus(.failed);
-        return;
-    }
-    sendStatus(.loading);
-    var det = nn.Net.init(a, det_b, 2) catch |e| {
-        fa.free(bytes);
-        log.err("手のひらの検出モデルを読めません: {}", .{e});
-        sendStatus(.failed);
-        return;
-    };
-    defer det.deinit();
-    var lmk = nn.Net.init(a, lmk_b, 2) catch |e| {
-        fa.free(bytes);
-        log.err("関節のモデルを読めません: {}", .{e});
-        sendStatus(.failed);
-        return;
-    };
-    defer lmk.deinit();
-    fa.free(bytes); // 重みは f32 に変換済み。ファイルの中身はもう要らない
-    // 両手まで追う(もう一方の手は、ポーズの組み合わせに使う)
-    var mt = track.MultiTracker.init(&det, &lmk);
-    mt.det_signed = false;
-
-    var cam = openCamera() orelse {
-        sendStatus(.no_camera);
-        return;
-    };
-    defer cam.close();
-    const rgb = a.alloc(u8, cam.w * cam.h * 3) catch return;
-    defer a.free(rgb);
-    sendStatus(.running);
-    log.info("ハンド操作: カメラ {d}x{d}", .{ cam.w, cam.h });
-
-    var ans = [_]gesture.Analyzer{ .{}, .{} };
-    var had = [_]bool{ false, false };
-    // カーソルを動かす手(先に見つかった方。消えたらもう一方)
-    var primary: usize = 0;
-    var lut: [256]u8 = undefined;
-    var last_run: i64 = 0;
-    var logged_dark = false;
-    while (!st.quit.load(.acquire)) {
-        var pfd = [_]std.posix.pollfd{.{ .fd = cam.fd, .events = std.posix.POLL.IN, .revents = 0 }};
-        _ = std.posix.poll(&pfd, 150) catch break;
-        // 手を追っている間は 1 秒に 30 回まで、見つかっていない間は検出を 1 秒に 4 回まで(軽くするため)
-        const now = std.time.milliTimestamp();
-        const gap: i64 = if (mt.count() == 0) 250 else 30;
-        if (now - last_run < gap) {
-            _ = cam.grab(null, true); // 処理しないコマは変換せずに捨てる
+fn onRead(ctx: *anyopaque, fd: c_int, _: u32) void {
+    const app: *App = @ptrCast(@alignCast(ctx));
+    while (true) {
+        if (st.line_len == st.line.len) st.line_len = 0; // 長すぎる行は捨てる
+        const n = c.read(fd, st.line[st.line_len..].ptr, st.line.len - st.line_len);
+        if (n > 0) {
+            st.line_len += @intCast(n);
+            var start: usize = 0;
+            while (std.mem.indexOfScalarPos(u8, st.line[0..st.line_len], start, '\n')) |nl| {
+                handleLine(app, st.line[start..nl]);
+                if (!st.on) return; // 行の処理でオフにされた
+                start = nl + 1;
+            }
+            std.mem.copyForwards(u8, st.line[0..], st.line[start..st.line_len]);
+            st.line_len -= start;
             continue;
         }
-        if (!cam.grab(rgb, true)) continue;
-        last_run = now;
-        // 暗い映像は持ち上げる(手の認識は暗いと精度が大きく落ちる)
-        var sum: u64 = 0;
-        var cnt: u64 = 0;
-        var i: usize = 0;
-        while (i < rgb.len) : (i += 3 * 37) {
-            sum += rgb[i] + @as(u64, rgb[i + 1]) * 2 + rgb[i + 2];
-            cnt += 4;
-        }
-        const mean = @as(f32, @floatFromInt(sum)) / @as(f32, @floatFromInt(@max(cnt, 1)));
-        if (gesture.brightLut(mean, &lut)) {
-            for (rgb) |*px| px.* = lut[px.*];
-            if (!logged_dark and mean < 40) {
-                log.warn("カメラの映像がとても暗い(平均 {d:.0}/255)。カメラのシャッターや部屋の明るさを確かめてください", .{mean});
-                logged_dark = true;
-            }
-        }
-        const img = track.Image{ .rgb = rgb, .w = cam.w, .h = cam.h };
-        var hands: [track.MAX_HANDS]?track.Hand = .{ null, null };
-        mt.step(img, &hands) catch {};
-        const t = @as(f32, @floatFromInt(now)) / 1000;
-        var feats: [2]?gesture.Features = .{ null, null };
-        for (0..2) |k| {
-            if (hands[k]) |hd| {
-                if (!had[k]) ans[k].reset();
-                had[k] = true;
-                feats[k] = ans[k].step(hd.pts, @floatFromInt(cam.w), @floatFromInt(cam.h), t);
-            } else had[k] = false;
-        }
-        if (feats[primary] == null and feats[1 - primary] != null) primary = 1 - primary;
-        if (feats[primary]) |f| {
-            const o = feats[1 - primary];
-            send(.{
-                .kind = 0,
-                .has = 1,
-                .gesture = @intFromEnum(f.gesture),
-                .fingers = f.fingers,
-                .cx = f.cx,
-                .cy = f.cy,
-                .px = f.px,
-                .py = f.py,
-                .pinch = f.pinch,
-                .size = f.size,
-                .pinch_mid = f.pinch_mid,
-                .pinch_ring = f.pinch_ring,
-                .ext = f.ext,
-                .has2 = @intFromBool(o != null),
-                .ext2 = if (o) |of| of.ext else 0,
-                .shape = custom.normalize(hands[primary].?.pts, hands[primary].?.right),
-                .shape2 = if (hands[1 - primary]) |h2| custom.normalize(h2.pts, h2.right) else [_]f32{0} ** custom.DIM,
-                .wx = hands[primary].?.pts[0][0] / @as(f32, @floatFromInt(cam.w)),
-                .wx2 = if (hands[1 - primary]) |h2| h2.pts[0][0] / @as(f32, @floatFromInt(cam.w)) else 0,
-            });
-        } else send(.{ .kind = 0, .has = 0 });
+        if (n < 0 and std.posix.errno(n) == .AGAIN) return;
+        break;
     }
+    // ame-handtrack が終わった(カメラ・モデルが無い・落ちた)。状態の案内はそのまま残す
+    closeFds();
 }
 
-fn openCamera() ?v4l2.Camera {
-    // 設定のカメラ、無ければ /dev/video0〜9 で YUYV を出せる最初のもの
-    if (st.device_len > 0) {
-        const p: [*:0]const u8 = @ptrCast(&st.device);
-        return v4l2.Camera.open(p, 640, 480, 30) catch |e| {
-            log.warn("{s} を開けません: {}", .{ st.device[0..st.device_len], e });
-            return null;
-        };
+fn handleLine(app: *App, line: []const u8) void {
+    const p = std.json.parseFromSlice(TrackLine, std.heap.c_allocator, line, .{ .ignore_unknown_fields = true }) catch return;
+    defer p.deinit();
+    const e = p.value;
+    if (std.mem.eql(u8, e.event, "status")) {
+        if (std.meta.stringToEnum(Status, e.status)) |s| status(app, s);
+        return;
     }
-    var buf: [32]u8 = undefined;
-    for (0..10) |i| {
-        const p = std.fmt.bufPrintZ(&buf, "/dev/video{d}", .{i}) catch continue;
-        if (v4l2.Camera.open(p.ptr, 640, 480, 30)) |cam| return cam else |_| {}
-    }
-    return null;
-}
-
-// ---- モデルのファイル ----
-
-fn modelPath(buf: []u8) ?[:0]const u8 {
-    if (std.posix.getenv("XDG_DATA_HOME")) |d| if (d.len > 0) return std.fmt.bufPrintZ(buf, "{s}/ame-shell/models/hand_landmarker.task", .{d}) catch null;
-    const home = std.posix.getenv("HOME") orelse return null;
-    return std.fmt.bufPrintZ(buf, "{s}/.local/share/ame-shell/models/hand_landmarker.task", .{home}) catch null;
-}
-
-fn loadModel(a: std.mem.Allocator) ?[]u8 {
-    var pb: [512]u8 = undefined;
-    const path = modelPath(&pb) orelse {
-        sendStatus(.no_model);
-        return null;
-    };
-    if (std.fs.cwd().readFileAlloc(a, path, 64 << 20)) |b| {
-        if (zip.isHandModel(b)) return b;
-        a.free(b);
-    } else |_| {}
-    // 無い・壊れている: 取ってくる(curl。一時ファイルに書いてから置き換える)
-    sendStatus(.downloading);
-    const dir = std.fs.path.dirname(path) orelse return null;
-    std.fs.cwd().makePath(dir) catch {};
-    var tb: [520]u8 = undefined;
-    const tmp = std.fmt.bufPrintZ(&tb, "{s}.part", .{path}) catch return null;
-    var pid: c_int = 0;
-    const fd = sys.spawnReader(&.{ "curl", "-sSfL", "--max-time", "180", "-o", tmp.ptr, MODEL_URL }, &pid) orelse {
-        sendStatus(.no_model);
-        return null;
-    };
-    // curl が終わる(pipe が閉じる)まで待つ。オフにされたら途中でやめる
-    var sink: [256]u8 = undefined;
-    while (true) {
-        if (st.quit.load(.acquire)) {
-            _ = c.kill(pid, c.SIGTERM);
-            _ = c.close(fd);
-            return null;
-        }
-        var pfd = [_]std.posix.pollfd{.{ .fd = fd, .events = std.posix.POLL.IN, .revents = 0 }};
-        _ = std.posix.poll(&pfd, 200) catch break;
-        if (pfd[0].revents == 0) continue;
-        const n = c.read(fd, &sink, sink.len);
-        if (n <= 0) break;
-    }
-    _ = c.close(fd);
-    std.fs.cwd().rename(tmp, path) catch {
-        sendStatus(.no_model);
-        return null;
-    };
-    const b = std.fs.cwd().readFileAlloc(a, path, 64 << 20) catch {
-        sendStatus(.no_model);
-        return null;
-    };
-    if (zip.isHandModel(b)) return b;
-    a.free(b);
-    std.fs.cwd().deleteFile(path) catch {};
-    sendStatus(.no_model);
-    return null;
+    if (!std.mem.eql(u8, e.event, "frame")) return;
+    if (e.hands.len == 0) return onMsg(app, .{ .kind = 0, .has = 0 });
+    const f = e.hands[0];
+    const o: ?TrackHand = if (e.hands.len > 1) e.hands[1] else null;
+    const g = std.meta.stringToEnum(Gesture, f.gesture) orelse .other;
+    onMsg(app, .{
+        .kind = 0,
+        .has = 1,
+        .gesture = @intFromEnum(g),
+        .fingers = f.fingers,
+        .cx = f.cx,
+        .cy = f.cy,
+        .px = f.px,
+        .py = f.py,
+        .pinch = f.pinch,
+        .size = f.size,
+        .pinch_mid = f.pinch_mid,
+        .pinch_ring = f.pinch_ring,
+        .ext = f.ext,
+        .has2 = @intFromBool(o != null),
+        .ext2 = if (o) |x| x.ext else 0,
+        .shape = custom.normalize(f.pts, f.right),
+        .shape2 = if (o) |x| custom.normalize(x.pts, x.right) else [_]f32{0} ** custom.DIM,
+        .wx = f.pts[0][0] / e.w,
+        .wx2 = if (o) |x| x.pts[0][0] / e.w else 0,
+    });
 }
 
 /// 試験用(ame-ctl debug-hand): カメラ無しで 1 コマ分の手を与える。

@@ -182,7 +182,7 @@ pub fn build(b: *std.Build) void {
     }
     b.installArtifact(ctl);
 
-    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai", "ame-agent", "ame-config", "ame-weather", "ame-airpods" };
+    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai", "ame-agent", "ame-config", "ame-weather", "ame-airpods", "ame-handtrack" };
     // --- 画面を持たない小さな道具(標準入出力でやりとりする。src/cmd/。libc だけ)---
     for (cmds) |name| {
         const t = b.addExecutable(.{
@@ -193,6 +193,8 @@ pub fn build(b: *std.Build) void {
             .strip = strip,
         });
         t.root_module.addImport("ame_lib", lib_mod);
+        // ame-handtrack だけは手の認識(ame-hand)を使う
+        if (std.mem.eql(u8, name, "ame-handtrack")) t.root_module.addImport("ame-hand", hand_dep.module("ame-hand"));
         t.linkLibC();
         b.installArtifact(t);
     }
@@ -330,6 +332,7 @@ pub fn build(b: *std.Build) void {
     for (cmds) |name| {
         const ct = b.addTest(.{ .root_source_file = b.path(b.fmt("src/cmd/{s}.zig", .{name})), .target = target, .optimize = optimize });
         ct.root_module.addImport("ame_lib", lib_mod);
+        if (std.mem.eql(u8, name, "ame-handtrack")) ct.root_module.addImport("ame-hand", hand_dep.module("ame-hand"));
         ct.linkLibC();
         test_step.dependOn(&b.addRunArtifact(ct).step);
     }
