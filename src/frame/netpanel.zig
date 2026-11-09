@@ -6,6 +6,7 @@
 // 「1 つずつ順番に」ワーカースレッドで実行し(キュー)、完了は pipe の EOF で知る。
 // 引数はシェルを通さず渡すので、SSID やパスワードにどんな文字が入っていても安全。
 const std = @import("std");
+const builtin = @import("builtin");
 const c = @import("../c.zig");
 const anim = @import("../gfx/anim.zig");
 const Spring = anim.Spring;
@@ -713,10 +714,19 @@ fn finishBsd(st: *State, j: Job, out: []const u8) void {
             const q_ssid = std.fmt.bufPrint(&sb, "\"{s}\"", .{st.pend_ssid[0..st.pend_ssid_len]}) catch return;
             wpa(st, .wifi_radio, &.{ "set_network", ids, "ssid", q_ssid }, "");
             if (st.pend_secure) {
-                var pb: [140]u8 = undefined;
-                const q_pw = std.fmt.bufPrint(&pb, "\"{s}\"", .{st.pend_pw[0..st.pend_pw_len]}) catch return;
-                wpa(st, .wifi_radio, &.{ "set_network", ids, "psk", q_pw }, "");
+                // パスワードは wpa_cli の引数に出さない(実行中は ps で他のユーザーから見えるため)。
+                // wpa_supplicant の制御ソケットへ直接送る(platform/bsd.zig)
+                var pb: [200]u8 = undefined;
+                const cmd = std.fmt.bufPrint(&pb, "SET_NETWORK {s} psk \"{s}\"", .{ ids, st.pend_pw[0..st.pend_pw_len] }) catch return;
+                var rb: [64]u8 = undefined;
+                const r = if (builtin.os.tag == .freebsd) @import("../platform/bsd.zig").wpaCommand(wlanIf(st), cmd, &rb) else null;
                 @memset(&pb, 0);
+                if (r == null or !std.mem.startsWith(u8, r.?, "OK")) {
+                    @memset(&st.pend_pw, 0);
+                    st.pend_pw_len = 0;
+                    setStatus(st, "パスワードを設定できませんでした(wpa_supplicant の制御ソケットに書けません)", true);
+                    return;
+                }
             } else wpa(st, .wifi_radio, &.{ "set_network", ids, "key_mgmt", "NONE" }, "");
             @memset(&st.pend_pw, 0);
             st.pend_pw_len = 0;

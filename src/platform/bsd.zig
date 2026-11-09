@@ -185,3 +185,25 @@ pub fn chargeMinutes(run: anytype) ?u32 {
     if (m < 1 or m > 48 * 60) return null;
     return @intFromFloat(@round(m));
 }
+
+/// wpa_supplicant の制御ソケット(/var/run/wpa_supplicant/<IF>)に 1 つのコマンドを送り、返事を out に読む。
+/// wpa_cli の引数に出したくない値(Wi-Fi のパスワード)を渡すため。wpa_cli と同じく、返事を受けるために
+/// 自分のソケットを /tmp に作る(終わったら消す)。2 秒待っても返事が無ければ null
+pub fn wpaCommand(iface: []const u8, cmd: []const u8, out: []u8) ?[]const u8 {
+    const ipc_path = @import("../core/ipc_path.zig");
+    var rb: [128]u8 = undefined;
+    const remote = ipc_path.unixAddr(std.fmt.bufPrint(&rb, "/var/run/wpa_supplicant/{s}", .{iface}) catch return null) orelse return null;
+    var lb: [64]u8 = undefined;
+    const lpath = std.fmt.bufPrint(&lb, "/tmp/ame-wpa-{x}", .{@as(u64, @truncate(@as(u128, @bitCast(std.time.nanoTimestamp()))))}) catch return null;
+    const local = ipc_path.unixAddr(lpath) orelse return null;
+    const fd = std.posix.socket(std.posix.AF.UNIX, std.posix.SOCK.DGRAM | std.posix.SOCK.CLOEXEC, 0) catch return null;
+    defer std.posix.close(fd);
+    std.posix.bind(fd, @ptrCast(&local), @sizeOf(std.posix.sockaddr.un)) catch return null;
+    defer std.fs.cwd().deleteFile(lpath) catch {};
+    std.posix.connect(fd, @ptrCast(&remote), @sizeOf(std.posix.sockaddr.un)) catch return null;
+    _ = std.posix.send(fd, cmd, 0) catch return null;
+    var pfd = [_]std.posix.pollfd{.{ .fd = fd, .events = std.posix.POLL.IN, .revents = 0 }};
+    if ((std.posix.poll(&pfd, 2000) catch return null) == 0) return null;
+    const n = std.posix.recv(fd, out, 0) catch return null;
+    return out[0..n];
+}
