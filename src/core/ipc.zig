@@ -9,6 +9,26 @@ const theme = @import("../gfx/theme.zig");
 const cfgmod = @import("ame_lib").config;
 
 pub const socketPath = @import("ipc_path.zig").socketPath;
+const events = @import("events.zig");
+
+/// ame-ctl watch につないだときの最初の 1 行: 今の状態
+fn hello(app: *App, buf: []u8) []const u8 {
+    var fbs = std.io.fixedBufferStream(buf);
+    const o = app.focused_output;
+    const tags: u32 = if (o) |oo| oo.focused_tags else 0;
+    const m = app.media;
+    std.json.stringify(.{
+        .event = "hello",
+        .output = if (o) |oo| oo.name.get() else "",
+        .workspace = events.workspaceOf(tags),
+        .tags = tags,
+        .title = app.focused_title.get(),
+        .locked = app.lock.locked,
+        .media = .{ .status = @tagName(m.status), .artist = m.artist[0..m.artist_len], .title = m.title[0..m.title_len] },
+    }, .{}, fbs.writer()) catch return "{\"event\":\"hello\"}\n";
+    fbs.writer().writeByte('\n') catch return "{\"event\":\"hello\"}\n";
+    return fbs.getWritten();
+}
 
 pub const Server = struct {
     app: *App,
@@ -40,15 +60,26 @@ pub const Server = struct {
         const self: *Server = @ptrCast(@alignCast(ctx));
         while (true) {
             const cl = std.posix.accept(fd, null, null, std.posix.SOCK.CLOEXEC) catch break;
-            defer _ = c.close(cl);
+            var keep = false; // ame-ctl watch は切らずに出来事を流し続ける(events.zig)
+            defer if (!keep) {
+                _ = c.close(cl);
+            };
             // コマンドは短いので同期で1回読む(クライアントは書いてすぐ待つ)
             var buf: [512]u8 = undefined;
             var tv = c.struct_timeval{ .tv_sec = 1, .tv_usec = 0 };
             _ = c.setsockopt(cl, c.SOL_SOCKET, c.SO_RCVTIMEO, &tv, @sizeOf(c.struct_timeval));
             const n = c.read(cl, &buf, buf.len);
             if (n <= 0) continue;
+            const cmd = std.mem.trim(u8, buf[0..@intCast(n)], " \n\r\t");
+            if (std.mem.eql(u8, cmd, "watch")) {
+                var hb: [2048]u8 = undefined;
+                const h = hello(self.app, &hb);
+                _ = c.send(cl, h.ptr, h.len, c.MSG_NOSIGNAL);
+                if (events.add(cl)) keep = true else _ = c.write(cl, "error: too many watchers\n", 25);
+                continue;
+            }
             var out: [4096]u8 = undefined;
-            const reply = handle(self.app, std.mem.trim(u8, buf[0..@intCast(n)], " \n\r\t"), &out);
+            const reply = handle(self.app, cmd, &out);
             _ = c.write(cl, reply.ptr, reply.len);
             _ = c.write(cl, "\n", 1);
         }
@@ -73,6 +104,7 @@ const help =
     \\  accent <#rrggbb>|reset
     \\  notify <text>          (テスト用の通知)
     \\  notifications toggle|clear
+    \\  watch                  (出来事を JSON の行で流し続ける: workspace・focus・window・notification・media・lock)
     \\  ai toggle|open|close|clear|pick|mcp|api|agent <CLI> <フォルダ> [new|last|<id>]|send <text>   (AI チャット: 右から生えるパネル)
     \\  session | sidebar | utilities   (caelestia: 各ドロワーの開閉)
     \\  close-all

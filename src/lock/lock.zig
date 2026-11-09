@@ -257,6 +257,7 @@ pub const Lock = struct {
         self.session = sess;
         _ = c.ext_session_lock_v1_add_listener(sess, &session_listener, self);
         self.locked = true;
+        @import("../core/events.zig").emit(.{ .event = "lock", .locked = true });
         // 窓で覆われて止めていた壁紙の動画も、ロック画面の下では動かす
         for (self.app.outputs.items) |o| if (o.wall) |w| w.setCovered(false);
         self.sddm_saved = false;
@@ -338,6 +339,7 @@ pub const Lock = struct {
         }
         self.session = null;
         self.locked = false;
+        @import("../core/events.zig").emit(.{ .event = "lock", .locked = false });
         if (self.app.musicw) |m| m.update();
         // 押しておいた通知を開く
         if (unlock and self.open_after != 0) for (self.app.notifs.history.items) |*n| if (n.id == self.open_after) {

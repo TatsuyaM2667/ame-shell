@@ -10,6 +10,7 @@ const Avatar = @import("../desktop/avatar.zig").Avatar;
 const Bar = @import("../desktop/bar.zig").Bar;
 const c = @import("../c.zig");
 const cfgmod = @import("ame_lib").config;
+const watch_events = @import("events.zig");
 const Dashboard = @import("../desktop/dashboard.zig").Dashboard;
 const Frame = @import("../frame/frame.zig").Frame;
 const gfx = @import("../gfx/gfx.zig");
@@ -64,6 +65,13 @@ pub const Output = struct {
     /// caelestia レイアウトの枠(classic では null)
     frame: ?*Frame = null,
     wall: ?*Wallpaper = null,
+
+    /// タグ(ワークスペース)・窓のあるタグが変わった: バーに知らせ、ame-ctl watch に流す
+    pub fn tagsChanged(self: *Output) void {
+        if (self.bar) |b| b.tagsChanged();
+        if (self.frame) |f| f.bar.tagsChanged(f);
+        watch_events.emit(.{ .event = "workspace", .output = self.name.get(), .workspace = watch_events.workspaceOf(self.focused_tags), .tags = self.focused_tags, .occupied = self.view_tags });
+    }
 
     pub fn logicalSize(self: *const Output) [2]u32 {
         if (self.width > 0) return .{ self.width, self.height };
@@ -949,8 +957,7 @@ const output_listener = c.struct_wl_output_listener{ .geometry = oGeometry, .mod
 fn rFocusedTags(data: ?*anyopaque, _: ?*c.struct_zriver_output_status_v1, tags: u32) callconv(.C) void {
     const o: *Output = @ptrCast(@alignCast(data.?));
     o.focused_tags = tags;
-    if (o.bar) |b| b.tagsChanged();
-    if (o.frame) |f| f.bar.tagsChanged(f);
+    o.tagsChanged();
 }
 fn rViewTags(data: ?*anyopaque, _: ?*c.struct_zriver_output_status_v1, arr: [*c]c.struct_wl_array) callconv(.C) void {
     const o: *Output = @ptrCast(@alignCast(data.?));
@@ -964,14 +971,12 @@ fn rViewTags(data: ?*anyopaque, _: ?*c.struct_zriver_output_status_v1, arr: [*c]
     }
     o.view_tags = mask;
     if (o.app.toplevels) |t| t.viewTagsChanged(o);
-    if (o.bar) |b| b.tagsChanged();
-    if (o.frame) |f| f.bar.tagsChanged(f);
+    o.tagsChanged();
 }
 fn rUrgent(data: ?*anyopaque, _: ?*c.struct_zriver_output_status_v1, tags: u32) callconv(.C) void {
     const o: *Output = @ptrCast(@alignCast(data.?));
     o.urgent_tags = tags;
-    if (o.bar) |b| b.tagsChanged();
-    if (o.frame) |f| f.bar.tagsChanged(f);
+    o.tagsChanged();
 }
 fn rLayout(data: ?*anyopaque, _: ?*c.struct_zriver_output_status_v1, name: [*c]const u8) callconv(.C) void {
     const o: *Output = @ptrCast(@alignCast(data.?));
@@ -1000,6 +1005,7 @@ fn sFocusedView(data: ?*anyopaque, _: ?*c.struct_zriver_seat_status_v1, title: [
     if (std.mem.eql(u8, t, app.focused_title.get())) return;
     app.focused_title.set(t);
     app.title_serial +%= 1;
+    watch_events.emit(.{ .event = "focus", .title = t, .app_id = "" });
     for (app.outputs.items) |o| {
         if (o.bar) |b| b.titleChanged();
         if (o.frame) |f| f.bar.titleChanged(f);

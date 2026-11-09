@@ -1,5 +1,6 @@
 // ame-ctl: ame-shell デーモンを操作する小さな CLI(libc だけに依存)。
 // 使い方: ame-ctl launcher toggle / ame-ctl volume up / ame-ctl help
+//       ame-ctl watch … 出来事(ワークスペース・フォーカス・窓・通知・曲・ロック)を 1 行 1 つの JSON で流し続ける(src/core/events.zig)
 // River のキーバインドから `riverctl map normal Super D spawn "ame-ctl launcher toggle"` のように呼ぶ。
 const std = @import("std");
 
@@ -47,14 +48,18 @@ pub fn main() !u8 {
     };
     _ = c.write(fd, &line_buf, len);
     _ = c.shutdown(fd, c.SHUT_WR);
+    // 届いた分からすぐ出す(ame-ctl watch は切れるまで出来事が流れ続ける)
     var out: [4096]u8 = undefined;
     var total: usize = 0;
-    while (total < out.len) {
-        const n = c.read(fd, out[total..].ptr, out.len - total);
+    var is_err = false;
+    const stdout = std.io.getStdOut();
+    while (true) {
+        const n = c.read(fd, &out, out.len);
         if (n <= 0) break;
-        total += @intCast(n);
+        const chunk = out[0..@intCast(n)];
+        if (total == 0) is_err = std.mem.startsWith(u8, chunk, "error");
+        total += chunk.len;
+        stdout.writeAll(chunk) catch break; // 読む側が閉じた(| head など)
     }
-    const reply = out[0..total];
-    _ = std.io.getStdOut().write(reply) catch {};
-    return if (std.mem.startsWith(u8, reply, "error")) 1 else 0;
+    return if (is_err) 1 else 0;
 }

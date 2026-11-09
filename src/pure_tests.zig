@@ -19,6 +19,7 @@ test {
     _ = @import("ai/mcp.zig");
     _ = @import("platform/sys.zig");
     _ = @import("frame/island.zig");
+    _ = @import("core/events.zig");
 }
 
 test "spring converges and is velocity-continuous" {

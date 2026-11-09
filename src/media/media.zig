@@ -99,6 +99,9 @@ pub const Media = struct {
     /// MPRIS(src/media/mpris.zig)から: 今のプレイヤーの状態をまとめて反映する
     pub fn applyState(self: *Media, playing: ?bool, player: []const u8, artist: []const u8, title: []const u8, art: []const u8, length_s: f32, pos_s: f32, album: []const u8) void {
         const prev_status = self.status;
+        // ame-ctl watch: 再生の状態・曲が変わったときだけ流す
+        const changed = self.status != (if (playing) |p| (if (p) Status.playing else Status.paused) else Status.none) or
+            !std.mem.eql(u8, title, self.title[0..self.title_len]) or !std.mem.eql(u8, artist, self.artist[0..self.artist_len]);
         self.status = if (playing) |p| (if (p) .playing else .paused) else .none;
         set(&self.player, &self.player_len, player);
         set(&self.artist, &self.artist_len, artist);
@@ -111,6 +114,7 @@ pub const Media = struct {
             set(&self.art_url, &self.art_len, art);
             self.loadArt();
         }
+        if (changed) @import("../core/events.zig").emit(.{ .event = "media", .status = @tagName(self.status), .artist = self.artist[0..self.artist_len], .title = self.title[0..self.title_len] });
         if (self.status != .none) self.lyrics.request(self.artist[0..self.artist_len], self.title[0..self.title_len], self.length_s);
         if (self.status != .none) self.lyrics.trySidecar(self.player[0..self.player_len]);
         if (self.status == .none and prev_status != .none) {

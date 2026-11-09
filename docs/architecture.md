@@ -18,6 +18,7 @@
 | `ame-config check [ファイル]` / `path` | 設定ファイルの文法と値を確かめる・場所を出す | → 「ファイル:行: 内容」。終了コード 0 / 1 警告 / 2 読めない |
 | `ame-weather [--json] [場所]` | 今の天気(wttr.in) | → 「12°C 晴れ(場所)」/ JSON。終了コード 0 / 1 分からない / 2 つながらない |
 | `ame-ctl …` | 動いている ame-shell を操作する(`ame-ctl help`) | 引数 → 結果の文字 |
+| `ame-ctl watch` | 出来事(ワークスペース・フォーカス・窓の開閉・通知・曲・ロック)を流し続ける | → 最初に今の状態(hello)、そのあと 1 行 1 つの JSON |
 | `ame-auth` | ロック画面のパスワード照合(FreeBSD、setuid) | — |
 
 例: `echo 'Zig の comptime を一言で' | ame-ai -p anthropic`、

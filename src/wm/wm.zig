@@ -1081,6 +1081,7 @@ pub const Wm = struct {
                     continue;
                 }
                 @import("../frame/island.zig").windowEvent(self.app, self.outputs.items, @intFromFloat(w.tx + w.tw / 2), @intFromFloat(w.ty + w.th / 2), true);
+                @import("../core/events.zig").emit(.{ .event = "window", .action = "open", .app_id = w.app_id[0..w.app_id_len] });
                 // 初めて表示: その場で「中心から広がる」(Hyprland の popin)
                 w.placed = true;
                 w.px.snap(w.tx);
@@ -1207,16 +1208,14 @@ pub const Wm = struct {
             const changed = ao.focused_tags != o.tags or ao.view_tags != occupied;
             ao.focused_tags = o.tags;
             ao.view_tags = occupied;
-            if (changed) {
-                if (ao.frame) |fr| fr.bar.tagsChanged(fr);
-                if (ao.bar) |b| b.tagsChanged();
-            }
+            if (changed) ao.tagsChanged();
         }
         const f = self.focusedWindow();
         const t: []const u8 = if (f) |w| w.titleStr() else "";
         if (!std.mem.eql(u8, t, app.focused_title.get())) {
             app.focused_title.set(t);
             app.title_serial +%= 1;
+            @import("../core/events.zig").emit(.{ .event = "focus", .title = t, .app_id = if (f) |w| w.app_id[0..w.app_id_len] else "" });
             for (app.outputs.items) |ao| {
                 if (ao.bar) |b| b.titleChanged();
                 if (ao.frame) |fr| fr.bar.titleChanged(fr);
@@ -1433,6 +1432,7 @@ fn wClosed(data: ?*anyopaque, obj: ?*c.struct_river_window_v1) callconv(.C) void
     const w: *Window = @ptrCast(@alignCast(data.?));
     const self = w.wm;
     if (w.placed) @import("../frame/island.zig").windowEvent(self.app, self.outputs.items, @intFromFloat(w.tx + w.tw / 2), @intFromFloat(w.ty + w.th / 2), false);
+    if (w.placed) @import("../core/events.zig").emit(.{ .event = "window", .action = "close", .app_id = w.app_id[0..w.app_id_len] });
     for (self.seats.items) |s| {
         // 次の manage で、このワークスペースで直前に使っていた窓へフォーカスが戻る
         if (s.focused == w) s.focused = null;

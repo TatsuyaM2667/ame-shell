@@ -419,6 +419,7 @@ pub const Notifs = struct {
         self.next_id +%= 1;
         if (self.next_id == 0) self.next_id = 1;
         self.attachImage(n.id, ex);
+        @import("../core/events.zig").emit(.{ .event = "notification", .id = n.id, .app = n.appName(), .summary = n.summaryText(), .body = n.bodyText() });
         n.slide.snap(1);
         n.slide.set(0);
         n.ypos.snap(-20); // 少し上から落ちてくる
