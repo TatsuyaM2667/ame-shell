@@ -503,7 +503,7 @@ fn toggleRecord(f: *Frame) void {
     var p: [512]u8 = undefined;
     const script = std.fmt.bufPrintZ(&p, "{s}/.local/bin/toggle-record.sh", .{home}) catch return;
     if (c.access(script.ptr, c.X_OK) == 0) {
-        sys.spawnDetached(script.ptr);
+        sys.spawnDetachedArgs("exec \"$1\"", &.{script.ptr}); // パスは文に埋め込まない
         f.sidev.recording = !f.sidev.recording;
         return;
     }
@@ -533,8 +533,10 @@ fn toggleRecord(f: *Frame) void {
     // 音も録る: 既定の出力(スピーカー)で鳴っている音。PipeWire ではスピーカーの名前をそのまま、
     // PulseAudio(FreeBSD)では <名前>.monitor を録る。pactl が無ければ既定の入力(-a)
     var cmd: [900]u8 = undefined;
-    const cmdz = std.fmt.bufPrintZ(&cmd, "s=$(pactl get-default-sink 2>/dev/null); if [ -z \"$s\" ]; then set -- -a; elif pactl info 2>/dev/null | grep -q PipeWire; then set -- \"--audio=$s\"; else set -- --audio-backend=pulse \"--audio=$s.monitor\"; fi; exec wf-recorder \"$@\" -f '{s}' >/dev/null 2>&1", .{path}) catch return;
-    sys.spawnDetached(cmdz.ptr);
+    const cmdz = std.fmt.bufPrintZ(&cmd, "F=\"$1\"; s=$(pactl get-default-sink 2>/dev/null); if [ -z \"$s\" ]; then set -- -a; elif pactl info 2>/dev/null | grep -q PipeWire; then set -- \"--audio=$s\"; else set -- --audio-backend=pulse \"--audio=$s.monitor\"; fi; exec wf-recorder \"$@\" -f \"$F\" >/dev/null 2>&1", .{}) catch return;
+    // 保存先は文に埋め込まず引数で渡す(sh -c の $1 → F)
+    var pz: [520]u8 = undefined;
+    sys.spawnDetachedArgs(cmdz.ptr, &.{(std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return).ptr});
     f.sidev.recording = true;
     f.app.notifs.post("ame-shell", "録画を開始しました(もう一度押すと停止)", path, 0);
 }

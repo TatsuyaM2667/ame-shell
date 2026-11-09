@@ -382,6 +382,18 @@ pub fn childDefaults() void {
 }
 
 pub fn spawnDetached(cmdline: [*:0]const u8) void {
+    spawnDetachedArgs(cmdline, &.{});
+}
+
+/// /bin/sh -c <script> sh <args…> で切り離して動かす。パスなどの値は script に埋め込まず args で渡し、
+/// script の中では "$1" "$2" … で読む(値に ' や $ が入っていてもシェルの文として解釈されない)
+pub fn spawnDetachedArgs(cmdline: [*:0]const u8, args: []const [*:0]const u8) void {
+    var argv: [12:null]?[*:0]const u8 = .{null} ** 12;
+    argv[0] = "/bin/sh";
+    argv[1] = "-c";
+    argv[2] = cmdline;
+    argv[3] = "sh";
+    for (args[0..@min(args.len, 8)], 0..) |a, i| argv[4 + i] = a;
     const pid = c.fork();
     if (pid < 0) return;
     if (pid == 0) {
@@ -391,7 +403,6 @@ pub fn spawnDetached(cmdline: [*:0]const u8) void {
         var sigset: c.sigset_t = undefined;
         _ = c.sigemptyset(&sigset);
         _ = c.sigprocmask(c.SIG_SETMASK, &sigset, null);
-        const argv = [_:null]?[*:0]const u8{ "/bin/sh", "-c", cmdline, null };
         childDefaults();
         _ = c.execv("/bin/sh", @ptrCast(&argv));
         c._exit(127);

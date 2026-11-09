@@ -386,7 +386,6 @@ fn cancel(s: *Shot) void {
     if (s.surf) |sf| sf.schedule();
 }
 
-
 fn confirm(s: *Shot, r: [4]f32) void {
     const sf = s.surf orelse return;
     s.closing = true;
@@ -733,19 +732,20 @@ fn takeExternal(app: *App, kind: Kind, delay_ms: u32) void {
         return;
     };
 
-    // 時刻のファイル名はシェルの date で(撮った瞬間の時刻にするため)。パスはシェルの引用符で囲む
+    // 時刻のファイル名はシェルの date で(撮った瞬間の時刻にするため)。保存先は文に埋め込まず "$1" で渡す
     var cmd_buf: [1024]u8 = undefined;
     var delay_buf: [32]u8 = undefined;
     const delay = if (delay_ms > 0) std.fmt.bufPrint(&delay_buf, "sleep {d}.{d:0>3}; ", .{ delay_ms / 1000, delay_ms % 1000 }) catch "" else "";
     const file = "\"$D/shot_$(date +%Y%m%d_%H%M%S).png\"";
     const cmd = switch (kind) {
-        .region => std.fmt.bufPrintZ(&cmd_buf, "{s}D='{s}'; G=$(slurp) || exit 0; F={s}; grim -g \"$G\" \"$F\" && wl-copy < \"$F\"", .{ delay, dir, file }),
-        .full => std.fmt.bufPrintZ(&cmd_buf, "{s}D='{s}'; F={s}; grim \"$F\" && wl-copy < \"$F\"", .{ delay, dir, file }),
+        .region => std.fmt.bufPrintZ(&cmd_buf, "{s}D=\"$1\"; G=$(slurp) || exit 0; F={s}; grim -g \"$G\" \"$F\" && wl-copy < \"$F\"", .{ delay, file }),
+        .full => std.fmt.bufPrintZ(&cmd_buf, "{s}D=\"$1\"; F={s}; grim \"$F\" && wl-copy < \"$F\"", .{ delay, file }),
         .clip => std.fmt.bufPrintZ(&cmd_buf, "{s}grim - | wl-copy", .{delay}),
     } catch return;
-    sys.spawnDetached(cmd.ptr);
+    var db: [520]u8 = undefined;
+    const dirz = std.fmt.bufPrintZ(&db, "{s}", .{dir}) catch return;
+    sys.spawnDetachedArgs(cmd.ptr, &.{dirz.ptr});
 }
-
 
 /// 出力が抜かれた(app.zig): その出力で撮っている/選んでいるならやめる
 pub fn outputRemoved(app: *App, o: *Output) void {
