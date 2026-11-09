@@ -19,6 +19,7 @@
 | `ame-weather [--json] [場所]` | 今の天気(wttr.in) | → 「12°C 晴れ(場所)」/ JSON。終了コード 0 / 1 分からない / 2 つながらない |
 | `ame-airpods head` / `battery` / `find` | AirPods の頭の動き・電池・接続中のもの(AAP、Linux) | → 1 行 1 つの JSON(head は止めるまで流し続ける) |
 | `ame-handtrack [-d カメラ]` | カメラに映った手の形と位置・関節 21 点(ame-hand で推論) | → 1 行 1 つの JSON(status / frame。止めるまで流し続ける) |
+| `ame-keyring` / `ame-keyring list` | 鍵束(org.freedesktop.secrets)。Zed などが API キー・パスワードをしまう(gnome-keyring の代わり) | D-Bus の Secret Service / 名前と属性の一覧 |
 | `ame-ctl …` | 動いている ame-shell を操作する(`ame-ctl help`) | 引数 → 結果の文字 |
 | `ame-ctl watch` | 出来事(ワークスペース・フォーカス・窓の開閉・通知・曲・ロック)を流し続ける | → 最初に今の状態(hello)、そのあと 1 行 1 つの JSON |
 | `ame-auth` | ロック画面のパスワード照合(FreeBSD、setuid) | — |
@@ -47,8 +48,8 @@ src/
   wm/        River 0.4 以降で使う内蔵のウィンドウマネージャ
   hand/ face/  手の操作(認識は ame-handtrack を動かす)・顔の認証(カメラ)
   platform/  OS ごとの違い(Linux / FreeBSD)・イベントループ
-  lib/       画面にも OS にも依存しない部品(lrc・ai・mcp・agentfmt・appid・config・weather・aap)
-  cmd/       小さな道具(ame-lyrics・ame-ai・ame-agent・ame-config・ame-weather・ame-airpods・ame-handtrack)
+  lib/       画面にも OS にも依存しない部品(lrc・ai・mcp・agentfmt・appid・config・weather・aap・secretstore)
+  cmd/       小さな道具(ame-lyrics・ame-ai・ame-agent・ame-config・ame-weather・ame-airpods・ame-handtrack・ame-keyring)
 anim/        Odin: ばね・あいまい検索・主色抽出・FFT・画像の縮小(C ABI。wasm32 にも同じものをビルド)
 widgets/     WASM ウィジェット(Zig → wasm32)
 ```

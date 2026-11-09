@@ -231,7 +231,7 @@ say "インストール先: ${DESTDIR}${PREFIX}($( [ "$USER_MODE" = 1 ] && echo 
 install_file "$OUT/bin/ame-shell" "$PREFIX/bin/ame-shell" 755
 install_file "$OUT/bin/ame-ctl" "$PREFIX/bin/ame-ctl" 755
 # 画面を持たない小さな道具(src/cmd/。単独でも使える)
-for t in ame-lyrics ame-ai ame-agent ame-config ame-weather ame-airpods ame-handtrack; do install_file "$OUT/bin/$t" "$PREFIX/bin/$t" 755; done
+for t in ame-lyrics ame-ai ame-agent ame-config ame-weather ame-airpods ame-handtrack ame-keyring; do install_file "$OUT/bin/$t" "$PREFIX/bin/$t" 755; done
 install_file "$HERE/ame-session" "$PREFIX/bin/ame-session" 755
 install_file "$HERE/ame-update" "$PREFIX/bin/ame-update" 755
 install_file "$HERE/ame-term-shell" "$PREFIX/bin/ame-term-shell" 755
@@ -381,13 +381,9 @@ if [ "$USER_MODE" = 0 ] && [ -f "$OUT/lib/libpam_ame_face.so" ]; then
             [ -n "$NOLOGIN" ] && echo "auth requisite pam_nologin.so"
             echo "$CTRL sufficient $PREFIX/lib/ame-shell/pam_ame_face.so"
             echo "auth include greetd"
-            # 鍵束(gnome-keyring): ログインのパスワードで解錠し、セッションで起動する(Zed などの API キーの保存先)。
-            # モジュールが無ければ飛ばす("-")。顔認証で入ったときはパスワードが無いので、初めて使うときに解錠を聞かれる
-            if [ "$OS" != FreeBSD ]; then echo "-auth optional pam_gnome_keyring.so"; fi
             echo "account include greetd"
             echo "password include greetd"
             echo "session include greetd"
-            if [ "$OS" != FreeBSD ]; then echo "-session optional pam_gnome_keyring.so auto_start"; fi
         } > "$tmp"
         for d in $FACE_PAM_DIRS; do install_file "$tmp" "$d/ame-greetd" 644; done
         rm -f "$tmp"

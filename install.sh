@@ -141,7 +141,7 @@ APK_RIVER="wlroots0.20-devel libevdev-devel pixman-devel libinput-devel xwayland
 APK_RUN="greetd greetd-dinit foot dbus mesa-dri polkit upower power-profiles-daemon pipewire wireplumber libpulse-progs mpv-libs ffmpeg
  swaylock brightnessctl util-linux-rfkill networkmanager bluez thunar tumbler xdg-utils
  zsh zsh-syntax-highlighting fzf zoxide
- xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk gnome-keyring
+ xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  fonts-noto-sans-cjk-otf fonts-nerd-jetbrains-mono fonts-nerd-symbols-only adwaita-icon-theme hicolor-icon-theme"
 APK_OPT="fastfetch wf-recorder wlr-randr gvfs eza bat"
 NEED_CMDS="git curl clang wayland-scanner pkg-config"

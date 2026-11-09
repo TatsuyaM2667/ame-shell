@@ -42,7 +42,7 @@ RIVER="river xorg-xwayland"
 #  ttf-nerd-fonts-symbols: バーのアイコン / hicolor・adwaita: アプリのアイコン)
 RUN="greetd foot polkit upower power-profiles-daemon pipewire pipewire-audio pipewire-pulse wireplumber libpulse mpv ffmpeg swaylock
  brightnessctl networkmanager bluez bluez-utils util-linux thunar tumbler gvfs xdg-utils
- xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk gnome-keyring
+ xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  noto-fonts-cjk ttf-jetbrains-mono-nerd ttf-nerd-fonts-symbols hicolor-icon-theme adwaita-icon-theme
  fastfetch wf-recorder wlr-randr
  ghostty zsh zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza bat

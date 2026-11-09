@@ -182,7 +182,7 @@ pub fn build(b: *std.Build) void {
     }
     b.installArtifact(ctl);
 
-    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai", "ame-agent", "ame-config", "ame-weather", "ame-airpods", "ame-handtrack" };
+    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai", "ame-agent", "ame-config", "ame-weather", "ame-airpods", "ame-handtrack", "ame-keyring" };
     // --- 画面を持たない小さな道具(標準入出力でやりとりする。src/cmd/。libc だけ)---
     for (cmds) |name| {
         const t = b.addExecutable(.{
@@ -195,6 +195,8 @@ pub fn build(b: *std.Build) void {
         t.root_module.addImport("ame_lib", lib_mod);
         // ame-handtrack だけは手の認識(ame-hand)を使う
         if (std.mem.eql(u8, name, "ame-handtrack")) t.root_module.addImport("ame-hand", hand_dep.module("ame-hand"));
+        // ame-keyring だけは D-Bus(libdbus。ame-shell 本体と同じもの)を使う
+        if (std.mem.eql(u8, name, "ame-keyring")) useDbus(b, t, sr, pre, bsd);
         t.linkLibC();
         b.installArtifact(t);
     }
@@ -333,7 +335,25 @@ pub fn build(b: *std.Build) void {
         const ct = b.addTest(.{ .root_source_file = b.path(b.fmt("src/cmd/{s}.zig", .{name})), .target = target, .optimize = optimize });
         ct.root_module.addImport("ame_lib", lib_mod);
         if (std.mem.eql(u8, name, "ame-handtrack")) ct.root_module.addImport("ame-hand", hand_dep.module("ame-hand"));
+        if (std.mem.eql(u8, name, "ame-keyring")) useDbus(b, ct, sr, pre, bsd);
         ct.linkLibC();
         test_step.dependOn(&b.addRunArtifact(ct).step);
     }
+}
+
+/// libdbus を使う(ヘッダの場所は ame-shell 本体と同じ。FreeBSD は pkg-config を使わない)
+fn useDbus(b: *std.Build, step: *std.Build.Step.Compile, sr: []const u8, pre: []const u8, bsd: bool) void {
+    for ([_][]const u8{ "/include/dbus-1.0", "/lib/dbus-1.0/include" }) |p| {
+        step.addIncludePath(.{ .cwd_relative = b.fmt("{s}{s}{s}", .{ sr, pre, p }) });
+    }
+    if (bsd) {
+        step.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/local/include", .{sr}) });
+        step.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/local/lib", .{sr}) });
+        if (sr.len > 0) {
+            step.addSystemIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{sr}) });
+            step.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/lib", .{sr}) });
+            step.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/lib", .{sr}) });
+        }
+        step.linkSystemLibrary2("dbus-1", .{ .use_pkg_config = .no });
+    } else step.linkSystemLibrary("dbus-1");
 }
