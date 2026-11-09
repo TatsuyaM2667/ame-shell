@@ -13,13 +13,15 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 DRY=0
 if [ "${1:-}" = "--dry-run" ]; then DRY=1; shift; fi
 
-# 名前|使う部品(src/lib のファイル名、空白区切り)|外部コマンド|説明
-COMPONENTS='ame-lyrics|lrc|curl|曲の同期歌詞(LRC)を探す小さなコマンド(LRCLIB・NetEase・Kugou、キャッシュつき)
-ame-ai|ai mcp|curl|いろいろな会社の AI と標準入出力で話す小さなコマンド(MCP のツール呼び出しつき)
-ame-agent|agentfmt||コーディング CLI(Claude Code・Gemini・Codex・OpenCode・Kimi)の出力を共通の JSON の行に直すフィルタ
-ame-config|config||ame-shell の設定ファイル(config.ame)の文法と値を確かめる小さなコマンド
-ame-weather|weather|curl|今の天気を wttr.in から取ってくる小さなコマンド(文字 / JSON)
-ame-airpods|aap|bluetoothctl|AirPods の頭の動き・電池を Bluetooth(AAP)で読む小さなコマンド(Linux)'
+# 名前|使う部品(src/lib のファイル名、空白区切り)|外部コマンド|ほかに要るもの(dbus = libdbus / ame-hand = 手の認識)|説明
+COMPONENTS='ame-lyrics|lrc|curl||曲の同期歌詞(LRC)を探す小さなコマンド(LRCLIB・NetEase・Kugou、キャッシュつき)
+ame-ai|ai mcp|curl||いろいろな会社の AI と標準入出力で話す小さなコマンド(MCP のツール呼び出しつき)
+ame-agent|agentfmt|||コーディング CLI(Claude Code・Gemini・Codex・OpenCode・Kimi)の出力を共通の JSON の行に直すフィルタ
+ame-config|config|||ame-shell の設定ファイル(config.ame)の文法と値を確かめる小さなコマンド
+ame-weather|weather|curl||今の天気を wttr.in から取ってくる小さなコマンド(文字 / JSON)
+ame-airpods|aap|bluetoothctl||AirPods の頭の動き・電池を Bluetooth(AAP)で読む小さなコマンド(Linux)
+ame-handtrack||curl|ame-hand|カメラに映った手の形と位置・関節 21 点を JSON の行で流し続ける小さなコマンド(Linux)
+ame-keyring|secretstore||dbus|鍵束(org.freedesktop.secrets)。アプリが API キー・パスワードをしまう Secret Service(gnome-keyring の代わり)'
 
 REV=$(git -C "$ROOT" rev-parse --short HEAD)
 if [ -n "$(git -C "$ROOT" status --porcelain -- src/cmd src/lib)" ]; then
@@ -29,7 +31,26 @@ fi
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/ame-split.XXXXXX")
 [ "$DRY" = 1 ] || trap 'rm -rf "${WORK:?}"' EXIT
 
-gen_build() { # $1 = 名前
+gen_build() { # $1 = 名前 $2 = ほかに要るもの
+	x_dep=""
+	x_exe=""
+	x_test=""
+	case "$2" in
+	dbus)
+		x_exe='
+    exe.linkSystemLibrary("dbus-1");'
+		x_test='
+    t_main.linkSystemLibrary("dbus-1");'
+		;;
+	ame-hand)
+		x_dep='
+    const hand = b.dependency("ame_hand", .{ .target = target, .optimize = optimize });'
+		x_exe='
+    exe.root_module.addImport("ame-hand", hand.module("ame-hand"));'
+		x_test='
+    t_main.root_module.addImport("ame-hand", hand.module("ame-hand"));'
+		;;
+	esac
 	cat <<EOF
 // ame-shell(https://github.com/$OWNER/ame-shell)の src/cmd/$1.zig から生成。直すときは ame-shell の方を直す
 const std = @import("std");
@@ -37,11 +58,11 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const lib = b.createModule(.{ .root_source_file = b.path("src/lib/lib.zig") });
+    const lib = b.createModule(.{ .root_source_file = b.path("src/lib/lib.zig") });$x_dep
 
     const exe = b.addExecutable(.{ .name = "$1", .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize });
     exe.root_module.addImport("ame_lib", lib);
-    exe.linkLibC();
+    exe.linkLibC();$x_exe
     b.installArtifact(exe);
 
     const run = b.addRunArtifact(exe);
@@ -50,7 +71,7 @@ pub fn build(b: *std.Build) void {
 
     const t_main = b.addTest(.{ .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize });
     t_main.root_module.addImport("ame_lib", lib);
-    t_main.linkLibC();
+    t_main.linkLibC();$x_test
     const t_lib = b.addTest(.{ .root_source_file = b.path("src/lib/lib.zig"), .target = target, .optimize = optimize });
     t_lib.linkLibC();
     const ts = b.step("test", "テスト");
@@ -60,13 +81,20 @@ pub fn build(b: *std.Build) void {
 EOF
 }
 
-gen_zon() {
+gen_zon() { # $1 = 名前 $2 = ほかに要るもの
+	deps=".{}"
+	# 手の認識(ame-hand)は ame-shell と同じ版を使う
+	if [ "$2" = ame-hand ]; then
+		deps=".{
+$(awk '/\.ame_hand = \.\{/,/\},/' "$ROOT/build.zig.zon")
+    }"
+	fi
 	cat <<EOF
 .{
     .name = "$1",
     .version = "0.1.0",
     .minimum_zig_version = "0.13.0",
-    .dependencies = .{},
+    .dependencies = $deps,
     .paths = .{ "build.zig", "build.zig.zon", "src", "LICENSE", "README.md" },
 }
 EOF
@@ -81,7 +109,7 @@ gen_lib() { # $@ = 部品
 	echo "}"
 }
 
-gen_readme() { # $1 名前 $2 説明 $3 外部コマンド
+gen_readme() { # $1 名前 $2 説明 $3 外部コマンド $4 ほかに要るもの
 	echo "# $1"
 	echo
 	echo "$2。"
@@ -99,7 +127,11 @@ gen_readme() { # $1 名前 $2 説明 $3 外部コマンド
 	echo "## ビルド"
 	echo
 	echo '```sh'
-	echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin/$1(Zig 0.13、libc だけ)"
+	case "$4" in
+	dbus) echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin/$1(Zig 0.13、libc と libdbus)" ;;
+	ame-hand) echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin/$1(Zig 0.13、libc。手の認識の ame-hand は初回に取ってくる)" ;;
+	*) echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin/$1(Zig 0.13、libc だけ)" ;;
+	esac
 	echo "zig build test"
 	echo '```'
 	if [ -n "$3" ]; then
@@ -115,7 +147,7 @@ gen_readme() { # $1 名前 $2 説明 $3 外部コマンド
 	echo "ライセンス: GPL-3.0(ame-shell と同じ)"
 }
 
-echo "$COMPONENTS" | while IFS='|' read -r name mods needs desc; do
+echo "$COMPONENTS" | while IFS='|' read -r name mods needs extra desc; do
 	if [ $# -gt 0 ]; then
 		want=0
 		for x in "$@"; do [ "$x" = "$name" ] && want=1; done
@@ -140,9 +172,9 @@ echo "$COMPONENTS" | while IFS='|' read -r name mods needs desc; do
 	for m in $mods; do cp "$ROOT/src/lib/$m.zig" "$dir/src/lib/$m.zig"; done
 	# shellcheck disable=SC2086
 	gen_lib $mods > "$dir/src/lib/lib.zig"
-	gen_build "$name" > "$dir/build.zig"
-	gen_zon "$name" > "$dir/build.zig.zon"
-	gen_readme "$name" "$desc" "$needs" > "$dir/README.md"
+	gen_build "$name" "$extra" > "$dir/build.zig"
+	gen_zon "$name" "$extra" > "$dir/build.zig.zon"
+	gen_readme "$name" "$desc" "$needs" "$extra" > "$dir/README.md"
 	cp "$ROOT/LICENSE" "$dir/LICENSE"
 	printf '.zig-cache/\nzig-out/\n' > "$dir/.gitignore"
 
