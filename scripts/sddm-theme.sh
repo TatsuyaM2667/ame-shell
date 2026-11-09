@@ -69,7 +69,7 @@ fi
 NAME=ame
 DIR="$THEMES/$NAME"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/ame-sddm.XXXXXX") || exit 1
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "${TMP:?}"' EXIT
 
 # ---- 1. テーマ本体(更新があれば入れ直す。背景は残す)----
 put "$SRC_THEME/Main.qml" "$DIR/Main.qml" 644

@@ -217,7 +217,7 @@ else
     ODIN="$ODIN_DIR/odin"
     if [ ! -x "$ODIN" ]; then
         info "Odin $ODIN_TAG をソースからビルドします(clang と llvm-config を使用)"
-        rm -rf "$ODIN_DIR"
+        rm -rf "${ODIN_DIR:?}"
         git clone --depth 1 --branch "$ODIN_TAG" https://github.com/odin-lang/Odin "$ODIN_DIR"
         (cd "$ODIN_DIR" && bash build_odin.sh release)
     fi
@@ -277,7 +277,7 @@ else
         fetch_to "https://release.files.ghostty.org/$GHOSTTY_VER/ghostty-$GHOSTTY_VER.tar.gz" "$CACHE/ghostty-$GHOSTTY_VER.tar.gz" &&
             tar -xzf "$CACHE/ghostty-$GHOSTTY_VER.tar.gz" -C "$CACHE"
     fi
-    rm -rf "$GHOSTTY_PREFIX"
+    rm -rf "${GHOSTTY_PREFIX:?}"
     GOPTS="-Doptimize=ReleaseFast -Dgtk-x11=false -fsys=freetype -fsys=harfbuzz -fsys=fontconfig -fsys=libpng -fsys=zlib"
     # glslang: 同梱のものは SPIRV/doc.cpp の最適化だけで 10GB 近いメモリを使い、メモリ 16GB 以下では
     # 強制終了される(clang terminated with signal KILL)。システムの glslang(glslang-devel)があればそれを使う。
@@ -318,14 +318,15 @@ WRAP
             GCC_WRAP="$W/cc"
         fi
     fi
+    # GOPTS は空白区切りのオプション(わざと分ける)。shellcheck の指示は if の前に置く(条件の途中だと読めなくなる)
+    # shellcheck disable=SC2086
     if [ -x "$ZIG17" ] && [ -d "$GSRC" ] &&
-        # shellcheck disable=SC2086
         (cd "$GSRC" && if [ -n "$GCC_WRAP" ]; then export CC="$GCC_WRAP"; fi &&
             "$ZIG17" build -j"$GJOBS" $GOPTS --prefix "$GHOSTTY_PREFIX"); then
         echo "$GHOSTTY_VER" > "$GHOSTTY_PREFIX/.ame-version"
         info "ghostty $GHOSTTY_VER → $GHOSTTY_PREFIX"
     else
-        rm -rf "$GHOSTTY_PREFIX"
+        rm -rf "${GHOSTTY_PREFIX:?}"
         info "ghostty のビルドに失敗しました。端末は foot を使います(--no-ghostty で次から飛ばせます)"
     fi
 fi

@@ -76,7 +76,7 @@ mkdir -p "$CACHE"
 if [ -d "$SRC/.git" ]; then
     (cd "$SRC" && git pull -q --ff-only || info "(更新できませんでした。手元のソースでビルドします)")
 else
-    rm -rf "$SRC"
+    rm -rf "${SRC:?}"
     git clone -q --depth 1 https://github.com/fcitx/mozc-cmake.git "$SRC" || die "取得できませんでした(ネットワークを確認)"
 fi
 # Mozc 本体のさらに下のサブモジュール(用例辞書 usage_dict.txt など)まで。足りないと辞書が欠ける

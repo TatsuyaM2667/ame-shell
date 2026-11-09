@@ -271,7 +271,7 @@ if [ -x "$ODIN_DIR/odin" ]; then
     info "Odin $ODIN_TAG は導入済み"
 else
     info "Odin $ODIN_TAG をソースからビルドします"
-    rm -rf "$ODIN_DIR"
+    rm -rf "${ODIN_DIR:?}"
     git clone --depth 1 --branch "$ODIN_TAG" https://github.com/odin-lang/Odin "$ODIN_DIR"
     cd "$ODIN_DIR"
     env LLVM_CONFIG=/usr/local/bin/llvm-config18 bash build_odin.sh release

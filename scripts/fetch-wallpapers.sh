@@ -41,7 +41,7 @@ else
     if git clone -q --depth 1 "$REPO_URL" "$DIR" >/dev/null 2>&1; then
         info "追加の壁紙を取ってきました($DIR)"
     else
-        rm -rf "$DIR"
+        rm -rf "${DIR:?}"
         hint
     fi
 fi
