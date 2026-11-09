@@ -52,7 +52,9 @@ pub fn enabled() bool {
     return std.mem.eql(u8, v, "1");
 }
 
+/// 試験用(パスワード "ame" で成功したことにする)。Debug ビルドのときだけ。入れる版では環境変数を何にしても効かない
 fn fake() bool {
+    if (builtin.mode != .Debug) return false;
     const v = std.posix.getenv("AME_GREETER_FAKE") orelse return false;
     return std.mem.eql(u8, v, "1");
 }

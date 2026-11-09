@@ -432,8 +432,9 @@ pub const Lock = struct {
                 _ = c.write(fds[1], &out, 1 + ml);
                 c._exit(0);
             }
-            // 試験用: 入れ子の試験セッション(AME_SESSION_NESTED=1)で AME_LOCK_FAKE=1 のときだけ、パスワード "ame" で解除できる
-            const fake = std.posix.getenv("AME_LOCK_FAKE") != null and
+            // 試験用: Debug ビルドの入れ子の試験セッション(AME_SESSION_NESTED=1)で AME_LOCK_FAKE=1 のときだけ、パスワード "ame" で解除できる。
+            // 入れる版(ReleaseFast など)では環境変数を何にしても効かない(ロックを無力化できないように)
+            const fake = @import("builtin").mode == .Debug and std.posix.getenv("AME_LOCK_FAKE") != null and
                 std.mem.eql(u8, std.posix.getenv("AME_SESSION_NESTED") orelse "", "1");
             const ok = if (fake) std.mem.eql(u8, self.pw[0..self.pw_len], "ame") else if (self.auth_helper) |hp| self.helperCheck(hp) else self.pamCheck();
             const b: u8 = if (ok) 1 else 0;

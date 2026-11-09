@@ -151,7 +151,7 @@ Bluetooth のイヤホンの音には `pipewire-audio`、バーのアイコン�
   - 背景と写真は、ユーザーごとの置き場 `/var/lib/ame-shell/greeter/<ユーザー>`(FreeBSD は `/var/db/…`)から。ame-shell が起動したとき・壁紙を変えたとき・ロックしたときに、壁紙(画像なら絵、オーロラ・雨なら種類だけ)・ぼかした背景・写真・アクセント色をそこへ書きます(root は要りません。この置き場は誰でも読めます)
   - 入れ方: `sh install.sh`(インストール後の設定で確認)、または `doas sh scripts/greeter-setup.sh`(`--dry-run` で内容だけ表示)。`/etc/greetd/config.toml` を書き換え(元は `.ame-bak`)、次の起動から sddm の代わりに greetd を使います
   - ログイン画面が出ないときは TTY(Ctrl+Alt+F2)でログインして `doas sh scripts/greeter-setup.sh --undo`(SDDM に戻す)。ログは `/var/lib/greetd/ame-greeter.log`
-  - 試す: `AME_GREETER=1 AME_GREETER_FAKE=1`(パスワード `ame` で成功したことにする)でネストした River の中に出せます
+  - 試す: Debug ビルド(`zig build`)で `AME_GREETER=1 AME_GREETER_FAKE=1`(パスワード `ame` で成功したことにする)にすると、ネストした River の中に出せます(入れる版では効きません)
 - **SDDM を使う場合**(FreeBSD など): ロック画面と同じ見た目の SDDM のテーマ(`data/sddm/ame`)も用意しています。
   - **背景・写真・アクセント色は ame-shell が書き出す**: インストーラがユーザーごとの置き場 `/var/lib/ame-shell/greeter/<ユーザー>`(FreeBSD は `/var/db/…`)を作り、ame-shell が起動したとき・壁紙を変えたとき・ロックしたときに、ぼかした壁紙(ロックしたときはロック画面の背景そのもの)・ユーザーの写真・アクセント色をそこへ書きます。root は要らず、次のログイン画面から反映されます。この置き場は誰でも読めます(ぼかした壁紙と写真が入るため)。
   - まだ書き出していないときは、壁紙の画像(動画なら 1 コマ目)をぼかしたもの、オーロラ・雨ならオーロラ風の背景。
