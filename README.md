@@ -44,7 +44,7 @@ River 0.5 は「描画は River、配置はウィンドウマネージャ」と�
 River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ランチャーなど)はそのまま使えます。
 
 ### 壁紙と配色
-- **ライブ壁紙**: シェーダで描くオーロラ / 雨、**GIF・MP4 などの動画**、画像。動画は libmpv(実行時に読み込み、ハードウェア復号)で再生し、libmpv が無い・再生できない・5 秒たっても映らないときは ffmpeg で再生します(VA-API で復号・縮小、使えなければ CPU。横 1280・30fps)。それでもだめなときは理由を通知します。`AME_VIDEO_BACKEND=ffmpeg` で ffmpeg に固定。タイル・全画面の窓で覆われている間は、動画もオーロラも止めて GPU を窓に回します
+- **ライブ壁紙**: シェーダで描くオーロラ / 雨、**GIF・MP4 などの動画**、画像。動画は libmpv(実行時に読み込み、ハードウェア復号)で再生し、libmpv が無い・再生できない・5 秒たっても映らないときは ffmpeg で再生します(VA-API で復号・縮小、使えなければ CPU。横 1280・30fps)。それでもだめなときは理由を通知します。`AME_VIDEO_BACKEND=ffmpeg` で ffmpeg に固定。透明な端末などから見えるよう、窓を開いていても動き続けます(全画面の窓があるときだけ止めて GPU を窓に回します)
 - **壁紙ピッカー**(Super+Shift+W): 斜めのカードが並び、決定するとカードの位置から円・斜めワイプ・短冊で切り替わる
 - **壁紙の置き場**: `~/Pictures/wallpapers`・`~/.config/ame-shell/wallpapers`・`~/.local/share/ame-shell/wallpapers`・`<prefix>/share/ame-shell/wallpapers`(同じ名前は 1 つにまとめる)。ame-update は、追加の壁紙を非公開リポジトリ(`AME_WALLPAPERS_REPO` で変更、空で無効)から取ってきます。GitHub にログインしていない場合は案内を出すだけです(`gh auth login && gh auth setup-git`)
 - **配色は壁紙から自動**: 壁紙の一番鮮やかな色からアクセント、ガラス・文字色も合わせてなめらかに遷移。再生中はアルバムアートの色に。くすんだ緑や、エラーと紛らわしい赤は避ける
@@ -52,7 +52,7 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
 - **ガラス**: 壁紙を dual Kawase でぼかし、パネルは真後ろをサンプル(屈折・色収差・ハイライト)
 
 ### そのほか
-- 通知サーバ内蔵(`org.freedesktop.Notifications`。他のデーモンが動いていれば譲る)
+- 通知サーバ内蔵(`org.freedesktop.Notifications`。他のデーモンが動いていれば譲る)。送り主の画像(Discord なら相手のアイコン)を丸く出し、右下にアプリのアイコン。**押すとそのアプリの窓があるワークスペースへ移る**(ロック画面では解除したあとに)
   - 電池の残量が少ないとき、充電器の抜き差し(満充電まであと何分・何時ごろ)、USB 機器・USB メモリ・SD カードの抜き差し(名前・容量・ラベル)も通知
 - **録画**(ユーティリティの録画ボタン): wf-recorder で `~/Videos` に保存。**PC で鳴っている音も一緒に**録る(PipeWire は既定の出力、PulseAudio は `<出力>.monitor`)
 - **スクリーンショット**: grim / slurp / wl-copy を使わず ame-shell が自分で撮る(ext-image-copy-capture、PNG は自前のエンコーダ、クリップボードは ext-data-control)
@@ -63,7 +63,7 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
   - 指さすとカーソルが指先に付いて動き、窓のフォーカスも移る / **つまむ**と短くでクリック、つまんだまま動かすと窓をつかんで移動、**持ったまま手を近づける・遠ざけるとズーム** /
     **手を払う**と隣のワークスペース / **指の本数**を示して止めるとその番号へ / **開いた手を止める**と手のメニュー(ランチャー・ダッシュボード・全画面・浮かせる・大きく・小さく・スクショ・閉じる・ワークスペース 1〜9)/ **握りこぶし**で閉じる。操作のたびに水の波紋、カーソルの後ろには船の航跡のような V 字の波
   - 手の認識は MediaPipe の手のモデル(Apache-2.0、約 8MB。初めてオンにしたときに `~/.local/share/ame-shell/models` へ取ってくる)を、**Zig で書いた推論エンジン**(別のリポジトリ [ame-hand](https://github.com/TatsuyaM2667/ame-hand)。ame-shell 側は River の操作につなぐ `src/hand/hand.zig`)で動かします。C++・Python・OpenCV は使いません
-  - カメラは V4L2 を直接(FreeBSD は webcamd)。オンの間だけ CPU を 1 コアの 10〜20% ほど使い、オフにするとカメラ・スレッド・モデルのメモリを全部返します
+  - カメラと推論は別のプロセス `ame-handtrack` が受け持ち、ame-shell はその出力(1 行 1 つの JSON)を操作にするだけ。カメラは V4L2 を直接(FreeBSD は webcamd)。オンの間だけ CPU を 1 コアの 10〜20% ほど使い、オフにするとプロセスごとカメラ・モデルのメモリを返します
   - ame-shell が WM を兼ねるセッション(River 0.5。FreeBSD は常にこれ)では窓そのものをつかんで動かし・ズームします。River 0.3 のセッション(Chimera・Arch で内蔵 WM を使わないとき)では、ワークスペース・閉じる・全画面・浮かせる・大きく/小さく を riverctl と同じ命令で行い、つまんで動かすのは左ボタンのドラッグになります
 - **充電のアニメーション**: 充電器をつなぐと、iPhone の MagSafe のように画面全体に光の輪と残り % のリングを出す。外したときは光の輪が吸い込まれ、リングの色が抜ける。このときは抜き差しの通知は出さない(ロック中も。`shell { charge-animation off }` で出さない)
 - **ホーム画面の曲のウィジェット**: ロック画面と同じ曲のカードを、デスクトップの四隅のどこかに置く(同期歌詞つき)。ジャケットを押すと、ロック画面と同じく「再生中」を画面いっぱいに広げる(窓の下。ドラッグで近い隅へ動かせ、覚える。`ame-ctl widget music <隅>`、`music-widget { corner … }`)
@@ -78,6 +78,7 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
     - 赤外線カメラ(GREY を出すもの)でだけ登録・照合する(スマホの画面は赤外線では真っ暗に写る)。赤外線では顔が照明で十分明るいことも確かめる
     - 顔の検出は MediaPipe の BlazeFace、顔の特徴は OpenCV Zoo の SFace(どちらも Apache-2.0。初めて登録するときに取ってきて SHA-256 を確かめる)。ONNX を読むところも推論も**自作**(別のリポジトリ [ame-face](https://github.com/TatsuyaM2667/ame-face)、手の認識と同じエンジン)。C++・Python・OpenCV は使わない
     - 登録した特徴は `~/.local/share/ame-shell/face.bin`(本人だけが読める)。画像は残さない。顔認証はパスワードより弱い(赤外線で印刷した写真・双子)ので、要らなければ `face { enabled off }`
+- **鍵束(`ame-keyring`)**: Zed などのアプリが API キー・パスワードをしまう `org.freedesktop.secrets` を自前で持つ(gnome-keyring は要らない)。中身は `~/.local/share/ame-shell/keyring` に XChaCha20-Poly1305 で暗号化。いつも開いている鍵束なので、このユーザーで動くプログラムからは読める
 - WASM ウィジェット(保存すると状態を保ったままホットリロード)
 - `ame-ctl` でシェルを操作(キーバインドやスクリプトから)
 
@@ -327,6 +328,7 @@ ame-ctl airpods on|off|toggle|status     (AirPods の頭の動きで操作)
 ame-ctl face enroll|clear|status        (顔認証: 顔を登録・消す)
 ame-ctl widget music <隅|on|off>       (ホーム画面の曲のウィジェット: top-left / top-right / bottom-left / bottom-right)
 ame-ctl lock | reload | widgets reload | stats | restart | quit
+ame-ctl watch                            (出来事を 1 行 1 つの JSON で流し続ける: workspace・focus・window・notification・media・lock)
 ```
 
 ## WASM ウィジェットを書く
@@ -357,6 +359,8 @@ ame-agent sessions ~/projects/foo                          # Claude Code の会�
 ame-config check                                          # 設定ファイルを確かめる(間違いは「ファイル:行:」で出る)
 ame-weather Sapporo                                       # 今の天気(--json で JSON)
 ame-airpods head | jq -r 'select(.event=="gesture").gesture'     # AirPods の頭の動き(right / left / up / down)
+ame-handtrack | jq -c '.hands[0].gesture'                 # カメラに映った手の形(カメラを使う)
+ame-keyring list                                          # 鍵束にしまってあるものの名前と属性(秘密は出さない)
 ame-ctl watch | jq -r 'select(.event=="workspace").workspace'   # 出来事を流し続ける(自分のバーやスクリプトから)
 ```
 
