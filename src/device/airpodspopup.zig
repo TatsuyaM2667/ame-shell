@@ -3,8 +3,8 @@
 //   画面の下の真ん中から、ガラスのカードがポンと上がる。名前・「接続しました」・AirPods の絵(左右のイヤホンとケース)、
 //   その下に左・右・ケースの電池の残り(リングと %、充電中は稲妻)。約 6 秒で下へ沈んで消える。押すとすぐ消える。
 //
-// 電池の残りは AirPods の AAP(airpods.zig と同じ L2CAP の接続)で読む: つないで handshake と通知の依頼を送ると、
-// 電池のパケットが届く。読めるまでは「…」。BlueZ の Device1 の Connected が true になったときに syswatch.zig から呼ぶ。
+// 電池の残りは ame-airpods battery(AAP の L2CAP の接続。src/cmd/ame-airpods.zig)で読む。読めるまでは「…」。
+//BlueZ の Device1 の Connected が true になったときに syswatch.zig から呼ぶ。
 // 設定: airpods { popup off } で出さない(そのときは今までどおり「ヘッドホンを接続しました」の通知)。Linux のみ。
 const std = @import("std");
 const anim = @import("../gfx/anim.zig");
@@ -19,7 +19,8 @@ const theme = @import("../gfx/theme.zig");
 const loop = @import("../platform/loop.zig");
 const surface = @import("../core/surface.zig");
 const Surface = surface.Surface;
-const ap = @import("airpods.zig");
+const ap = @import("ame_lib").aap;
+const sys = @import("../platform/sys.zig");
 
 const W: u32 = 520;
 const H: u32 = 330;
@@ -42,12 +43,13 @@ pub const Popup = struct {
     name_len: usize = 0,
     batt: ap.Batteries = .{ .{}, .{}, .{} },
     have_batt: bool = false,
-    /// 電池を読むスレッド
-    thread: ?std.Thread = null,
-    quit: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    /// 電池を読む ame-airpods battery の出力
     rfd: c_int = -1,
-    wfd: c_int = -1,
+    pid: c_int = 0,
+    buf: [512]u8 = undefined,
+    len: usize = 0,
     addr: [17]u8 = undefined,
+    addr_z: [17:0]u8 = undefined,
     /// 電池のリングが満ちていく
     fill: Spring = Spring.init(0, 0.6, 0.9),
 
@@ -61,9 +63,10 @@ pub const Popup = struct {
     /// AirPods がつながった。addr は "AA:BB:…"
     pub fn show(self: *Popup, addr: []const u8, name: []const u8) void {
         const app = self.app;
-        if (!ap.supported or app.lock.locked or addr.len != 17) return;
+        if (!@import("airpods.zig").supported or app.lock.locked or addr.len != 17) return;
         self.stopWorker();
         @memcpy(&self.addr, addr[0..17]);
+        @memcpy(&self.addr_z, addr[0..17]);
         self.name_len = @min(name.len, self.name.len);
         @memcpy(self.name[0..self.name_len], name[0..self.name_len]);
         self.batt = .{ .{}, .{}, .{} };
@@ -139,82 +142,45 @@ pub const Popup = struct {
         if (self.surf) |s| s.schedule();
     }
 
-    // ---- 電池を読むスレッド ----
-
-    const Msg = extern struct { lv: [3]u8, chg: [3]u8 };
+    // ---- 電池を読む(ame-airpods battery。src/cmd/ame-airpods.zig)----
 
     fn startWorker(self: *Popup) void {
-        var fds: [2]c_int = undefined;
-        if (c.pipe2(&fds, c.O_CLOEXEC | c.O_NONBLOCK) != 0) return;
-        self.rfd = fds[0];
-        self.wfd = fds[1];
-        self.app.loop.add(self.rfd, c.EPOLLIN, self, onMsg) catch {
-            _ = c.close(fds[0]);
-            _ = c.close(fds[1]);
-            self.rfd = -1;
-            self.wfd = -1;
+        const fd = sys.spawnReader(&.{ "ame-airpods", "battery", "-a", &self.addr_z }, &self.pid) orelse return;
+        self.app.loop.add(fd, c.EPOLLIN | c.EPOLLHUP, self, onMsg) catch {
+            _ = c.close(fd);
             return;
         };
-        self.quit.store(false, .release);
-        self.thread = std.Thread.spawn(.{ .stack_size = 128 << 10 }, worker, .{self}) catch null;
+        self.rfd = fd;
+        self.len = 0;
     }
 
     fn stopWorker(self: *Popup) void {
-        if (self.thread) |t| {
-            self.quit.store(true, .release);
-            t.join();
-            self.thread = null;
-        }
-        if (self.rfd >= 0) {
-            self.app.loop.remove(self.rfd);
-            _ = c.close(self.rfd);
-            _ = c.close(self.wfd);
-        }
+        if (self.rfd < 0) return;
+        _ = c.kill(self.pid, c.SIGTERM);
+        self.app.loop.remove(self.rfd);
+        _ = c.close(self.rfd);
         self.rfd = -1;
-        self.wfd = -1;
     }
 
+    /// 終わるまで読み、{"left":{"level","charging"},"right":…,"case":…} を電池の表示に
     fn onMsg(ctx: *anyopaque, fd: c_int, _: u32) void {
         const self: *Popup = @ptrCast(@alignCast(ctx));
-        var m: Msg = undefined;
-        while (c.read(fd, &m, @sizeOf(Msg)) == @sizeOf(Msg)) {
-            for (0..3) |i| self.batt[i] = .{ .level = if (m.lv[i] == 255) null else m.lv[i], .charging = m.chg[i] != 0 };
-            self.have_batt = true;
-            self.fill.snap(0);
-            self.fill.set(1);
+        const n = c.read(fd, self.buf[self.len..].ptr, self.buf.len - self.len);
+        if (n > 0) {
+            self.len += @intCast(n);
+            if (self.len < self.buf.len) return;
         }
+        self.app.loop.remove(fd);
+        _ = c.close(fd);
+        self.rfd = -1;
+        const B = struct { left: ap.Battery, right: ap.Battery, case: ap.Battery };
+        const p = std.json.parseFromSlice(B, std.heap.c_allocator, std.mem.trim(u8, self.buf[0..self.len], " \n"), .{ .ignore_unknown_fields = true }) catch return;
+        defer p.deinit();
+        self.batt = .{ p.value.left, p.value.right, p.value.case };
+        self.have_batt = true;
+        self.fill.snap(0);
+        self.fill.set(1);
         if (self.surf) |s| s.schedule();
-    }
-
-    fn worker(self: *Popup) void {
-        // つないだ直後は AAP がまだ開かないことがあるので、何度か試す
-        var tries: u32 = 0;
-        while (tries < 4 and !self.quit.load(.acquire)) : (tries += 1) {
-            if (tries > 0) std.time.sleep(800 * std.time.ns_per_ms);
-            const fd = ap.connectL2cap(&self.addr, &self.quit) orelse continue;
-            defer _ = c.close(fd);
-            if (!ap.sendPkt(fd, &ap.HANDSHAKE)) continue;
-            std.time.sleep(200 * std.time.ns_per_ms);
-            _ = ap.sendPkt(fd, &ap.REQUEST_NOTIFICATIONS);
-            var buf: [512]u8 = undefined;
-            const t0 = std.time.milliTimestamp();
-            while (std.time.milliTimestamp() - t0 < 3000 and !self.quit.load(.acquire)) {
-                var pfd = [_]std.posix.pollfd{.{ .fd = fd, .events = std.posix.POLL.IN, .revents = 0 }};
-                const n = std.posix.poll(&pfd, 200) catch break;
-                if (n == 0) continue;
-                const r = c.recv(fd, &buf, buf.len, 0);
-                if (r <= 0) break;
-                var b: ap.Batteries = undefined;
-                if (!ap.parseBattery(buf[0..@intCast(r)], &b)) continue;
-                var m = Msg{ .lv = .{ 255, 255, 255 }, .chg = .{ 0, 0, 0 } };
-                for (0..3) |i| {
-                    if (b[i].level) |l| m.lv[i] = l;
-                    m.chg[i] = @intFromBool(b[i].charging);
-                }
-                _ = c.write(self.wfd, &m, @sizeOf(Msg));
-                return;
-            }
-        }
     }
 
     // ---- 描画 ----

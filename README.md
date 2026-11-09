@@ -356,6 +356,7 @@ claude -p '直して' --output-format stream-json --verbose | ame-agent -C "$PWD
 ame-agent sessions ~/projects/foo                          # Claude Code の会話の一覧
 ame-config check                                          # 設定ファイルを確かめる(間違いは「ファイル:行:」で出る)
 ame-weather Sapporo                                       # 今の天気(--json で JSON)
+ame-airpods head | jq -r 'select(.event=="gesture").gesture'     # AirPods の頭の動き(right / left / up / down)
 ame-ctl watch | jq -r 'select(.event=="workspace").workspace'   # 出来事を流し続ける(自分のバーやスクリプトから)
 ```
 

@@ -7,6 +7,7 @@ pub const agentfmt = @import("agentfmt.zig");
 pub const appid = @import("appid.zig");
 pub const config = @import("config.zig");
 pub const weather = @import("weather.zig");
+pub const aap = @import("aap.zig");
 
 test {
     _ = lrc;
@@ -16,4 +17,5 @@ test {
     _ = appid;
     _ = config;
     _ = weather;
+    _ = aap;
 }
