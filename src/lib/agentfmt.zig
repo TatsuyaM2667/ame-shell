@@ -11,6 +11,8 @@ pub const Fmt = enum {
     opencode,
     /// 役割ごとのメッセージ({"role":"assistant","content":…,"tool_calls":…})
     kimi,
+    /// Antigravity CLI(agy)の stream-json(event: init / step_update / result)
+    antigravity,
     /// 端末の出力をそのまま
     raw,
 
@@ -53,6 +55,10 @@ pub const Parser = struct {
     emit: *const fn (ctx: *anyopaque, ev: Event) void,
     /// 今の返事の区切りが、すでに delta で届いた
     seg_streamed: bool = false,
+    /// Antigravity: 見出しを出した最後のツールの手順の番号
+    last_step: i64 = -1,
+    /// Antigravity: 会話の id はもう出した(行ごとに同じものが来るので 1 回だけ)
+    got_session: bool = false,
     alloc: std.mem.Allocator = std.heap.c_allocator,
     ansi: [4096]u8 = undefined,
 
@@ -77,6 +83,7 @@ pub const Parser = struct {
             .codex => p.codex(v),
             .opencode => p.opencode(v),
             .kimi => p.kimi(v),
+            .antigravity => p.antigravity(v),
             .raw => unreachable,
         }
     }
@@ -254,6 +261,55 @@ pub const Parser = struct {
         }
     }
 
+    /// Antigravity CLI(agy -p --output-format stream-json)の 1 行。
+    /// {"event":"init"|"step_update"|"result", "conversation_id"…}。step_update の step_type が
+    /// agent_response(text_delta で少しずつ)・tool(ACTIVE で始まり DONE / ERROR で output / error)
+    fn antigravity(p: *Parser, v: std.json.Value) void {
+        const kind = getStr(v, "event") orelse return;
+        const eq = std.mem.eql;
+        // 会話の id は init では一番外、step_update・result では中にある
+        if (p.live and !p.got_session) {
+            const inner = getVal(v, "step_update") orelse getVal(v, "result");
+            if (getStr(v, "conversation_id") orelse (if (inner) |x| getStr(x, "conversation_id") else null)) |sid| {
+                p.ev(.{ .session = sid });
+                p.got_session = true;
+            }
+        }
+        if (eq(u8, kind, "result")) {
+            const r = getVal(v, "result") orelse return;
+            const status = getStr(r, "status") orelse "";
+            if (status.len > 0 and !eq(u8, status, "SUCCESS")) {
+                const msg = getStr(r, "response") orelse "";
+                p.ev(.{ .@"error" = if (msg.len > 0) msg else status });
+            }
+            p.ev(.{ .done = .{ .cost = 0 } });
+            return;
+        }
+        if (!eq(u8, kind, "step_update")) return;
+        const s = getVal(v, "step_update") orelse return;
+        const ty = getStr(s, "step_type") orelse return;
+        const state = getStr(s, "state") orelse "";
+        const step: i64 = if (getVal(s, "step_index")) |x| (if (x == .integer) x.integer else -1) else -1;
+        if (eq(u8, ty, "agent_response")) {
+            if (getStr(s, "text_delta")) |t| p.ev(.{ .delta = t });
+            if (eq(u8, state, "DONE")) p.ev(.split);
+        } else if (eq(u8, ty, "tool")) {
+            const info = getVal(s, "tool_info");
+            const name = getStr(s, "tool_name") orelse (if (info) |i| getStr(i, "name") else null) orelse "ツール";
+            // 見出しは 1 つの手順につき 1 回(ACTIVE と DONE の両方に同じものが来る)
+            if (step != p.last_step) {
+                p.last_step = step;
+                p.title(name, if (info) |i| getVal(i, "parameters") else null);
+            }
+            if (eq(u8, state, "DONE")) {
+                p.result(if (info) |i| getVal(i, "output") else null, false);
+            } else if (eq(u8, state, "ERROR")) {
+                const e = if (info) |i| getVal(i, "error") else null;
+                p.ev(.{ .result = .{ .text = if (e) |x| getStr(x, "message") orelse "失敗しました" else "失敗しました", .err = true } });
+            }
+        }
+    }
+
     fn kimi(p: *Parser, v: std.json.Value) void {
         const role = getStr(v, "role") orelse return p.claude(v);
         const eq = std.mem.eql;
@@ -299,7 +355,7 @@ pub fn toolTitle(tool: []const u8, input: ?std.json.Value, dir: []const u8, buf:
     var arg: []const u8 = "";
     if (input) |in| {
         if (in == .object) {
-            for ([_][]const u8{ "command", "cmd", "file_path", "filePath", "path", "absolute_path", "pattern", "url", "query", "description", "prompt", "title" }) |k| {
+            for ([_][]const u8{ "command", "cmd", "CommandLine", "file_path", "filePath", "AbsolutePath", "TargetFile", "path", "absolute_path", "DirectoryPath", "SearchPath", "pattern", "Pattern", "url", "Url", "query", "Query", "description", "prompt", "title" }) |k| {
                 if (getStr(in, k)) |s| {
                     arg = s;
                     break;
@@ -349,6 +405,17 @@ pub fn stripAnsi(s: []const u8, out: []u8) []const u8 {
             continue;
         }
         if (ch == '\r') {
+            i += 1;
+            continue;
+        }
+        // タブは字形が無く □ になるので、空白 2 つに(ls の出力などの区切り)
+        if (ch == '\t') {
+            out[n] = ' ';
+            n += 1;
+            if (n < out.len) {
+                out[n] = ' ';
+                n += 1;
+            }
             i += 1;
             continue;
         }
@@ -549,4 +616,28 @@ test "other formats" {
     try std.testing.expectEqualStrings("text:やります\ntool:Shell: ls\nresult:x\n", k);
     var b: [16]u8 = undefined;
     try std.testing.expectEqualStrings("ok", stripAnsi("\x1b[1;32mok\x1b[0m\r", &b));
+}
+
+test "antigravity stream-json" {
+    // agy -p … --output-format stream-json が実際に出したもの(短くしたもの)
+    const got = try collect(.antigravity, true, &.{
+        "{\"event\":\"init\",\"conversation_id\":\"c1\",\"init\":{\"cwd\":\"/w\"}}",
+        "{\"event\":\"step_update\",\"step_update\":{\"conversation_id\":\"c1\",\"step_index\":0,\"state\":\"DONE\",\"step_type\":\"user_input\"}}",
+        "{\"event\":\"step_update\",\"step_update\":{\"step_index\":1,\"state\":\"ACTIVE\",\"step_type\":\"agent_response\",\"text_delta\":\"見て\"}}",
+        "{\"event\":\"step_update\",\"step_update\":{\"step_index\":1,\"state\":\"DONE\",\"step_type\":\"agent_response\",\"text_delta\":\"みます\"}}",
+        "{\"event\":\"step_update\",\"step_update\":{\"step_index\":2,\"state\":\"ACTIVE\",\"step_type\":\"tool\",\"tool_name\":\"run_command\",\"tool_info\":{\"name\":\"run_command\",\"parameters\":{\"CommandLine\":\"ls -a\"}}}}",
+        "{\"event\":\"step_update\",\"step_update\":{\"step_index\":2,\"state\":\"DONE\",\"step_type\":\"tool\",\"tool_name\":\"run_command\",\"tool_info\":{\"name\":\"run_command\",\"parameters\":{\"CommandLine\":\"ls -a\"},\"output\":\"a.txt\"}}}",
+        "{\"event\":\"step_update\",\"step_update\":{\"step_index\":3,\"state\":\"ERROR\",\"step_type\":\"tool\",\"tool_name\":\"run_command\",\"tool_info\":{\"parameters\":{\"CommandLine\":\"ps\"},\"error\":{\"type\":\"TOOL_ERROR\",\"message\":\"denied\"}}}}",
+        "{\"event\":\"result\",\"result\":{\"conversation_id\":\"c1\",\"status\":\"SUCCESS\",\"response\":\"ok\"}}",
+    });
+    defer std.testing.allocator.free(got);
+    try std.testing.expectEqualStrings(
+        "session:c1\ndelta:見て\ndelta:みます\nsplit\ntool:run_command: ls -a\nresult:a.txt\ntool:run_command: ps\nresult!:denied\ndone:0\n",
+        got,
+    );
+}
+
+test "tabs become spaces" {
+    var b: [16]u8 = undefined;
+    try std.testing.expectEqualStrings(".  ..  a", stripAnsi(".\t..\ta\r", &b));
 }

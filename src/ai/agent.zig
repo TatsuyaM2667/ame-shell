@@ -48,6 +48,7 @@ pub const Agent = struct {
 pub const builtin = [_]Agent{
     .{ .id = "claude", .name = "Claude Code", .bin = "claude", .fmt = .claude, .resume_id = true },
     .{ .id = "opencode", .name = "OpenCode", .bin = "opencode", .fmt = .opencode, .resume_id = true },
+    .{ .id = "antigravity", .name = "Antigravity CLI", .bin = "agy", .fmt = .antigravity, .resume_id = true },
     .{ .id = "gemini", .name = "Gemini CLI", .bin = "gemini", .fmt = .gemini },
     .{ .id = "codex", .name = "Codex CLI", .bin = "codex", .fmt = .codex, .resume_id = true },
     .{ .id = "kimi", .name = "Kimi CLI", .bin = "kimi", .fmt = .kimi },
@@ -447,6 +448,32 @@ fn buildArgv(av: *Argv, prompt: []const u8, input: *[]const u8) void {
         if (p == .all) av.add("--dangerously-allow-all");
         av.add("--stream-json");
         av.add("-x");
+        av.add(prompt);
+    } else if (eq(u8, id, "antigravity")) {
+        // Antigravity CLI(agy): -p で 1 回だけ動かす。続きは --conversation <id>(出力の conversation_id)か -c
+        for ([_][]const u8{ "agy", "--output-format", "stream-json" }) |w| av.add(w);
+        switch (p) {
+            .edits => {
+                av.add("--mode");
+                av.add("accept-edits");
+            },
+            .all => av.add("--dangerously-skip-permissions"),
+            .plan => {
+                av.add("--mode");
+                av.add("plan");
+            },
+            .ask => {}, // 許可の要るものは聞けないので止まる(断ったことになる)
+        }
+        switch (res) {
+            .id => {
+                av.add("--conversation");
+                av.add(sid);
+            },
+            .last => av.add("--continue"),
+            .none => {},
+        }
+        // -p の値は次の引数をそのまま取る(- で始まる文でも)
+        av.add("-p");
         av.add(prompt);
     } else if (eq(u8, id, "gemini")) {
         for ([_][]const u8{ "gemini", "--output-format", "stream-json" }) |w| av.add(w);

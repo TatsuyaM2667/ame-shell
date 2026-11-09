@@ -4,7 +4,7 @@
 //   ame-agent sessions [フォルダ]          Claude Code のそのフォルダの会話(新しい順){"id","title","mtime"}
 //   ame-agent history フォルダ 会話の id   その会話の記録を、同じ出来事にして出す
 //
-// 形式: claude(既定。Qwen Code・Cursor Agent・Amp も)/ gemini / codex / opencode / kimi / raw
+// 形式: claude(既定。Qwen Code・Cursor Agent・Amp も)/ antigravity(agy)/ gemini / codex / opencode / kimi / raw
 // 出来事(読み方は lib/agentfmt.zig。ame-shell の AI チャットのパネルも同じものを使う):
 //   {"type":"session","id"}            会話の id(次は --resume などに渡せる)
 //   {"type":"delta","text"}            少しずつ届く返事の続き / {"type":"text","text"} まとまった返事
@@ -38,7 +38,7 @@ fn emit(_: *anyopaque, e: af.Event) void {
 
 fn usage() noreturn {
     std.io.getStdErr().writeAll(
-        \\使い方: CLI の出力 | ame-agent [-f claude|gemini|codex|opencode|kimi|raw] [-C フォルダ]
+        \\使い方: CLI の出力 | ame-agent [-f claude|antigravity|gemini|codex|opencode|kimi|raw] [-C フォルダ]
         \\        ame-agent sessions [フォルダ]
         \\        ame-agent history フォルダ 会話の id
         \\
