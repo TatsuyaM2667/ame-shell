@@ -308,11 +308,11 @@ pub fn main() !void {
         }
     }
     const idx = try std.fs.path.join(a, &.{ out_dir, "index.theme" });
-    try std.fs.cwd().writeFile(.{ .sub_path = idx, .data =
-        \\[Icon Theme]
-        \\Name=ame
-        \\Comment=ame-shell のマウスカーソル(紺のガラスと白い縁)
-        \\
+    try std.fs.cwd().writeFile(.{ .sub_path = idx, .data = 
+    \\[Icon Theme]
+    \\Name=ame
+    \\Comment=ame-shell のマウスカーソル(紺のガラスと白い縁)
+    \\
     });
 }
 

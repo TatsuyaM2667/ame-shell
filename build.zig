@@ -325,6 +325,8 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addImport("ame_lib", lib_mod);
     tests.linkLibC();
     const test_step = b.step("test", "純粋ロジックのテスト");
+    // 書式もそろっているか(zig fmt --check)。そろっていなければ zig fmt <ファイル> で直す
+    test_step.dependOn(&b.addFmt(.{ .paths = &.{ "src", "tools", "widgets", "site/src", "site/gen", "build.zig" }, .check = true }).step);
     test_step.dependOn(&b.addRunArtifact(tests).step);
     // 部品(src/lib)のテスト。名前付きのモジュールのテストは読み込む側からは走らないので、別に走らせる
     const lt = b.addTest(.{ .root_source_file = b.path("src/lib/lib.zig"), .target = target, .optimize = optimize });

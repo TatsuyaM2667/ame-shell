@@ -321,7 +321,6 @@ pub const Bar = struct {
                         self.tag_click_ms = now_ms;
                         self.tag_click_idx = h.idx;
                         if (dbl) {
-
                             app.focusTags(if (f.out.focused_tags == SPECIAL) @as(u32, 1) << @intCast(h.idx) else SPECIAL);
                             self.tag_click_ms = 0;
                             self.squish.kick(30);
