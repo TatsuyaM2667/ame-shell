@@ -632,3 +632,17 @@ test "doc portal broken" {
     try tmp.dir.makePath("doc/by-app");
     try std.testing.expect(!docPortalBroken(rd)); // 正常
 }
+
+/// Unix ソケットの相手のプロセスの実 UID(Linux は SO_PEERCRED、FreeBSD は getpeereid)。分からなければ null
+pub fn peerUid(fd: c_int) ?u32 {
+    if (builtin.os.tag == .freebsd) {
+        var uid: c.uid_t = 0;
+        var gid: c.gid_t = 0;
+        if (c.getpeereid(fd, &uid, &gid) != 0) return null;
+        return @intCast(uid);
+    }
+    var cred: c.struct_ucred = undefined;
+    var len: c.socklen_t = @sizeOf(c.struct_ucred);
+    if (c.getsockopt(fd, c.SOL_SOCKET, c.SO_PEERCRED, &cred, &len) != 0) return null;
+    return @intCast(cred.uid);
+}

@@ -64,6 +64,8 @@ pub const Server = struct {
             defer if (!keep) {
                 _ = c.close(cl);
             };
+            // 自分(同じ実 UID)のプロセスからだけ受ける。置き場($XDG_RUNTIME_DIR)は本人しか入れないが、念のため
+            if ((sys.peerUid(cl) orelse continue) != c.getuid()) continue;
             // コマンドは短いので同期で1回読む(クライアントは書いてすぐ待つ)
             var buf: [512]u8 = undefined;
             var tv = c.struct_timeval{ .tv_sec = 1, .tv_usec = 0 };
