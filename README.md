@@ -28,7 +28,7 @@ Chimera Linux(musl + dinit)向け。SDDM から選べるセッションつき。
 - **下: ランチャー** — Super 単独・Super+D。ファジー検索、よく使う順、お気に入りの固定、全アイコンテーマ + SVG。`>` でアクション、`>壁紙` で壁紙
 - **右: 音量・明るさ(OSD)/ 通知 / ユーティリティ / セッション / 通知センター**
 - **上の中央: ダイナミックアイランド** — AI の目が常駐し、再生中の曲(乗せると操作)・通知・AI の作業中・録画中に合わせて伸び縮みする(`shell { island off }` で消せる)
-- **右: AI チャット**(Super+C)— 通知センターと同じ場所から生えるパネルで、OpenAI・Claude・Gemini・Mistral・DeepSeek・OpenCode Zen・OpenRouter・Kimi・xAI・Groq・Qwen・GLM・Perplexity・Together・Cerebras・Ollama・OpenAI 互換のサーバと API で会話。返事は届いた分から表示、日本語入力(fcitx5)対応。API キーはパネルから保存(`~/.config/ame-shell/ai-keys`、0600)か環境変数。**Claude Code・Antigravity CLI(agy)などのコーディング CLI** も選べ、作業の様子(返事・ツールの実行・結果)をチャットに映す(作業フォルダを選び、Claude Code は過去の会話を読み込んで続きから)。**MCP サーバ**を選んで使える(`~/.config/ame-shell/mcp.json` と Claude Code の登録)。開いたままでも他の窓をクリックすればそちらに入力できる
+- **右: AI チャット**(Super+C)— 通知センターと同じ場所から生えるパネルで、OpenAI・Claude・Gemini・Mistral・DeepSeek・OpenCode Zen・OpenRouter・Kimi・xAI・Groq・Qwen・GLM・Perplexity・Together・Cerebras・Ollama・OpenAI 互換のサーバと API で会話。返事は届いた分から表示、日本語入力(fcitx5)対応。**画像も送れる**(Ctrl+V でクリップボードの画像・入力欄の画像のボタンでファイル。4 枚まで、大きいものは縮めて送る。コーディング CLI にはファイルの場所を渡す)。API キーはパネルから保存(`~/.config/ame-shell/ai-keys`、0600)か環境変数。**Claude Code・Antigravity CLI(agy)などのコーディング CLI** も選べ、作業の様子(返事・ツールの実行・結果)をチャットに映す(作業フォルダを選び、Claude Code は過去の会話を読み込んで続きから)。**MCP サーバ**を選んで使える(`~/.config/ame-shell/mcp.json` と Claude Code の登録)。開いたままでも他の窓をクリックすればそちらに入力できる
 - **縦バー** — タグ(液体のように伸びるインジケータ)・時計・音量・ネット・Bluetooth・電池。乗せると右にポップアウト
   - 音量のポップアウトで **出力先・入力先を切り替え**(再生中の音も移る)
   - ネット / Bluetooth をクリックすると **Wi-Fi・Bluetooth の設定パネル**(接続・切断・パスワード・スキャン・ごみ箱のボタンで Bluetooth の登録の削除(2 回押し)。外側をクリックで閉じる)。イヤホンは接続すると自動で音の出力先になる
@@ -353,6 +353,7 @@ ame-ctl watch                            (出来事を 1 行 1 つの JSON で�
 ```sh
 ame-lyrics 'YOASOBI' 'アイドル' > idol.lrc               # 歌詞を探す(0 見つかった / 1 無い / 2 一時的な失敗)
 echo 'Zig の comptime を一言で' | ame-ai -p anthropic       # AI に聞く(会社とモデルは省くとチャットで最後に選んだもの)
+echo 'これは何?' | ame-ai -i photo.png                      # 画像を付けて聞く(-i は何枚でも、8 枚まで)
 ame-ai models -p openai                                     # モデルの一覧
 claude -p '直して' --output-format stream-json --verbose | ame-agent -C "$PWD"   # コーディング CLI の出力を共通の出来事に
 ame-agent sessions ~/projects/foo                          # Claude Code の会話の一覧

@@ -1,4 +1,4 @@
-// 文字のクリップボード(ext-data-control。wl-copy / wl-paste を使わずに、コピーと貼り付け)。
+// クリップボード(ext-data-control。wl-copy / wl-paste を使わずに、文字のコピーと、文字・画像の貼り付け)。
 // 貼り付けは「今のクリップボード」を受け取りたいときだけ読む(他のアプリのクリップボードを勝手には読まない)。
 const std = @import("std");
 const c = @import("../c.zig");
@@ -10,6 +10,8 @@ const Offer = struct {
     offer: *c.struct_ext_data_control_offer_v1,
     /// 受け取れる文字の形式(良いものほど小さい番号)。0 = 無し
     best: u8 = 0,
+    /// 受け取れる画像の形式(image_mimes の番号 + 1)。0 = 無し
+    img: u8 = 0,
 };
 
 const State = struct {
@@ -21,11 +23,15 @@ const State = struct {
     fd: c_int = -1,
     buf: std.ArrayList(u8) = std.ArrayList(u8).init(ca),
     cb: ?*const fn ([]const u8) void = null,
+    /// 受け取る量の上限(文字は 1MB、画像は 32MB)
+    limit: usize = 1 << 20,
 };
 
 var st: State = .{};
 
 const mimes = [_][*:0]const u8{ "text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "TEXT", "STRING" };
+/// 貼り付けられる画像の形式(良いものから)
+const image_mimes = [_][*:0]const u8{ "image/png", "image/jpeg", "image/webp", "image/gif" };
 
 fn device(app: *App) ?*c.struct_ext_data_control_device_v1 {
     st.app = app;
@@ -124,6 +130,37 @@ pub fn paste(app: *App, cb: *const fn ([]const u8) void) bool {
     st.fd = fds[0];
     st.cb = cb;
     st.buf.clearRetainingCapacity();
+    st.limit = 1 << 20;
+    app.loop.add(st.fd, c.EPOLLIN | c.EPOLLHUP, &st, onRead) catch {
+        _ = c.close(st.fd);
+        st.fd = -1;
+        return false;
+    };
+    return true;
+}
+
+/// 今のクリップボードに画像があるか(スクショ・ブラウザの「画像をコピー」など)
+pub fn hasImage() bool {
+    const o = st.sel orelse return false;
+    return o.img != 0;
+}
+
+/// 今のクリップボードの画像を読み、読み終わったら cb に渡す(PNG・JPEG・WebP・GIF のバイト列)
+pub fn pasteImage(app: *App, cb: *const fn ([]const u8) void) bool {
+    _ = device(app) orelse return false;
+    if (st.fd >= 0) return true;
+    const o = st.sel orelse return false;
+    if (o.img == 0) return false;
+    var fds: [2]c_int = undefined;
+    if (c.pipe2(&fds, c.O_CLOEXEC) != 0) return false;
+    c.ext_data_control_offer_v1_receive(o.offer, image_mimes[o.img - 1], fds[1]);
+    _ = c.wl_display_flush(app.display);
+    _ = c.close(fds[1]);
+    _ = c.fcntl(fds[0], c.F_SETFL, c.O_NONBLOCK);
+    st.fd = fds[0];
+    st.cb = cb;
+    st.limit = 32 << 20;
+    st.buf.clearRetainingCapacity();
     app.loop.add(st.fd, c.EPOLLIN | c.EPOLLHUP, &st, onRead) catch {
         _ = c.close(st.fd);
         st.fd = -1;
@@ -137,7 +174,7 @@ fn onRead(_: *anyopaque, fd: c_int, _: u32) void {
     while (true) {
         const n = c.read(fd, &tmp, tmp.len);
         if (n > 0) {
-            if (st.buf.items.len < 1 << 20) st.buf.appendSlice(tmp[0..@intCast(n)]) catch {};
+            if (st.buf.items.len < st.limit) st.buf.appendSlice(tmp[0..@intCast(n)]) catch {};
             continue;
         }
         if (n < 0 and std.posix.errno(n) == .AGAIN) return;
@@ -156,6 +193,12 @@ fn offerMime(data: ?*anyopaque, _: ?*c.struct_ext_data_control_offer_v1, mime: [
         if (std.mem.eql(u8, m, std.mem.span(want))) {
             const rank: u8 = @intCast(i + 1);
             if (o.best == 0 or rank < o.best) o.best = rank;
+        }
+    }
+    for (image_mimes, 0..) |want, i| {
+        if (std.mem.eql(u8, m, std.mem.span(want))) {
+            const rank: u8 = @intCast(i + 1);
+            if (o.img == 0 or rank < o.img) o.img = rank;
         }
     }
 }

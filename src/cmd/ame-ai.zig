@@ -1,6 +1,6 @@
 // ame-ai: いろいろな会社の AI と API で話す。
 //
-//   echo 質問 | ame-ai [-p 会社] [-m モデル] [-s 指示]            返事の文章を標準出力へ(届いた分から)
+//   echo 質問 | ame-ai [-p 会社] [-m モデル] [-s 指示] [-i 画像]…  返事の文章を標準出力へ(届いた分から)
 //   ame-ai --json [-p …] [-m …] [-s …] [--mcp 名前,名前] < 会話.json  1 行 1 つの出来事(JSON)を標準出力へ
 //   ame-ai models [-p 会社]                                          その会社のモデルの id を 1 行ずつ
 //   ame-ai providers                                                 会社の id と名前
@@ -308,6 +308,9 @@ fn request(a: std.mem.Allocator, p: usize, base: []const u8, mdl: []const u8, sy
 
 const Opts = struct {
     cmd: enum { chat, models, providers } = .chat,
+    /// -i で付けた画像(文字だけのときの頼みごとに付ける。8 枚まで)
+    images: [8][]const u8 = undefined,
+    n_images: usize = 0,
     provider: []const u8 = "",
     model: []const u8 = "",
     system: []const u8 = "",
@@ -338,6 +341,10 @@ pub fn parseArgs(args: []const []const u8) ?Opts {
             o.mcp = val(args, &i) orelse return null;
         } else if (eq(u8, s, "--custom-url")) {
             o.custom_url = std.mem.trimRight(u8, val(args, &i) orelse return null, "/");
+        } else if (eq(u8, s, "-i")) {
+            if (o.n_images >= o.images.len) return null;
+            o.images[o.n_images] = val(args, &i) orelse return null;
+            o.n_images += 1;
         } else if (eq(u8, s, "--json")) {
             o.json = true;
         } else if (i == 0 and eq(u8, s, "models")) {
@@ -369,6 +376,25 @@ fn lastChoice(a: std.mem.Allocator, o: *Opts) void {
         const m = f.rest();
         if (m.len > 0) o.model = m;
     }
+}
+
+/// 会話の "images" のファイルを読んで base64 にする。読めない・画像でない・大きすぎる(20MB 超)ものは止める
+fn loadImages(a: std.mem.Allocator, paths: []const []const u8) []const ai.Image {
+    const out = a.alloc(ai.Image, paths.len) catch fail("メモリが足りません");
+    for (paths, 0..) |p, i| {
+        const bytes = std.fs.cwd().readFileAlloc(a, p, 20 << 20) catch {
+            var b: [600]u8 = undefined;
+            fail(std.fmt.bufPrint(&b, "画像を読めません: {s}", .{p}) catch "画像を読めません");
+        };
+        const mime = ai.mimeOf(bytes) orelse {
+            var b: [600]u8 = undefined;
+            fail(std.fmt.bufPrint(&b, "送れる画像ではありません(PNG・JPEG・GIF・WebP): {s}", .{p}) catch "送れる画像ではありません");
+        };
+        const enc = std.base64.standard.Encoder;
+        const b64 = a.alloc(u8, enc.calcSize(bytes.len)) catch fail("メモリが足りません");
+        out[i] = .{ .mime = mime, .b64 = enc.encode(b64, bytes) };
+    }
+    return out;
 }
 
 fn usage() noreturn {
@@ -431,9 +457,13 @@ pub fn main() !void {
         try turns.appendSlice(ai.parseConversation(a, input) catch fail("会話の JSON を読めません"));
     } else {
         const q = std.mem.trim(u8, input, " \t\r\n");
-        if (q.len == 0) usage();
-        try turns.append(.{ .role = .user, .content = q });
+        if (q.len == 0 and o.n_images == 0) usage();
+        try turns.append(.{ .role = .user, .content = q, .image_paths = o.images[0..o.n_images] });
     }
+    // 画像のファイルを読んで base64 に(会話の "images" と -i)
+    for (turns.items) |*t| if (t.image_paths.len > 0) {
+        t.images = loadImages(a, t.image_paths);
+    };
 
     var mcp = Mcp.start(a, o.mcp);
     defer mcp.stop();

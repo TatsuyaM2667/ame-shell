@@ -62,11 +62,13 @@ pub const Msg = struct {
     call_failed: bool = false,
     /// この返事のあとにツールの呼び出しが続く(文が空でも送り返す)
     has_calls: bool = false,
+    /// 付けた画像のパス(改行区切り。ai-images にしまったもの。images.zig)
+    images: std.ArrayList(u8),
 
     pub fn create(alloc: std.mem.Allocator, role: Role) !*Msg {
         const m = try alloc.create(Msg);
         const B = std.ArrayList(u8);
-        m.* = .{ .role = role, .text = B.init(alloc), .think = B.init(alloc), .lines = std.ArrayList(Line).init(alloc), .call_id = B.init(alloc), .call_name = B.init(alloc), .call_args = B.init(alloc), .result = B.init(alloc) };
+        m.* = .{ .role = role, .text = B.init(alloc), .think = B.init(alloc), .lines = std.ArrayList(Line).init(alloc), .call_id = B.init(alloc), .call_name = B.init(alloc), .call_args = B.init(alloc), .result = B.init(alloc), .images = B.init(alloc) };
         return m;
     }
     pub fn destroy(self: *Msg, alloc: std.mem.Allocator) void {
@@ -77,6 +79,7 @@ pub const Msg = struct {
         self.call_name.deinit();
         self.call_args.deinit();
         self.result.deinit();
+        self.images.deinit();
         alloc.destroy(self);
     }
 };
@@ -110,6 +113,10 @@ const State = struct {
     model_prov: usize = std.math.maxInt(usize),
     model_err: [200]u8 = undefined,
     model_err_len: usize = 0,
+    // ---- 送る前に付けた画像(4 枚まで)----
+    pending: [MAX_IMAGES][512]u8 = undefined,
+    pending_len: [MAX_IMAGES]usize = [_]usize{0} ** MAX_IMAGES,
+    n_pending: usize = 0,
 };
 
 var st: State = .{};
@@ -266,7 +273,7 @@ pub fn writeChat(msgs: []const *Msg, name: []const u8) void {
     var out = std.ArrayList(u8).init(st.alloc);
     defer out.deinit();
     for (msgs) |m| {
-        if (m.err or m.text.items.len == 0) continue;
+        if (m.err or (m.text.items.len == 0 and m.images.items.len == 0)) continue;
         out.writer().print("{c} {d}\n", .{ @as(u8, switch (m.role) {
             .user => 'U',
             .assistant => if (m.mono) 'M' else 'A',
@@ -274,6 +281,11 @@ pub fn writeChat(msgs: []const *Msg, name: []const u8) void {
         }), m.text.items.len }) catch return;
         out.appendSlice(m.text.items) catch return;
         out.append('\n') catch return;
+        if (m.images.items.len > 0) {
+            out.writer().print("I {d}\n", .{m.images.items.len}) catch return;
+            out.appendSlice(m.images.items) catch return;
+            out.append('\n') catch return;
+        }
     }
     writeState(name, out.items);
 }
@@ -298,6 +310,14 @@ fn parseChat(alloc: std.mem.Allocator, list: *std.ArrayList(*Msg), txt: []const 
         const nl = std.mem.indexOfScalarPos(u8, txt, i, '\n') orelse return;
         const head = txt[i..nl];
         if (head.len < 3 or head[1] != ' ') return;
+        const n0 = std.fmt.parseInt(usize, head[2..], 10) catch return;
+        // I: 直前の発言に付けた画像のパス
+        if (head[0] == 'I') {
+            if (nl + 1 + n0 > txt.len) return;
+            if (list.items.len > 0) try list.items[list.items.len - 1].images.appendSlice(txt[nl + 1 .. nl + 1 + n0]);
+            i = nl + 1 + n0 + 1;
+            continue;
+        }
         const role: Role = switch (head[0]) {
             'U' => .user,
             'A', 'M' => .assistant,
@@ -340,6 +360,13 @@ fn conversationJson(out: *std.ArrayList(u8), msgs: []const *Msg) !void {
             try ws.write("user");
             try ws.objectField("content");
             try ws.write(m.text.items);
+            if (m.images.items.len > 0) {
+                try ws.objectField("images");
+                try ws.beginArray();
+                var it = std.mem.tokenizeScalar(u8, m.images.items, '\n');
+                while (it.next()) |p| try ws.write(p);
+                try ws.endArray();
+            }
             try ws.endObject();
             continue;
         }
@@ -385,10 +412,11 @@ fn conversationJson(out: *std.ArrayList(u8), msgs: []const *Msg) !void {
 /// 送る。失敗の理由は返事の欄に出す
 pub fn send(text: []const u8) void {
     const t = std.mem.trim(u8, text, " \t\r\n");
-    if (t.len == 0 or busy()) return;
+    if ((t.len == 0 and st.n_pending == 0) or busy()) return;
     const app = st.app orelse return;
     const um = Msg.create(st.alloc, .user) catch return;
     um.text.appendSlice(t) catch {};
+    takePending(um);
     st.msgs.append(um) catch return;
     const am = Msg.create(st.alloc, .assistant) catch return;
     st.msgs.append(am) catch return;
@@ -650,6 +678,73 @@ fn onModels(_: *anyopaque, fd: c_int, _: u32) void {
 }
 
 // ---------------------------------------------------------------------------
+// 付ける画像(送る前に入力欄の上に並ぶ。送るとその発言に移る)
+// ---------------------------------------------------------------------------
+
+pub const MAX_IMAGES = 4;
+const images = @import("images.zig");
+
+pub fn nPending() usize {
+    return st.n_pending;
+}
+
+pub fn pendingImage(i: usize) []const u8 {
+    return st.pending[i][0..st.pending_len[i]];
+}
+
+pub fn removePending(i: usize) void {
+    if (i >= st.n_pending) return;
+    var k = i;
+    while (k + 1 < st.n_pending) : (k += 1) {
+        st.pending[k] = st.pending[k + 1];
+        st.pending_len[k] = st.pending_len[k + 1];
+    }
+    st.n_pending -= 1;
+    redraw();
+}
+
+fn addPending(path: []const u8) void {
+    for (0..st.n_pending) |i| if (std.mem.eql(u8, pendingImage(i), path)) return; // 同じ画像は 1 回
+    if (st.n_pending >= MAX_IMAGES) return;
+    const n = @min(path.len, st.pending[0].len);
+    @memcpy(st.pending[st.n_pending][0..n], path[0..n]);
+    st.pending_len[st.n_pending] = n;
+    st.n_pending += 1;
+    redraw();
+}
+
+/// 画像のバイト列(貼り付け)を付ける。付けられなければ理由を返す
+pub fn attachBytes(bytes: []const u8) ?[]const u8 {
+    if (st.n_pending >= MAX_IMAGES) return "画像は 4 枚まで付けられます";
+    var pb: [512]u8 = undefined;
+    const p = images.store(bytes, &pb) catch |e| return images.describe(e);
+    addPending(p);
+    return null;
+}
+
+/// 画像のファイルを付ける。付けられなければ理由を返す
+pub fn attachFile(path: []const u8) ?[]const u8 {
+    if (st.n_pending >= MAX_IMAGES) return "画像は 4 枚まで付けられます";
+    var pb: [512]u8 = undefined;
+    const p = images.storeFile(path, &pb) catch |e| return images.describe(e);
+    addPending(p);
+    return null;
+}
+
+pub fn clearPending() void {
+    st.n_pending = 0;
+}
+
+/// 付けた画像を発言に移す(改行区切り)
+pub fn takePending(m: *Msg) void {
+    for (0..st.n_pending) |i| {
+        if (m.images.items.len > 0) m.images.append('\n') catch {};
+        m.images.appendSlice(pendingImage(i)) catch {};
+    }
+    st.n_pending = 0;
+}
+
+// ---------------------------------------------------------------------------
 // クリップボード(clipboard.zig。ext-data-control を直接使う)
 // ---------------------------------------------------------------------------
 
@@ -659,6 +754,28 @@ pub fn copy(text: []const u8) void {
 }
 
 /// 貼り付け: 読み終わったら cb に渡す
+/// 貼り付け(Ctrl+V): クリップボードに画像があれば画像を付け、無ければ文字を cb に渡す
+pub fn pasteAny(cb: *const fn ([]const u8) void) void {
+    const app = st.app orelse return;
+    const clip = @import("../desktop/clipboard.zig");
+    if (clip.hasImage() and st.n_pending < MAX_IMAGES and clip.pasteImage(app, onImagePasted)) return;
+    paste(cb);
+}
+
+fn onImagePasted(bytes: []const u8) void {
+    if (attachBytes(bytes)) |why| if (st.app) |a| a.osd.info(why);
+}
+
+/// 画像のファイルを選ぶ画面(xdg-desktop-portal)を開き、選んだら付ける
+pub fn pickImage() void {
+    const app = st.app orelse return;
+    @import("../desktop/portal.zig").openImage(app, "AI チャットに付ける画像", onImagePicked);
+}
+
+fn onImagePicked(app: *App, path: []const u8) void {
+    if (attachFile(path)) |why| app.osd.info(why);
+}
+
 pub fn paste(cb: *const fn ([]const u8) void) void {
     const app = st.app orelse return;
     _ = @import("../desktop/clipboard.zig").paste(app, cb);
@@ -699,4 +816,21 @@ test "conversation json" {
     defer out.deinit();
     try conversationJson(&out, list.items);
     try std.testing.expectEqualStrings("[{\"role\":\"user\",\"content\":\"天気は?\"},{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"id\":\"c1\",\"name\":\"w__get\",\"arguments\":\"{}\"}]},{\"role\":\"tool\",\"id\":\"c1\",\"content\":\"晴れ\",\"error\":false}]", out.items);
+}
+
+test "images in conversation and saved chat" {
+    const a = std.testing.allocator;
+    var list = std.ArrayList(*Msg).init(a);
+    defer {
+        for (list.items) |m| m.destroy(a);
+        list.deinit();
+    }
+    // 保存の形: U の次の I が画像のパス
+    try parseChat(a, &list, "U 10\nこれは?\nI 14\n/x/a.png\n/b.jp\nA 2\nok\n");
+    try std.testing.expectEqual(@as(usize, 2), list.items.len);
+    try std.testing.expectEqualStrings("/x/a.png\n/b.jp", list.items[0].images.items);
+    var out = std.ArrayList(u8).init(a);
+    defer out.deinit();
+    try conversationJson(&out, list.items);
+    try std.testing.expectEqualStrings("[{\"role\":\"user\",\"content\":\"これは?\",\"images\":[\"/x/a.png\",\"/b.jp\"]},{\"role\":\"assistant\",\"content\":\"ok\",\"tool_calls\":[]}]", out.items);
 }

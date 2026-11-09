@@ -24,6 +24,8 @@ const LH: f32 = 21;
 const PAD: f32 = 20;
 /// 会話の欄の上端(見出し・会社の名前・MCP と許可の行の下)
 const TOP: f32 = 128;
+/// 付けた画像の小さな絵(入力欄の上・発言の中)
+const THUMB: f32 = 56;
 const MAX_INPUT_LINES = 6;
 /// ツールの実行の表示: 見出し + 出力の最初の数行 / 端末の出力: 最後の数行
 const TOOL_LINES = 8;
@@ -32,7 +34,7 @@ const TLH: f32 = 18;
 
 const Mode = enum { chat, providers, models, key, folder, sessions, mcp };
 
-const HitId = enum { pick, new_chat, close, send, stop, copy, prov, back, model, use_typed, key_edit, key_save, key_delete, refresh, agent, folder, use_folder, session, mcp_open, mcp_toggle, mcp_reload, perm, new_project };
+const HitId = enum { pick, new_chat, close, send, stop, copy, attach, unattach, prov, back, model, use_typed, key_edit, key_save, key_delete, refresh, agent, folder, use_folder, session, mcp_open, mcp_toggle, mcp_reload, perm, new_project };
 const Hit = struct { x: f32, y: f32, w: f32, h: f32, id: HitId, arg: usize = 0 };
 
 const State = struct {
@@ -238,7 +240,7 @@ fn drawLine(cv: *gfx.Canvas, x: f32, y: f32, col: Color, s: []const u8, bold: bo
 
 fn msgHeight(m: *const ai.Msg, last: bool) f32 {
     const n: f32 = @floatFromInt(@max(m.lines.items.len, 1));
-    if (m.role == .user) return n * LH + 20;
+    if (m.role == .user) return n * LH + 20 + (if (m.images.items.len > 0) THUMB + 8 else 0);
     if (m.role == .tool) return @as(f32, @floatFromInt(@min(@max(m.lines.items.len, 1), TOOL_LINES))) * TLH + 12;
     if (m.mono) return @as(f32, @floatFromInt(@min(@max(m.lines.items.len, 1), MONO_LINES))) * TLH + 12;
     var h = n * LH;
@@ -343,6 +345,41 @@ fn iconButton(cv: *gfx.Canvas, x: f32, y: f32, icon: []const u8, id: HitId, acc:
     addHit(x, y, 30, 30, id, 0);
 }
 
+// ---- 付けた画像の小さな絵(パスごとに 1 回だけ読んで GPU に置く。16 枚まで覚え、古いものから捨てる)----
+const Thumb = struct { key: u64 = 0, tex: c.GLuint = 0, used: u64 = 0 };
+var thumbs: [16]Thumb = [_]Thumb{.{}} ** 16;
+var thumb_clock: u64 = 0;
+
+fn thumbTex(path: []const u8) c.GLuint {
+    const hk = std.hash.Wyhash.hash(1, path);
+    thumb_clock += 1;
+    for (&thumbs) |*t| if (t.key == hk and t.tex != 0) {
+        t.used = thumb_clock;
+        return t.tex;
+    };
+    var zb: [600]u8 = undefined;
+    const z = std.fmt.bufPrintZ(&zb, "{s}", .{path}) catch return 0;
+    const px = @import("../gfx/icons.zig").decode(z, 112, 112, true) orelse return 0;
+    defer std.c.free(px);
+    const tex = gfx.uploadImage(px, 112, 112);
+    var old = &thumbs[0];
+    for (&thumbs) |*t| if (t.used < old.used) {
+        old = t;
+    };
+    if (old.tex != 0) c.glDeleteTextures(1, &old.tex);
+    old.* = .{ .key = hk, .tex = tex, .used = thumb_clock };
+    return tex;
+}
+
+/// 画像の小さな絵を 1 つ描く(読めなければ枠だけ)
+fn drawThumb(cv: *gfx.Canvas, path: []const u8, x: f32, y: f32, s: f32, sub: Color) void {
+    const tex = thumbTex(path);
+    if (tex != 0) cv.image(tex, x, y, s, s, 10) else {
+        cv.rect(x, y, s, s, 10, Color.hex(0xffffff).alpha(0.08));
+        _ = cv.text(x + s / 2, y + s / 2 + 7, 18, sub, "\u{F02E9}", .{ .alignment = .center });
+    }
+}
+
 fn drawChat(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32, acc: Color, txt: Color, sub: Color) bool {
     const app = f.app;
     var animating = false;
@@ -352,7 +389,7 @@ fn drawChat(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32, acc: Color, txt: Color, 
         st.input_lines_ok = true;
     }
     st.input_lines.clearRetainingCapacity();
-    const in_w = w - 2 * PAD - 54;
+    const in_w = w - 2 * PAD - 94; // 右に「画像」と「送信」のボタン
     var code = false;
     var mx: f32 = 0;
     {
@@ -401,19 +438,42 @@ fn drawChat(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32, acc: Color, txt: Color, 
         _ = cv.text(bx + 17, by + 23, 15, Color.hex(0xffffff), "\u{F04DB}", .{ .alignment = .center });
         addHit(bx, by, 34, 34, .stop, 0);
     } else {
-        const can = st.input_len > 0;
+        const can = st.input_len > 0 or ai.nPending() > 0;
         const hv: f32 = if (hovered(.send, 0)) 1 else 0;
         if (can) cv.rectGrad(bx, by, 34, 34, 17, acc.lighten(0.3 + 0.1 * hv), acc) else cv.rect(bx, by, 34, 34, 17, Color.hex(0xffffff).alpha(0.08));
         _ = cv.text(bx + 18, by + 23, 15, if (can) Color.hex(0x08101e) else sub, "\u{F048A}", .{ .alignment = .center });
         addHit(bx, by, 34, 34, .send, 0);
     }
+    // 画像を付ける(ファイルを選ぶ。Ctrl+V でクリップボードの画像も付けられる)
+    {
+        const ax = bx - 40;
+        const full = ai.nPending() >= ai.MAX_IMAGES;
+        const hv: f32 = if (hovered(.attach, 0)) 1 else 0;
+        cv.rect(ax, by, 34, 34, 17, Color.hex(0xffffff).alpha(if (full) 0.03 else 0.07 + 0.1 * hv));
+        _ = cv.text(ax + 17, by + 23, 16, if (full) sub.alpha(0.4) else txt.alpha(0.85), "\u{F02E9}", .{ .alignment = .center });
+        if (!full) addHit(ax, by, 34, 34, .attach, 0);
+    }
+
+    // ---- 付けた画像(送る前。押すと × で外す)----
+    var above = iy;
+    if (ai.nPending() > 0) {
+        above = iy - THUMB - 10;
+        for (0..ai.nPending()) |i| {
+            const x = PAD + @as(f32, @floatFromInt(i)) * (THUMB + 8);
+            drawThumb(cv, ai.pendingImage(i), x, above, THUMB, sub);
+            const hv: f32 = if (hovered(.unattach, i)) 1 else 0;
+            cv.rect(x + THUMB - 20, above + 2, 18, 18, 9, Color.hex(0x000000).alpha(0.55 + 0.3 * hv));
+            _ = cv.text(x + THUMB - 11, above + 15.5, 11, Color.hex(0xffffff), "\u{F0156}", .{ .alignment = .center });
+            addHit(x, above, THUMB, THUMB, .unattach, i);
+        }
+    }
 
     // ---- 状態(作業中・終わった・費用)----
     const stt = statusText();
-    if (stt.len > 0) _ = cv.text(PAD, iy - 10, 11.5, sub, stt, .{ .max_w = w - 2 * PAD });
+    if (stt.len > 0) _ = cv.text(PAD, above - 10, 11.5, sub, stt, .{ .max_w = w - 2 * PAD });
     // ---- 会話 ----
     const top = TOP;
-    const bottom = iy - (if (stt.len > 0) @as(f32, 26) else 10);
+    const bottom = above - (if (stt.len > 0) @as(f32, 26) else 10);
     const area_h = bottom - top;
     const msgs = messages();
     // 最後が返事の欄でない(CLI の作業中)ときは、最後に「…」を出す
@@ -459,11 +519,22 @@ fn drawChat(f: *Frame, cv: *gfx.Canvas, w: f32, h: f32, acc: Color, txt: Color, 
         defer y += mh + 14;
         if (y + mh < top - 10 or y > bottom + 10) continue;
         if (m.role == .user) {
-            const bw = @min(m.lay_max + 24, aw * 0.82);
+            // 付けた画像の数(吹き出しの上の段に並べる)
+            var n_img: usize = 0;
+            var img_it = std.mem.tokenizeScalar(u8, m.images.items, '\n');
+            while (img_it.next()) |_| n_img += 1;
+            const img_w = if (n_img > 0) @as(f32, @floatFromInt(n_img)) * (THUMB + 6) - 6 else 0;
+            const bw = @min(@max(m.lay_max, img_w) + 24, aw * 0.82);
             const x0 = w - PAD - bw;
             cv.rectGrad(x0, y, bw, mh, 16, acc.alpha(0.42), acc.alpha(0.3));
+            const text_y = if (n_img > 0) y + THUMB + 8 else y;
+            if (n_img > 0) {
+                img_it = std.mem.tokenizeScalar(u8, m.images.items, '\n');
+                var k: f32 = 0;
+                while (img_it.next()) |p| : (k += 1) drawThumb(cv, p, x0 + 12 + k * (THUMB + 6), y + 10, THUMB, sub);
+            }
             for (m.lines.items, 0..) |l, li| {
-                const ty = y + 10 + 15 + @as(f32, @floatFromInt(li)) * LH;
+                const ty = text_y + 10 + 15 + @as(f32, @floatFromInt(li)) * LH;
                 if (ty < top - LH or ty > bottom + LH) continue;
                 _ = cv.text(x0 + 12, ty, SIZE, txt, std.mem.trim(u8, m.text.items[l.a..l.b], " "), .{});
             }
@@ -1095,7 +1166,8 @@ fn goMode(m: Mode) void {
 }
 
 fn submit() void {
-    if (busy() or st.input_len == 0) return;
+    if (busy() or (st.input_len == 0 and ai.nPending() == 0)) return;
+    // 付けた画像は送る側が持っていく(API: 画像として / コーディング CLI: ファイルの場所を頼みごとに)
     if (usingAgent()) agent.send(st.input[0..st.input_len]) else ai.send(st.input[0..st.input_len]);
     st.input_len = 0;
     st.scroll = 0;
@@ -1238,7 +1310,7 @@ pub fn key(f: *Frame, ev: surface.KeyEvent) void {
         return;
     }
     if (ev.ctrl and (sym == c.XKB_KEY_v or sym == c.XKB_KEY_V)) {
-        ai.paste(onPasted);
+        ai.pasteAny(onPasted); // 画像なら付ける・文字なら入れる
         return;
     }
     switch (st.mode) {
@@ -1433,6 +1505,8 @@ pub fn pointer(f: *Frame, ev: surface.PointerEvent, lx: f32, ly: f32) bool {
         .new_chat => if (usingAgent()) agent.newConversation() else ai.clear(),
         .close => f.toggleAi(),
         .send => submit(),
+        .attach => ai.pickImage(),
+        .unattach => ai.removePending(h.arg),
         .stop => if (usingAgent()) agent.stop() else ai.stop(),
         .copy => {
             const msgs = messages();

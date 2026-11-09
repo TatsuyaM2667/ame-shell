@@ -343,11 +343,21 @@ const Argv = struct {
 };
 
 pub fn send(text: []const u8) void {
-    const t = std.mem.trim(u8, text, " \t\r\n");
-    if (t.len == 0 or busy() or !st.active) return;
+    const text_t = std.mem.trim(u8, text, " \t\r\n");
+    if ((text_t.len == 0 and ai.nPending() == 0) or busy() or !st.active) return;
     const app = getApp() orelse return;
     const um = Msg.create(st.alloc, .user) catch return;
-    um.text.appendSlice(t) catch {};
+    um.text.appendSlice(text_t) catch {};
+    // 付けた画像: 吹き出しに小さな絵を出し、CLI には画像のファイルの場所を頼みごとに書く(Claude Code・Antigravity などは自分で読める)
+    ai.takePending(um);
+    var prompt = std.ArrayList(u8).init(st.alloc);
+    defer prompt.deinit();
+    prompt.appendSlice(text_t) catch {};
+    if (um.images.items.len > 0) {
+        prompt.appendSlice(if (text_t.len > 0) "\n\n添付した画像(このファイルを読んで見てください):\n" else "添付した画像(このファイルを読んで見てください):\n") catch {};
+        prompt.appendSlice(um.images.items) catch {};
+    }
+    const t = prompt.items;
     st.msgs.append(um) catch return;
     if (!installed(st.idx)) return addError("この CLI は入っていません(PATH に見つかりません)");
 

@@ -105,7 +105,7 @@ const help =
     \\  notify <text>          (テスト用の通知)
     \\  notifications toggle|clear
     \\  watch                  (出来事を JSON の行で流し続ける: workspace・focus・window・notification・media・lock)
-    \\  ai toggle|open|close|clear|pick|mcp|api|agent <CLI> <フォルダ> [new|last|<id>]|send <text>   (AI チャット: 右から生えるパネル)
+    \\  ai toggle|open|close|clear|pick|mcp|api|agent <CLI> <フォルダ> [new|last|<id>]|attach <画像>|send <text>   (AI チャット: 右から生えるパネル)
     \\  session | sidebar | utilities   (caelestia: 各ドロワーの開閉)
     \\  close-all
     \\  network | bluetooth     (Wi-Fi / Bluetooth の設定パネル)
@@ -310,6 +310,11 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
             agent.start(k, dir, if (eq(u8, how, "new")) .new else if (eq(u8, how, "last")) .last else .{ .id = how });
             if (!f.aiOpen()) f.toggleAi();
             @import("../frame/aipanel.zig").showChat();
+        } else if (eq(u8, arg, "attach")) {
+            // ai attach <画像のパス>: 次に送る頼みごとに画像を付ける
+            if (!f.aiOpen()) f.toggleAi();
+            const sp = std.mem.indexOfScalar(u8, rest, ' ') orelse return "error: ai attach <画像のパス>";
+            if (ai.attachFile(std.mem.trim(u8, rest[sp + 1 ..], " "))) |why| return std.fmt.bufPrint(out, "error: {s}", .{why}) catch "error: attach";
         } else if (eq(u8, arg, "send")) {
             if (!f.aiOpen()) f.toggleAi();
             const sp = std.mem.indexOfScalar(u8, rest, ' ') orelse return "error: ai send <text>";
