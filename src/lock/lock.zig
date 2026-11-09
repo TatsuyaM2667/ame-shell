@@ -896,9 +896,12 @@ pub fn currentUserName(buf: []u8) []const u8 {
     return currentUser(buf) orelse "";
 }
 
+/// 今のユーザーの名前。PAM で照合する相手なので、書き換えられる環境変数(USER・LOGNAME)ではなく実 UID から取る
 fn currentUser(buf: []u8) ?[:0]const u8 {
-    const u = std.posix.getenv("USER") orelse std.posix.getenv("LOGNAME") orelse return null;
-    return std.fmt.bufPrintZ(buf, "{s}", .{u}) catch null;
+    const pw = c.getpwuid(c.getuid()) orelse return null;
+    const name = std.mem.sliceTo(pw.*.pw_name orelse return null, 0);
+    if (name.len == 0) return null;
+    return std.fmt.bufPrintZ(buf, "{s}", .{name}) catch null;
 }
 
 /// PAM の会話関数: パスワード入力を求められたら(子プロセス内の)バッファを渡す

@@ -25,7 +25,10 @@ pub fn dir(buf: []u8) ?[:0]const u8 {
         const p = std.fmt.bufPrintZ(buf, "{s}", .{d}) catch return null;
         return if (c.access(p.ptr, c.W_OK) == 0) p else null;
     }
-    const user = std.posix.getenv("USER") orelse std.posix.getenv("LOGNAME") orelse return null;
+    // ユーザーごとの置き場の名前は実 UID から(環境変数 USER は書き換えられる)
+    var ub: [256]u8 = undefined;
+    const user = @import("../lock/lock.zig").currentUserName(&ub);
+    if (user.len == 0) return null;
     const root = if (builtin.os.tag == .freebsd) "/var/db/ame-shell/greeter" else "/var/lib/ame-shell/greeter";
     const p = std.fmt.bufPrintZ(buf, "{s}/{s}", .{ root, user }) catch return null;
     if (c.access(p.ptr, c.W_OK) != 0) return null;

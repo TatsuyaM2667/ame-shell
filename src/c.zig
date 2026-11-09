@@ -6,6 +6,7 @@ pub usingnamespace @cImport({
     @cInclude("stdlib.h");
     @cInclude("string.h");
     @cInclude("unistd.h");
+    @cInclude("pwd.h");
     @cInclude("fcntl.h");
     @cInclude("time.h");
     @cInclude("signal.h");
