@@ -330,8 +330,16 @@ pub const Frame = struct {
         self.afterOpenChange();
         @import("../desktop/ime.zig").update(self.app);
     }
-    /// キーボードがこの枠に来た: AI チャットの「開いた直後の排他」を解く
+    /// キーボードがこの枠に来た。River 0.3(WM が別)では、ここで AI チャットの「開いた直後の排他」を解く
+    /// (窓のクリックを知る手段が無いため)。River 0.5 では解かない: 解くと River がキーボードを
+    /// 元の窓へ戻してしまい、パネルに打てない・日本語入力が効かない(入力メソッドが窓の方へ行く)
     pub fn keyboardEntered(self: *Frame) void {
+        if (self.app.wm != null) return;
+        self.releaseAiGrab();
+    }
+    /// ほかの窓が押された(River 0.5 の WM から): AI チャットの排他を解き、その窓に入力できるようにする。
+    /// パネルを開いたままでも、もう一度パネルを押せばまた打てる(on_demand)
+    pub fn releaseAiGrab(self: *Frame) void {
         if (!self.ai_grab) return;
         self.ai_grab = false;
         self.updateKeyboard();

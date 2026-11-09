@@ -1634,6 +1634,8 @@ fn sPtrLeave(data: ?*anyopaque, _: ?*c.struct_river_seat_v1) callconv(.C) void {
 }
 fn sInteract(data: ?*anyopaque, _: ?*c.struct_river_seat_v1, win: ?*c.struct_river_window_v1) callconv(.C) void {
     const s: *WSeat = @ptrCast(@alignCast(data.?));
+    // 窓が押された: AI チャットが開いた直後のキーボードの独り占めを解く(その窓に入力できるように)
+    for (s.wm.app.outputs.items) |o| if (o.frame) |f| f.releaseAiGrab();
     if (s.wm.findWindow(win)) |w| s.wm.push(.{ .focus_window = w });
 }
 fn sShellInteract(_: ?*anyopaque, _: ?*c.struct_river_seat_v1, _: ?*c.struct_river_shell_surface_v1) callconv(.C) void {}

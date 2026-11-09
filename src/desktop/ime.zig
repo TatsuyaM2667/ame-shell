@@ -6,6 +6,13 @@ const c = @import("../c.zig");
 const App = @import("../core/app.zig").App;
 const aipanel = @import("../frame/aipanel.zig");
 
+const log = std.log.scoped(.ime);
+
+/// AME_DEBUG のときだけ、入力メソッドとのやりとりをログに出す(日本語が入らないときの切り分け用)
+fn dbg(comptime f: []const u8, args: anytype) void {
+    if (std.posix.getenv("AME_DEBUG") != null) log.info(f, args);
+}
+
 const State = struct {
     ti: ?*c.struct_zwp_text_input_v3 = null,
     app: ?*App = null,
@@ -42,6 +49,7 @@ pub fn update(app: *App) void {
     const want = wanted(app);
     if (want == st.enabled) return;
     st.enabled = want;
+    dbg("{s}(入力欄にキーボード: {})", .{ if (want) "enable" else "disable", st.focus != null });
     if (want) {
         c.zwp_text_input_v3_enable(t);
         c.zwp_text_input_v3_set_content_type(t, c.ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE, c.ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
@@ -62,12 +70,14 @@ fn sendRect(app: *App, t: *c.struct_zwp_text_input_v3) void {
 }
 
 fn tiEnter(_: ?*anyopaque, _: ?*c.struct_zwp_text_input_v3, surf: ?*c.struct_wl_surface) callconv(.C) void {
+    dbg("enter", .{});
     st.focus = surf;
     st.enabled = false; // 入り直したら、もう一度 enable を送る
     if (st.app) |a| update(a);
 }
 
 fn tiLeave(_: ?*anyopaque, t: ?*c.struct_zwp_text_input_v3, _: ?*c.struct_wl_surface) callconv(.C) void {
+    dbg("leave", .{});
     st.focus = null;
     if (st.enabled) {
         c.zwp_text_input_v3_disable(t);
@@ -94,6 +104,7 @@ fn tiCommit(_: ?*anyopaque, _: ?*c.struct_zwp_text_input_v3, text: [*c]const u8)
 fn tiDelete(_: ?*anyopaque, _: ?*c.struct_zwp_text_input_v3, _: u32, _: u32) callconv(.C) void {}
 
 fn tiDone(_: ?*anyopaque, _: ?*c.struct_zwp_text_input_v3, _: u32) callconv(.C) void {
+    dbg("done: 確定 \"{s}\" 変換中 \"{s}\"", .{ st.commit[0..st.commit_len], st.pre[0..st.pre_len] });
     if (st.commit_len > 0) {
         aipanel.insert(st.commit[0..st.commit_len]);
         st.commit_len = 0;
