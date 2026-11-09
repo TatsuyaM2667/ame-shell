@@ -12,7 +12,7 @@
 //     先頭の手がカーソルを動かす手(先に見つかった方。消えたらもう一方)。2 つまで。
 //
 // 手の認識(推論・追跡・形)は ame-hand(github.com/TatsuyaM2667/ame-hand)。モデル(MediaPipe の
-// hand_landmarker.task、Apache-2.0)は $XDG_DATA_HOME/ame-shell/models に無ければ curl で取ってくる。
+// hand_landmarker.task、Apache-2.0)は $XDG_DATA_HOME/ame-shell/models に無ければ curl で取ってくる(版を決めた URL。SHA-256 を確かめる)。
 // 手を追っている間は 1 秒に 30 コマまで、見つかっていない間は 4 コマまで。SIGTERM / SIGINT でカメラを閉じて終わる。
 // ame-shell のハンド操作はこれを動かして、出てくる行を操作にしている(カメラ・推論で詰まっても画面は止まらない)。
 const std = @import("std");
@@ -22,6 +22,19 @@ const track = handlib.track;
 const nn = handlib.nn;
 const zip = handlib.zip;
 const gesture = handlib.gesture;
+
+/// モデル(MediaPipe の Hand Landmarker、Apache-2.0)。版を決めた URL と、その中身の SHA-256。
+/// 取ってきたもの・置いてあるものがこれと違えば使わない(差し替えられたモデルで推論しないように。顔のモデルと同じ)
+const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+const MODEL_SHA256 = "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1";
+
+fn modelOk(b: []const u8) bool {
+    var h: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(b, &h, .{});
+    var hex: [64]u8 = undefined;
+    _ = std.fmt.bufPrint(&hex, "{s}", .{std.fmt.fmtSliceHexLower(&h)}) catch return false;
+    return std.mem.eql(u8, &hex, MODEL_SHA256) and zip.isHandModel(b);
+}
 
 var out: std.io.BufferedWriter(16384, std.fs.File.Writer) = undefined;
 var quit = std.atomic.Value(bool).init(false);
@@ -52,7 +65,7 @@ fn loadModel(a: std.mem.Allocator) ?[]u8 {
     var pb: [512]u8 = undefined;
     const path = modelPath(&pb) orelse return null;
     if (std.fs.cwd().readFileAlloc(a, path, 64 << 20)) |b| {
-        if (zip.isHandModel(b)) return b;
+        if (modelOk(b)) return b;
         a.free(b);
     } else |_| {}
     status("downloading");
@@ -60,14 +73,14 @@ fn loadModel(a: std.mem.Allocator) ?[]u8 {
     std.fs.cwd().makePath(dir) catch {};
     var tb: [520]u8 = undefined;
     const tmp = std.fmt.bufPrint(&tb, "{s}.part", .{path}) catch return null;
-    var ch = std.process.Child.init(&.{ "curl", "-sSfL", "--max-time", "180", "-o", tmp, handlib.MODEL_URL }, a);
+    var ch = std.process.Child.init(&.{ "curl", "-sSfL", "--max-time", "180", "-o", tmp, MODEL_URL }, a);
     ch.stdin_behavior = .Ignore;
     ch.stdout_behavior = .Ignore;
     const term = ch.spawnAndWait() catch return null;
     if (term != .Exited or term.Exited != 0) return null;
     std.fs.cwd().rename(tmp, path) catch return null;
     const b = std.fs.cwd().readFileAlloc(a, path, 64 << 20) catch return null;
-    if (zip.isHandModel(b)) return b;
+    if (modelOk(b)) return b;
     a.free(b);
     std.fs.cwd().deleteFile(path) catch {};
     return null;
