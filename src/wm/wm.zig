@@ -238,6 +238,8 @@ pub const Wm = struct {
     ptrbinds: std.ArrayList(*PtrBind),
     queue: std.ArrayList(Action),
     binds_enabled: bool = false,
+    /// バインドを作った seat(その seat が消えたら作り直す)
+    bind_seat: ?*WSeat = null,
     in_manage: bool = false,
     anim_timer: loop.Timer,
     last_render_ms: u64 = 0,
@@ -1232,9 +1234,26 @@ pub const Wm = struct {
     // キー・ポインタのバインド
     // ---------------------------------------------------------------------
 
+    /// seat が消えた: その seat に作ったバインドを壊し、次の manage で残っている seat に作り直す
+    fn dropBindings(self: *Wm) void {
+        for (self.keybinds.items) |kb| {
+            c.river_xkb_binding_v1_destroy(kb.obj);
+            self.app.alloc.destroy(kb);
+        }
+        for (self.ptrbinds.items) |pb| {
+            c.river_pointer_binding_v1_destroy(pb.obj);
+            self.app.alloc.destroy(pb);
+        }
+        self.keybinds.clearRetainingCapacity();
+        self.ptrbinds.clearRetainingCapacity();
+        self.binds_enabled = false;
+        self.bind_seat = null;
+    }
+
     fn setupBindings(self: *Wm) void {
         const s = self.seat() orelse return;
         self.binds_enabled = true;
+        self.bind_seat = s;
         const xkb = self.xkb orelse {
             std.log.warn("wm: river_xkb_bindings_v1 が無いのでキーバインド無し", .{});
             return;
@@ -1615,6 +1634,7 @@ const lsh_seat_listener = c.struct_river_layer_shell_seat_v1_listener{ .focus_ex
 fn sRemoved(data: ?*anyopaque, obj: ?*c.struct_river_seat_v1) callconv(.C) void {
     const s: *WSeat = @ptrCast(@alignCast(data.?));
     const self = s.wm;
+    if (self.bind_seat == s) self.dropBindings();
     if (std.mem.indexOfScalar(*WSeat, self.seats.items, s)) |i| _ = self.seats.orderedRemove(i);
     c.river_seat_v1_destroy(obj);
     self.app.alloc.destroy(s);
