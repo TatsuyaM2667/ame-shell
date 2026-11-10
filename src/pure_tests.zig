@@ -18,6 +18,7 @@ test {
     _ = @import("ai/agent.zig");
     _ = @import("ai/mcp.zig");
     _ = @import("platform/sys.zig");
+    if (@import("builtin").os.tag == .linux) _ = @import("platform/malloc.zig");
     _ = @import("frame/island.zig");
     _ = @import("core/events.zig");
 }

@@ -5,6 +5,11 @@ const App = @import("core/app.zig").App;
 
 pub const std_options: std.Options = .{ .log_level = .info };
 
+// Linux では malloc 一式を自前に差し替える(libc の mimalloc が解放したメモリを返さないため。platform/malloc.zig)
+comptime {
+    if (@import("builtin").os.tag == .linux) _ = @import("platform/malloc.zig");
+}
+
 pub fn main() !u8 {
     // 日本語ロケール(xkb の compose / strftime 等のため)
     _ = c.setlocale(c.LC_ALL, "");
