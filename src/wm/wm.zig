@@ -240,6 +240,9 @@ pub const Wm = struct {
     binds_enabled: bool = false,
     /// バインドを作った seat(その seat が消えたら作り直す)
     bind_seat: ?*WSeat = null,
+    /// 再起動前の状態ファイルの中身(savedState が最初に読む)
+    saved_buf: [16384]u8 = undefined,
+    saved_len: ?usize = null,
     in_manage: bool = false,
     anim_timer: loop.Timer,
     last_render_ms: u64 = 0,
@@ -957,16 +960,20 @@ pub const Wm = struct {
 
     fn visibleList(self: *Wm, o: ?*WOut, tiled_only: bool) []*Window {
         const S = struct {
-            var buf: [128]*Window = undefined;
+            var buf: [512]*Window = undefined;
+            var warned = false;
         };
         var n: usize = 0;
         for (self.windows.items) |w| {
             if (w.out != o or !w.visible() or w.closing or w.w == 0) continue;
             if (tiled_only and (w.floating or w.fullscreen)) continue;
-            if (n < S.buf.len) {
-                S.buf[n] = w;
-                n += 1;
+            if (n >= S.buf.len) {
+                if (!S.warned) std.log.warn("wm: 1 つの出力に見える窓が {d} 個を超えたので、超えた分は並べません", .{S.buf.len});
+                S.warned = true;
+                break;
             }
+            S.buf[n] = w;
+            n += 1;
         }
         return S.buf[0..n];
     }
@@ -1325,13 +1332,18 @@ pub const Wm = struct {
 
     const Restored = struct { tags: u32, floating: bool };
 
-    fn restored(self: *Wm, w: *Window) ?Restored {
-        _ = self;
-        if (w.ident_len == 0) return null;
+    /// 再起動の前に書いた状態ファイル(読むのは最初の 1 回だけ。この起動の間は書き換わらない)
+    fn savedState(self: *Wm) []const u8 {
+        if (self.saved_len) |n| return self.saved_buf[0..n];
         var pb: [256]u8 = undefined;
-        const p = statePath(&pb) orelse return null;
-        var buf: [16384]u8 = undefined;
-        const data = std.fs.cwd().readFile(p, &buf) catch return null;
+        const data = if (statePath(&pb)) |p| std.fs.cwd().readFile(p, &self.saved_buf) catch "" else "";
+        self.saved_len = data.len;
+        return data;
+    }
+
+    fn restored(self: *Wm, w: *Window) ?Restored {
+        if (w.ident_len == 0) return null;
+        const data = self.savedState();
         var lines = std.mem.splitScalar(u8, data, '\n');
         while (lines.next()) |l| {
             var it = std.mem.tokenizeScalar(u8, l, ' ');
