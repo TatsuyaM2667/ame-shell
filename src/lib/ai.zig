@@ -593,6 +593,13 @@ pub const CallBuilder = struct {
         return .{ .a = a, .parts = std.ArrayList(Part).init(a) };
     }
 
+    /// API 応答の "index"(i64)を u32 に。負や 2^32 以上は端に寄せる(@intCast だとパニック)
+    fn jsonIndex(x: ?std.json.Value, def: u32) u32 {
+        const v = x orelse return def;
+        if (v != .integer) return def;
+        return @intCast(std.math.clamp(v.integer, 0, std.math.maxInt(u32)));
+    }
+
     fn at(self: *CallBuilder, idx: u32) ?*Part {
         for (self.parts.items) |*p| if (p.index == idx) return p;
         self.parts.append(.{ .index = idx, .id = std.ArrayList(u8).init(self.a), .name = std.ArrayList(u8).init(self.a), .args = std.ArrayList(u8).init(self.a) }) catch return null;
@@ -604,7 +611,7 @@ pub const CallBuilder = struct {
         switch (proto) {
             .anthropic => {
                 const ty = getStr(v, "type") orelse return;
-                const idx: u32 = if (v.object.get("index")) |x| (if (x == .integer) @intCast(@max(0, x.integer)) else 0) else 0;
+                const idx = jsonIndex(v.object.get("index"), 0);
                 if (std.mem.eql(u8, ty, "content_block_start")) {
                     const cb = v.object.get("content_block") orelse return;
                     if (!std.mem.eql(u8, getStr(cb, "type") orelse "", "tool_use")) return;
@@ -626,7 +633,7 @@ pub const CallBuilder = struct {
                 if (tc != .array) return;
                 for (tc.array.items, 0..) |t, k| {
                     if (t != .object) continue;
-                    const idx: u32 = if (t.object.get("index")) |x| (if (x == .integer) @intCast(@max(0, x.integer)) else @intCast(k)) else @intCast(k);
+                    const idx = jsonIndex(t.object.get("index"), @intCast(k));
                     const p = self.at(idx) orelse continue;
                     if (getStr(t, "id")) |id| if (p.id.items.len == 0) p.id.appendSlice(id) catch {};
                     if (t.object.get("function")) |f| {

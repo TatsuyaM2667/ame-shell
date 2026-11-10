@@ -311,7 +311,8 @@ pub fn parse(src: []const u8, base: Config, diag: *Diag) Config {
 }
 
 fn num(v: []const u8) ?f32 {
-    return std.fmt.parseFloat(f32, v) catch null;
+    const f = std.fmt.parseFloat(f32, v) catch return null;
+    return if (std.math.isFinite(f)) f else null; // nan は clamp を素通りして @intFromFloat で未定義動作になる
 }
 
 fn color(v: []const u8) ?u32 {
@@ -514,6 +515,13 @@ test "structure warnings" {
     var d2 = Diag{};
     _ = parse("theme {\n  radius 4\n  bogus 1\n}\n", .{}, &d2);
     try std.testing.expect(std.mem.startsWith(u8, d2.get(), "line 3: "));
+}
+
+test "nan / inf は数として受けない" {
+    var d = Diag{};
+    const cfg = parse("notifications { timeout nan }\ntheme { blur inf }\n", .{}, &d);
+    try std.testing.expectEqual((Config{}).notify_timeout_ms, cfg.notify_timeout_ms);
+    try std.testing.expectEqual((Config{}).blur, cfg.blur);
 }
 
 test "parse basic" {

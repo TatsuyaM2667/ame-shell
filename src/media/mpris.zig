@@ -535,7 +535,8 @@ fn getInt(it: *c.DBusMessageIter) ?i64 {
         c.DBUS_TYPE_DOUBLE => {
             var v: f64 = 0;
             c.dbus_message_iter_get_basic(it, &v);
-            return @intFromFloat(v);
+            if (!std.math.isFinite(v)) return null; // プレイヤーが送る値はそのまま信用しない
+            return @intFromFloat(std.math.clamp(v, -9.0e18, 9.0e18));
         },
         else => return null,
     }

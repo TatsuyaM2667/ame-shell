@@ -315,6 +315,7 @@ pub fn parseArgs(args: []const []const u8) ?Opts {
             i += 1;
             if (i >= args.len) return null;
             o.duration = std.fmt.parseFloat(f32, args[i]) catch return null;
+            if (!(o.duration >= 0 and o.duration <= 86400)) return null; // nan や巨大値は整数にできない
         } else if (eq(u8, s, "--music-tui")) {
             i += 1;
             if (i >= args.len) return null;
@@ -385,6 +386,8 @@ test "args" {
     try std.testing.expectEqualStrings("アイドル", o.title);
     try std.testing.expect(!o.kugou and o.duration == 213);
     try std.testing.expect(parseArgs(&.{"only-one"}) == null);
+    try std.testing.expect(parseArgs(&.{ "-d", "nan", "a", "b" }) == null);
+    try std.testing.expect(parseArgs(&.{ "-d", "1e30", "a", "b" }) == null);
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     try std.testing.expectEqualStrings("a%20b/c", encodePath(arena.allocator(), "/a b/c"));
