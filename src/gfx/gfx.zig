@@ -874,7 +874,7 @@ pub const Canvas = struct {
     fonts: *textmod.Fonts,
     inst: std.ArrayList(f32),
     xf: Xf = .{},
-    stack: [32]Xf = undefined,
+    stack: [32]struct { xf: Xf, clip: [4]f32 } = undefined,
     depth: usize = 0,
     clip: [4]f32 = .{ 0, 0, 0, 0 },
     cur_img: c.GLuint = 0,
@@ -942,12 +942,14 @@ pub const Canvas = struct {
     // ---- 変換スタック(パネル全体の拡大・移動・フェードを CPU 側で適用) ----
 
     pub fn save(self: *Canvas) void {
-        self.stack[self.depth] = self.xf;
+        self.stack[self.depth] = .{ .xf = self.xf, .clip = self.clip };
         self.depth += 1;
     }
+    /// 変換とクリップを save の時点に戻す
     pub fn restore(self: *Canvas) void {
         self.depth -= 1;
-        self.xf = self.stack[self.depth];
+        self.xf = self.stack[self.depth].xf;
+        self.clip = self.stack[self.depth].clip;
     }
     pub fn translate(self: *Canvas, x: f32, y: f32) void {
         self.xf.tx += x * self.xf.s;
@@ -969,6 +971,19 @@ pub const Canvas = struct {
             return;
         }
         self.clip = .{ self.xf.tx + x * self.xf.s, self.xf.ty + y * self.xf.s, w * self.xf.s, h * self.xf.s };
+    }
+
+    /// 今のクリップとの重なりだけに絞る(外側のクリップを越えない)
+    pub fn clipWithin(self: *Canvas, x: f32, y: f32, w: f32, h: f32) void {
+        const outer = self.clip;
+        self.setClip(x, y, w, h);
+        if (outer[2] <= 0) return;
+        const x0 = @max(outer[0], self.clip[0]);
+        const y0 = @max(outer[1], self.clip[1]);
+        const x1 = @min(outer[0] + outer[2], self.clip[0] + self.clip[2]);
+        const y1 = @min(outer[1] + outer[3], self.clip[1] + self.clip[3]);
+        // 重ならないときは幅 0 だと「解除」になってしまうので、ごく小さい範囲にする
+        self.clip = .{ x0, y0, @max(x1 - x0, 0.001), @max(y1 - y0, 0.001) };
     }
 
     fn push(self: *Canvas, x: f32, y: f32, w: f32, h: f32, c0: Color, c1: Color, c2: Color, p0: [4]f32, p1: [4]f32) void {

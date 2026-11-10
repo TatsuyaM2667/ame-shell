@@ -464,6 +464,9 @@ pub const Dashboard = struct {
     /// ウィジェットの描画コマンドを Canvas 呼び出しに変換する
     fn runCmds(self: *Dashboard, cv: *gfx.Canvas, w: *wasm.Widget, cmds: []align(1) const abi.Cmd, h: f32) void {
         const app = self.app;
+        // 外側(パネル)のクリップ。ウィジェットのクリップはこの中に絞り、終わったらここへ戻す
+        const outer = cv.clip;
+        defer cv.clip = outer;
         for (cmds) |cmd| {
             const col = Color.rgba(cmd.col);
             const col2 = Color.rgba(cmd.col2);
@@ -487,12 +490,12 @@ pub const Dashboard = struct {
                 .art => if (app.media.art_tex != 0) cv.image(app.media.art_tex, cmd.x, cmd.y, cmd.w, cmd.h, cmd.r),
                 .clip => {
                     // ウィジェット内のクリップはカードの範囲を超えないようにする
-                    if (cmd.w <= 0) cv.setClip(0, 0, 0, 0) else cv.setClip(cmd.x, @max(cmd.y, -12), cmd.w, @min(cmd.h, h + 12));
+                    cv.clip = outer;
+                    if (cmd.w > 0) cv.clipWithin(cmd.x, @max(cmd.y, -12), cmd.w, @min(cmd.h, h + 12));
                 },
                 _ => {},
             }
         }
-        cv.setClip(0, 0, 0, 0);
     }
 
     // ---------------------------------------------------------------------
