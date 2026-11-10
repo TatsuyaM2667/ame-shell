@@ -2,7 +2,7 @@
 // 読み直しを繰り返して何分も固まる(実機: 空き 93MB で River と ame-shell が D 状態のまま止まり、電源で切るしか
 // なかった)。カーネルのメモリ圧力(PSI)の知らせを待ち(定期的には調べない)、来たら空きを見て:
 //   空きが 10% を切った → 通知(いちばん使っているアプリと量)
-//   空きが 3% を切った  → カーネルの OOM キラーが選ぶのと同じプロセス(oom_score が最大)を止めて通知
+//   空きが 3% を切った  → 使っているメモリ(常駐 + スワップ)が最大のプロセスを止めて通知
 // 止めるのは自分のユーザーのプロセスだけ。River・Xwayland・ame-*・音やバスの常駐は選ばない。
 // shell { memory-guard false } で止めるのをやめる(通知だけになる)。
 const std = @import("std");
@@ -73,7 +73,7 @@ pub const Guard = struct {
                 if (self.warned_ms != 0 and now -| self.warned_ms < 120_000) return;
                 self.warned_ms = now;
                 var top: Proc = .{};
-                _ = pick(&top, .largest);
+                _ = pick(&top);
                 var sb: [96]u8 = undefined;
                 var bb: [160]u8 = undefined;
                 const summary = std.fmt.bufPrint(&sb, "メモリが残りわずかです(残り {d} MB)", .{mi.avail_kb / 1024}) catch "メモリが残りわずかです";
@@ -84,13 +84,13 @@ pub const Guard = struct {
                 if (!self.app.cfg.memory_guard) return;
                 if (self.killed_ms != 0 and now -| self.killed_ms < 5_000) return;
                 var v: Proc = .{};
-                if (!pick(&v, .oom)) return;
+                if (!pick(&v)) return;
                 if (c.kill(v.pid, c.SIGKILL) != 0) return;
                 self.killed_ms = now;
                 log.warn("空き {d} MB: {s}(pid {d}, {d} MB)を止めました", .{ mi.avail_kb / 1024, v.name(), v.pid, v.rss_kb / 1024 });
                 var sb: [128]u8 = undefined;
                 const summary = std.fmt.bufPrint(&sb, "メモリが尽きそうだったので {s} を止めました", .{v.name()}) catch "メモリが尽きそうだったのでアプリを止めました";
-                self.app.notifs.post("ame-shell", summary, "固まるのを防ぐため、カーネルが選ぶのと同じものを止めました(shell { memory-guard false } で止めなくなります)", 0);
+                self.app.notifs.post("ame-shell", summary, "固まるのを防ぐため、いちばんメモリを使っていたものを止めました(shell { memory-guard false } で止めなくなります)", 0);
             },
         }
     }
@@ -114,7 +114,7 @@ fn memInfo() ?MemInfo {
 const Proc = struct {
     pid: c_int = 0,
     rss_kb: u64 = 0,
-    score: i64 = -1,
+
     comm: [32]u8 = undefined,
     comm_len: usize = 0,
     fn name(self: *const Proc) []const u8 {
@@ -122,8 +122,10 @@ const Proc = struct {
     }
 };
 
-/// 自分のユーザーのプロセスから、largest = 常駐が最大 / oom = oom_score が最大(守るものは除く)
-fn pick(out: *Proc, by: enum { largest, oom }) bool {
+/// 自分のユーザーのプロセスから、使っているメモリ(常駐 + スワップに出した分)が最大のもの(守るものは除く)。
+/// oom_score では選ばない: ブラウザは小さなタブのプロセスに高い oom_score_adj を付けるので、それで選ぶと
+/// 数 MB のプロセスばかり止めて、本当に食っている物(実機: Zen の動画の復号プロセス 5.9GB)が残った
+fn pick(out: *Proc) bool {
     var dir = std.fs.openDirAbsolute("/proc", .{ .iterate = true }) catch return false;
     defer dir.close();
     const me = std.os.linux.getpid();
@@ -134,28 +136,32 @@ fn pick(out: *Proc, by: enum { largest, oom }) bool {
         const pid = std.fmt.parseInt(c_int, e.name, 10) catch continue;
         if (pid <= 1 or pid == me) continue;
         var pb: [64]u8 = undefined;
-        var buf: [512]u8 = undefined;
-        // 持ち主(status の Uid の 1 つ目)
+        var buf: [4096]u8 = undefined;
+        // 持ち主(Uid の 1 つ目)とスワップに出した量(VmSwap)
         const st = rd(std.fmt.bufPrint(&pb, "/proc/{d}/status", .{pid}) catch continue, &buf) orelse continue;
         const ui = std.mem.indexOf(u8, st, "\nUid:\t") orelse continue;
         var uit = std.mem.tokenizeAny(u8, st[ui + 6 ..], "\t\n");
         if ((std.fmt.parseInt(std.os.linux.uid_t, uit.next() orelse continue, 10) catch continue) != uid) continue;
-        const comm = std.mem.trim(u8, rd(std.fmt.bufPrint(&pb, "/proc/{d}/comm", .{pid}) catch continue, &buf) orelse continue, " \n");
+        const swap_kb: u64 = if (std.mem.indexOf(u8, st, "\nVmSwap:")) |si| blk: {
+            var sit = std.mem.tokenizeAny(u8, st[si + 8 ..], " \t\n");
+            break :blk std.fmt.parseInt(u64, sit.next() orelse "0", 10) catch 0;
+        } else 0;
+        var cb: [64]u8 = undefined;
+        const comm = rd(std.fmt.bufPrint(&pb, "/proc/{d}/comm", .{pid}) catch continue, &cb) orelse continue;
         if (protected(comm)) continue;
-        var p = Proc{ .pid = pid };
-        p.comm_len = @min(comm.len, p.comm.len);
-        @memcpy(p.comm[0..p.comm_len], comm[0..p.comm_len]);
+        // カーネルも止めないもの(oom_score_adj -1000)は選ばない
+        var ab: [16]u8 = undefined;
+        if (rd(std.fmt.bufPrint(&pb, "/proc/{d}/oom_score_adj", .{pid}) catch continue, &ab)) |adj| if (std.mem.eql(u8, adj, "-1000")) continue;
         // 常駐(statm の 2 つ目、ページ数)
-        const sm = rd(std.fmt.bufPrint(&pb, "/proc/{d}/statm", .{pid}) catch continue, &buf) orelse continue;
+        var mb: [128]u8 = undefined;
+        const sm = rd(std.fmt.bufPrint(&pb, "/proc/{d}/statm", .{pid}) catch continue, &mb) orelse continue;
         var smi = std.mem.tokenizeScalar(u8, sm, ' ');
         _ = smi.next();
-        p.rss_kb = (std.fmt.parseInt(u64, smi.next() orelse continue, 10) catch continue) * 4;
-        if (by == .oom) {
-            const sc = rd(std.fmt.bufPrint(&pb, "/proc/{d}/oom_score", .{pid}) catch continue, &buf) orelse continue;
-            p.score = std.fmt.parseInt(i64, std.mem.trim(u8, sc, " \n"), 10) catch continue;
-            if (p.score <= 0) continue; // oom_score_adj -1000 など、カーネルも止めないもの
-            if (p.score <= out.score) continue;
-        } else if (p.rss_kb <= out.rss_kb) continue;
+        const rss_kb = (std.fmt.parseInt(u64, smi.next() orelse continue, 10) catch continue) * 4;
+        if (rss_kb + swap_kb <= out.rss_kb) continue;
+        var p = Proc{ .pid = pid, .rss_kb = rss_kb + swap_kb };
+        p.comm_len = @min(comm.len, p.comm.len);
+        @memcpy(p.comm[0..p.comm_len], comm[0..p.comm_len]);
         out.* = p;
         found = true;
     }
@@ -172,12 +178,10 @@ test "level: 10% / 3% で段階が変わる" {
 
 test "pick: 守るもの・自分は選ばない(実際の /proc を読むだけで、止めはしない)" {
     var v: Proc = .{};
-    if (pick(&v, .oom)) {
+    if (pick(&v)) {
         try std.testing.expect(!protected(v.name()));
-        try std.testing.expect(v.pid != std.os.linux.getpid() and v.score > 0);
+        try std.testing.expect(v.pid != std.os.linux.getpid() and v.rss_kb > 0);
     }
-    var l: Proc = .{};
-    if (pick(&l, .largest)) try std.testing.expect(l.rss_kb > 0);
 }
 
 /// /proc の小さなファイルを読む(c.zig を使わない: 試験のビルドには Wayland のヘッダが無い)
