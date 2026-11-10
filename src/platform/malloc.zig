@@ -13,6 +13,7 @@ const linux = std.os.linux;
 
 const Fn = struct {
     extern "c" fn dlsym(handle: ?*anyopaque, name: [*:0]const u8) ?*anyopaque;
+    extern "c" fn pthread_atfork(prepare: ?*const fn () callconv(.C) void, parent: ?*const fn () callconv(.C) void, child: ?*const fn () callconv(.C) void) c_int;
 };
 const RTLD_NEXT: ?*anyopaque = @ptrFromInt(@as(usize, @bitCast(@as(isize, -1))));
 
@@ -48,7 +49,11 @@ fn resolve() bool {
     r_free = @ptrCast(Fn.dlsym(RTLD_NEXT, "free"));
     r_usable = @ptrCast(Fn.dlsym(RTLD_NEXT, "malloc_usable_size"));
     @atomicStore(?*const fn (usize) callconv(.C) ?[*]u8, &r_malloc, @ptrCast(Fn.dlsym(RTLD_NEXT, "malloc")), .release);
-    return r_malloc != null;
+    if (r_malloc == null) return false;
+    // fork の瞬間に別のスレッドが cache_lock を持っていると、子(ロック画面の PAM など exec せずに働く子)の
+    // malloc が永久に待つ。fork の間はこちらで持っておき、親子どちらでも離す
+    _ = Fn.pthread_atfork(forkPrepare, forkRelease, forkChild);
+    return true;
 }
 
 fn head(p: *anyopaque) *Head {
@@ -74,6 +79,17 @@ fn now() i64 {
     var ts: linux.timespec = undefined;
     _ = linux.clock_gettime(linux.CLOCK.MONOTONIC_COARSE, &ts);
     return ts.tv_sec;
+}
+
+fn forkPrepare() callconv(.C) void {
+    cache_lock.lock();
+}
+/// 子は 1 スレッドだけなので作り直す(Debug の Mutex は別のスレッドからの unlock を許さない)
+fn forkChild() callconv(.C) void {
+    cache_lock = .{};
+}
+fn forkRelease() callconv(.C) void {
+    cache_lock.unlock();
 }
 
 /// 古いものを返す(cache_lock を持って呼ぶ)
