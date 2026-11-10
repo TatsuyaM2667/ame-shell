@@ -27,6 +27,7 @@ const Osd = @import("../desktop/osd.zig").Osd;
 const loop_mod = @import("../platform/loop.zig");
 const SuperTap = @import("../platform/supertap.zig").SuperTap;
 const sys = @import("../platform/sys.zig");
+const netdbus = @import("../platform/netdbus.zig");
 const surface = @import("surface.zig");
 const Surface = surface.Surface;
 const SysWatch = @import("../desktop/syswatch.zig").SysWatch;
@@ -182,6 +183,12 @@ pub const App = struct {
     inotify_fd: c_int = -1,
     config_wd: c_int = -1,
     pactl_fd: c_int = -1,
+    /// バーに出す Wi-Fi の SSID(裏で聞いた最後の答え)と、聞いている最中の読み口
+    ssid_fd: c_int = -1,
+    ssid_buf: [64]u8 = undefined,
+    ssid_len: usize = 0,
+    ssid_rbuf: [64]u8 = undefined,
+    ssid_rlen: usize = 0,
     pactl_pid: c_int = 0,
     start_ms: u64,
     frame_stats: FrameStats = .{},
@@ -608,6 +615,10 @@ pub const App = struct {
         if (!self.debug_battery) self.sys.battery = sys.battery();
         self.sys.brightness = sys.brightness();
         self.sys.net = sys.network();
+        if (self.sys.net.kind == .wifi) {
+            _ = self.applySsid();
+            self.querySsid();
+        } else self.ssid_len = 0;
         if (all) self.sys.volume = sys.volume();
         if (prev_ac != self.sys.battery.on_ac) {
             // 電源が変わったら壁紙の FPS/解像度を切り替える
@@ -669,6 +680,45 @@ pub const App = struct {
             // 最後に WASM ウィジェットを読み、1回実行しておく(wasm3 は関数を初回呼び出し時にコンパイルする)
             self.dashboard.prewarm();
         }
+    }
+
+    /// つながっている Wi-Fi の SSID をワーカースレッドで聞く(netdbus の "ame-net ssid")。
+    /// 答えが来るまでは前回の SSID を出しておく
+    fn querySsid(self: *App) void {
+        if (@import("builtin").os.tag != .linux or self.ssid_fd >= 0) return;
+        const fd = netdbus.spawn(&.{ "ame-net", "ssid" }) orelse return;
+        self.ssid_fd = fd;
+        self.ssid_rlen = 0;
+        self.loop.add(fd, c.EPOLLIN | c.EPOLLHUP, self, onSsid) catch {
+            _ = c.close(fd);
+            self.ssid_fd = -1;
+        };
+    }
+
+    fn onSsid(ctx: *anyopaque, fd: c_int, _: u32) void {
+        const self: *App = @ptrCast(@alignCast(ctx));
+        const n = c.read(fd, self.ssid_rbuf[self.ssid_rlen..].ptr, self.ssid_rbuf.len - self.ssid_rlen);
+        if (n > 0) {
+            self.ssid_rlen += @intCast(n);
+            if (self.ssid_rlen < self.ssid_rbuf.len) return;
+        } else if (n < 0 and std.posix.errno(n) == .AGAIN) return;
+        self.loop.remove(fd);
+        _ = c.close(fd);
+        self.ssid_fd = -1;
+        self.ssid_len = self.ssid_rlen;
+        @memcpy(self.ssid_buf[0..self.ssid_len], self.ssid_rbuf[0..self.ssid_len]);
+        if (self.applySsid()) self.redrawBars();
+    }
+
+    /// 覚えている SSID をバーの表示名に。変わったら true
+    fn applySsid(self: *App) bool {
+        const n = &self.sys.net;
+        if (n.kind != .wifi or self.ssid_len == 0) return false;
+        const len = @min(self.ssid_len, n.name_buf.len);
+        if (std.mem.eql(u8, n.name_buf[0..n.name_len], self.ssid_buf[0..len])) return false;
+        @memcpy(n.name_buf[0..len], self.ssid_buf[0..len]);
+        n.name_len = len;
+        return true;
     }
 
     fn onSysTimer(ctx: *anyopaque, _: c_int, _: u32) void {

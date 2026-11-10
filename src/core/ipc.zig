@@ -34,6 +34,7 @@ pub const Server = struct {
     app: *App,
     fd: c_int = -1,
     path: [256]u8 = undefined,
+    clients: [16]Client = [_]Client{.{}} ** 16,
 
     pub fn init(app: *App) !Server {
         var s = Server{ .app = app };
@@ -59,31 +60,19 @@ pub const Server = struct {
     fn onAccept(ctx: *anyopaque, fd: c_int, _: u32) void {
         const self: *Server = @ptrCast(@alignCast(ctx));
         while (true) {
-            const cl = std.posix.accept(fd, null, null, std.posix.SOCK.CLOEXEC) catch break;
-            var keep = false; // ame-ctl watch は切らずに出来事を流し続ける(events.zig)
-            defer if (!keep) {
-                _ = c.close(cl);
-            };
+            // 読み書きはメインループから(接続だけして黙る相手でループを止めない)
+            const cl = std.posix.accept(fd, null, null, std.posix.SOCK.CLOEXEC | std.posix.SOCK.NONBLOCK) catch break;
             // 自分(同じ実 UID)のプロセスからだけ受ける。置き場($XDG_RUNTIME_DIR)は本人しか入れないが、念のため
-            if ((sys.peerUid(cl) orelse continue) != c.getuid()) continue;
-            // コマンドは短いので同期で1回読む(クライアントは書いてすぐ待つ)
-            var buf: [512]u8 = undefined;
-            var tv = c.struct_timeval{ .tv_sec = 1, .tv_usec = 0 };
-            _ = c.setsockopt(cl, c.SOL_SOCKET, c.SO_RCVTIMEO, &tv, @sizeOf(c.struct_timeval));
-            const n = c.read(cl, &buf, buf.len);
-            if (n <= 0) continue;
-            const cmd = std.mem.trim(u8, buf[0..@intCast(n)], " \n\r\t");
-            if (std.mem.eql(u8, cmd, "watch")) {
-                var hb: [2048]u8 = undefined;
-                const h = hello(self.app, &hb);
-                _ = c.send(cl, h.ptr, h.len, c.MSG_NOSIGNAL);
-                if (events.add(cl)) keep = true else _ = c.write(cl, "error: too many watchers\n", 25);
+            const slot = for (&self.clients) |*k| {
+                if (k.fd < 0) break k;
+            } else null;
+            if ((sys.peerUid(cl) orelse c.getuid() +% 1) != c.getuid() or slot == null) {
+                _ = c.close(cl);
                 continue;
             }
-            var out: [4096]u8 = undefined;
-            const reply = handle(self.app, cmd, &out);
-            _ = c.write(cl, reply.ptr, reply.len);
-            _ = c.write(cl, "\n", 1);
+            const k = slot.?;
+            k.* = .{ .server = self, .fd = cl };
+            self.app.loop.add(cl, c.EPOLLIN | c.EPOLLHUP, k, onClient) catch k.finish();
         }
     }
 
@@ -94,6 +83,104 @@ pub const Server = struct {
         }
     }
 };
+
+/// ame-ctl の 1 本の接続。コマンドの行を読み、答えを書いて切る。
+/// net の問い合わせ(NetworkManager / BlueZ への D-Bus の往復)はワーカースレッドで行い、その答えを待つ
+const Client = struct {
+    server: *Server = undefined,
+    fd: c_int = -1,
+    buf: [512]u8 = undefined,
+    len: usize = 0,
+    job_fd: c_int = -1,
+    out: [4096]u8 = undefined,
+    out_len: usize = 0,
+    /// net ssid を聞いている(空の答え = つながっていない)
+    ssid: bool = false,
+
+    fn finish(self: *Client) void {
+        const lp = &self.server.app.loop;
+        if (self.job_fd >= 0) {
+            lp.remove(self.job_fd);
+            _ = c.close(self.job_fd);
+            self.job_fd = -1;
+        }
+        if (self.fd >= 0) {
+            lp.remove(self.fd);
+            _ = c.close(self.fd);
+            self.fd = -1;
+        }
+    }
+
+    fn reply(self: *Client, s: []const u8) void {
+        _ = c.send(self.fd, s.ptr, s.len, c.MSG_NOSIGNAL);
+        _ = c.send(self.fd, "\n", 1, c.MSG_NOSIGNAL);
+        self.finish();
+    }
+
+    /// 行がそろった(改行か、相手が書き終えた)
+    fn run(self: *Client) void {
+        const app = self.server.app;
+        app.loop.remove(self.fd);
+        const cmd = std.mem.trim(u8, self.buf[0..self.len], " \n\r\t");
+        if (std.mem.eql(u8, cmd, "watch")) {
+            var hb: [2048]u8 = undefined;
+            const h = hello(app, &hb);
+            _ = c.send(self.fd, h.ptr, h.len, c.MSG_NOSIGNAL);
+            // 受け渡した fd は events.zig が持つ(ここでは閉じない)
+            if (events.add(self.fd)) self.fd = -1 else _ = c.send(self.fd, "error: too many watchers\n", 25, c.MSG_NOSIGNAL);
+            return self.finish();
+        }
+        var it = std.mem.tokenizeAny(u8, cmd, " \t");
+        if (std.mem.eql(u8, it.next() orelse "", "net")) {
+            const what = it.next() orelse "";
+            const argv = netArgv(what) orelse return self.reply("error: net wifi|saved|radio|ssid|bt|bt-devices");
+            self.ssid = std.mem.eql(u8, what, "ssid");
+            self.job_fd = @import("../platform/netdbus.zig").spawn(argv) orelse return self.reply("error");
+            app.loop.add(self.job_fd, c.EPOLLIN | c.EPOLLHUP, self, onJob) catch return self.reply("error");
+            return;
+        }
+        var out: [4096]u8 = undefined;
+        self.reply(handle(app, cmd, &out));
+    }
+};
+
+fn onClient(ctx: *anyopaque, fd: c_int, _: u32) void {
+    const k: *Client = @ptrCast(@alignCast(ctx));
+    const n = c.read(fd, k.buf[k.len..].ptr, k.buf.len - k.len);
+    if (n < 0) {
+        if (std.posix.errno(n) == .AGAIN) return;
+        return k.finish();
+    }
+    k.len += @intCast(n);
+    if (n == 0 or k.len == k.buf.len or std.mem.indexOfScalar(u8, k.buf[0..k.len], '\n') != null) {
+        if (k.len == 0) return k.finish();
+        k.run();
+    }
+}
+
+fn onJob(ctx: *anyopaque, fd: c_int, _: u32) void {
+    const k: *Client = @ptrCast(@alignCast(ctx));
+    const n = c.read(fd, k.out[k.out_len..].ptr, k.out.len - k.out_len);
+    if (n > 0) {
+        k.out_len += @intCast(n);
+        if (k.out_len < k.out.len) return;
+    } else if (n < 0 and std.posix.errno(n) == .AGAIN) return;
+    const r = std.mem.trimRight(u8, k.out[0..k.out_len], "\n");
+
+    k.reply(if (r.len == 0 and k.ssid) "(つながっていません)" else r);
+}
+
+/// net の問い合わせを netdbus のコマンドの形に(読み取りだけ)
+fn netArgv(arg: []const u8) ?[]const []const u8 {
+    const eq = std.mem.eql;
+    if (eq(u8, arg, "wifi")) return &.{ "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "dev", "wifi", "list" };
+    if (eq(u8, arg, "saved")) return &.{ "nmcli", "-t", "-f", "NAME,TYPE", "connection", "show" };
+    if (eq(u8, arg, "radio")) return &.{ "nmcli", "radio", "wifi" };
+    if (eq(u8, arg, "ssid")) return &.{ "ame-net", "ssid" };
+    if (eq(u8, arg, "bt")) return &.{ "bluetoothctl", "show" };
+    if (eq(u8, arg, "bt-devices")) return &.{ "bluetoothctl", "devices" };
+    return null;
+}
 
 const help =
     \\commands:
@@ -332,24 +419,8 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
     } else if (eq(u8, cmd, "media")) {
         // 再生中の曲の操作(MPRIS を D-Bus で。playerctl は使わない)
         if (eq(u8, arg, "play-pause") or eq(u8, arg, "toggle")) app.media.toggle() else if (eq(u8, arg, "next")) app.media.next() else if (eq(u8, arg, "previous") or eq(u8, arg, "prev")) app.media.prev() else return "error: media play-pause|next|previous";
-    } else if (eq(u8, cmd, "net") and eq(u8, arg, "ssid")) {
-        // つながっている Wi-Fi の名前(バーに出すもの)
-        return @import("../platform/netdbus.zig").activeSsid(out) orelse "(つながっていません)";
     } else if (eq(u8, cmd, "net")) {
-        // Wi-Fi・Bluetooth の状態(NetworkManager / BlueZ に D-Bus で直接聞く。読み取りだけ)
-        const argv: []const []const u8 = if (eq(u8, arg, "wifi"))
-            &.{ "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "dev", "wifi", "list" }
-        else if (eq(u8, arg, "saved"))
-            &.{ "nmcli", "-t", "-f", "NAME,TYPE", "connection", "show" }
-        else if (eq(u8, arg, "radio"))
-            &.{ "nmcli", "radio", "wifi" }
-        else if (eq(u8, arg, "bt"))
-            &.{ "bluetoothctl", "show" }
-        else if (eq(u8, arg, "bt-devices"))
-            &.{ "bluetoothctl", "devices" }
-        else
-            return "error: net wifi|saved|radio|ssid|bt|bt-devices";
-        return @import("../platform/netdbus.zig").run(argv, out) orelse "error";
+        return "error: net は ame-ctl から(答えは裏で聞く: Client.run)";
     } else if (eq(u8, cmd, "screenshot")) {
         const k = @import("../desktop/shot.zig").Kind.parse(if (arg.len > 0) arg else "region") orelse return "error: screenshot region|full|clip";
         @import("../desktop/shot.zig").take(app, k, 0);

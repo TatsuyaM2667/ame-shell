@@ -20,6 +20,7 @@
 //   ame-bt scan <秒>                                     → "ok"(見つかった機器は BlueZ の信号で syswatch が拾う)
 //   ame-bt remove <MAC>                                  → "Device has been removed" / "Failed: …"(登録を消す)
 //   ame-bt connect|pair <MAC> <bt-connect.sh>            → "Connection successful" / "Failed: …"
+//   ame-net ssid                                         → つながっている Wi-Fi の SSID / ""(バーの表示用)
 //                                                          (音の出力先の切り替えは bt-connect.sh --audio で pactl)
 const std = @import("std");
 const builtin = @import("builtin");
@@ -46,7 +47,7 @@ const DBusError = extern struct { name: ?[*:0]const u8 = null, message: ?[*:0]co
 /// このモジュールが引き受けるコマンドか
 pub fn handles(argv0: []const u8) bool {
     if (builtin.os.tag != .linux) return false;
-    return std.mem.eql(u8, argv0, "nmcli") or std.mem.eql(u8, argv0, "bluetoothctl") or std.mem.eql(u8, argv0, "ame-bt");
+    return std.mem.eql(u8, argv0, "nmcli") or std.mem.eql(u8, argv0, "bluetoothctl") or std.mem.eql(u8, argv0, "ame-bt") or std.mem.eql(u8, argv0, "ame-net");
 }
 
 // ---------------------------------------------------------------------------
@@ -177,7 +178,10 @@ fn exec(a: *Args, o: *Out) void {
         return;
     };
     defer bus.close();
-    if (a.is(0, "nmcli")) nmcli(&bus, a, o) else if (a.is(0, "bluetoothctl")) btctl(&bus, a, o) else if (a.is(0, "ame-bt")) ameBt(&bus, a, o);
+    if (a.is(0, "nmcli")) nmcli(&bus, a, o) else if (a.is(0, "bluetoothctl")) btctl(&bus, a, o) else if (a.is(0, "ame-bt")) ameBt(&bus, a, o) else if (a.is(0, "ame-net") and a.is(1, "ssid")) {
+        var b: [64]u8 = undefined;
+        if (ssidOn(&bus, &b)) |s| o.add(s);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -808,17 +812,21 @@ fn connectionDown(bus: *Bus, id: []const u8, o: *Out) void {
 
 /// バーに出す SSID(つながっている Wi-Fi のアクセスポイント)
 pub fn activeSsid(buf: []u8) ?[]const u8 {
-    // つながっているアクセスポイントだけを読む(見えている全部を読むと数十回の往復になり、バーの更新のたびに止まる)
     var bus = Bus.open() orelse return null;
     defer bus.close();
+    return ssidOn(&bus, buf);
+}
+
+fn ssidOn(bus: *Bus, buf: []u8) ?[]const u8 {
+    // つながっているアクセスポイントだけを読む(見えている全部を読むと数十回の往復になり、バーの更新のたびに止まる)
     var devs = Paths{};
-    wifiDevices(&bus, &devs);
+    wifiDevices(bus, &devs);
     for (0..devs.n) |d| {
         var abuf: [128:0]u8 = undefined;
         const active = bus.getStr(NM, devs.z(d), NM_WIFI, "ActiveAccessPoint", abuf[0..127]) orelse continue;
         if (active.len < 2) continue; // "/" = つながっていない
         abuf[active.len] = 0;
-        const ap = readAp(&bus, @ptrCast(&abuf)) orelse continue;
+        const ap = readAp(bus, @ptrCast(&abuf)) orelse continue;
         const s = ap.ssidStr();
         const n = @min(s.len, buf.len);
         @memcpy(buf[0..n], s[0..n]);

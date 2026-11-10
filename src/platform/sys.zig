@@ -258,14 +258,7 @@ pub fn network() Net {
         }
         if (is_wifi) break;
     }
-    // Wi-Fi なら SSID を表示したい。NetworkManager に D-Bus で聞く(動いていなければ IF 名のまま)。
-    if (n.kind == .wifi) {
-        var out: [64]u8 = undefined;
-        if (@import("netdbus.zig").activeSsid(&out)) |ssid| {
-            n.name_len = @min(ssid.len, n.name_buf.len);
-            @memcpy(n.name_buf[0..n.name_len], ssid[0..n.name_len]);
-        }
-    }
+    // SSID は App が裏で聞く(D-Bus の往復でメインループを止めない: app.zig の querySsid)
     return n;
 }
 

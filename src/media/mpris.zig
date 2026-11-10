@@ -53,6 +53,8 @@ const Player = struct {
     loop_mode: u8 = 0, // 0=なし 1=プレイリスト 2=1 曲
     changed_ms: u64 = 0,
     used: bool = false,
+    /// 枠を使い回したときに変わる番号(古い問い合わせの返事を別のプレイヤーに当てない)
+    gen: u32 = 0,
 
     /// playerctl の playerName と同じ短い名前(firefox.instance_… → firefox)
     fn shortName(self: *const Player) []const u8 {
@@ -62,6 +64,9 @@ const Player = struct {
         return rest[0 .. std.mem.indexOfScalar(u8, rest, '.') orelse rest.len];
     }
 };
+
+const ReqKind = enum { list, owner, props };
+const Req = struct { serial: u32 = 0, kind: ReqKind = .list, player: ?*Player = null, gen: u32 = 0 };
 
 pub const Mpris = struct {
     app: *App,
@@ -73,6 +78,10 @@ pub const Mpris = struct {
     /// 返事を待っている位置の問い合わせ(queryPosition)
     pos_serial: u32 = 0,
     pos_player: ?*Player = null,
+    /// 返事を待っている問い合わせ(ListNames / GetNameOwner / GetAll)
+    reqs: [24]Req = [_]Req{.{}} ** 24,
+    req_next: usize = 0,
+    gen: u32 = 0,
 
     pub fn create(app: *App, media: *Media) ?*Mpris {
         const self = app.alloc.create(Mpris) catch return null;
@@ -107,29 +116,64 @@ pub const Mpris = struct {
     // 一覧と状態の読み込み
     // ---------------------------------------------------------------------------
 
-    fn scan(self: *Mpris) void {
+    /// 問い合わせを送るだけ(返事は onDbus が reply_serial で拾う。メインループを待たせない)
+    fn ask(self: *Mpris, msg: *c.DBusMessage, kind: ReqKind, p: ?*Player) void {
         const conn = self.conn orelse return;
+        var serial: u32 = 0;
+        if (c.dbus_connection_send(conn, msg, &serial) == 0) return;
+        c.dbus_connection_flush(conn);
+        // 返事が来ないまま溜まったものは古い順に上書き
+        self.reqs[self.req_next] = .{ .serial = serial, .kind = kind, .player = p, .gen = if (p) |pp| pp.gen else 0 };
+        self.req_next = (self.req_next + 1) % self.reqs.len;
+    }
+
+    /// 返事なら処理して true。プレイヤーが入れ替わっていたら捨てる
+    fn takeReply(self: *Mpris, msg: *c.DBusMessage) bool {
+        const rs = c.dbus_message_get_reply_serial(msg);
+        if (rs == 0) return false;
+        const r = for (&self.reqs) |*q| {
+            if (q.serial == rs) break q;
+        } else return false;
+        const req = r.*;
+        r.* = .{};
+        if (c.dbus_message_get_type(msg) != c.DBUS_MESSAGE_TYPE_METHOD_RETURN) return true;
+        if (req.player) |p| if (!p.used or p.gen != req.gen) return true;
+        var it: c.DBusMessageIter = undefined;
+        switch (req.kind) {
+            .list => {
+                if (c.dbus_message_iter_init(msg, &it) == 0) return true;
+                var arr: c.DBusMessageIter = undefined;
+                c.dbus_message_iter_recurse(&it, &arr);
+                while (c.dbus_message_iter_get_arg_type(&arr) == c.DBUS_TYPE_STRING) : (_ = c.dbus_message_iter_next(&arr)) {
+                    var s: [*c]const u8 = null;
+                    c.dbus_message_iter_get_basic(&arr, @ptrCast(&s));
+                    const name = std.mem.sliceTo(s, 0);
+                    if (std.mem.startsWith(u8, name, PREFIX)) _ = self.addPlayer(name);
+                }
+            },
+            .owner => {
+                var s: [*c]const u8 = null;
+                if (c.dbus_message_get_args(msg, null, c.DBUS_TYPE_STRING, &s, c.DBUS_TYPE_INVALID) != 0 and s != null) req.player.?.owner.set(std.mem.sliceTo(s, 0));
+            },
+            .props => {
+                if (c.dbus_message_iter_init(msg, &it) == 0) return true;
+                applyProps(req.player.?, &it);
+            },
+        }
+        return true;
+    }
+
+    fn scan(self: *Mpris) void {
         const msg = c.dbus_message_new_method_call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames") orelse return;
         defer c.dbus_message_unref(msg);
-        const reply = c.dbus_connection_send_with_reply_and_block(conn, msg, 1000, null) orelse return;
-        defer c.dbus_message_unref(reply);
-        var it: c.DBusMessageIter = undefined;
-        if (c.dbus_message_iter_init(reply, &it) == 0) return;
-        var arr: c.DBusMessageIter = undefined;
-        c.dbus_message_iter_recurse(&it, &arr);
-        while (c.dbus_message_iter_get_arg_type(&arr) == c.DBUS_TYPE_STRING) : (_ = c.dbus_message_iter_next(&arr)) {
-            var s: [*c]const u8 = null;
-            c.dbus_message_iter_get_basic(&arr, @ptrCast(&s));
-            const name = std.mem.sliceTo(s, 0);
-            if (std.mem.startsWith(u8, name, PREFIX)) _ = self.addPlayer(name);
-        }
-        self.choose();
+        self.ask(msg, .list, null);
     }
 
     fn addPlayer(self: *Mpris, name: []const u8) ?usize {
         for (&self.players, 0..) |*p, i| if (p.used and std.mem.eql(u8, p.name.get(), name)) return i;
         for (&self.players, 0..) |*p, i| if (!p.used) {
-            p.* = .{ .used = true, .changed_ms = loop.nowMs() };
+            self.gen +%= 1;
+            p.* = .{ .used = true, .changed_ms = loop.nowMs(), .gen = self.gen };
             p.name.set(name);
             self.refreshOwner(p);
             self.getAll(p);
@@ -139,33 +183,24 @@ pub const Mpris = struct {
     }
 
     fn refreshOwner(self: *Mpris, p: *Player) void {
-        const conn = self.conn orelse return;
         const msg = c.dbus_message_new_method_call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetNameOwner") orelse return;
         defer c.dbus_message_unref(msg);
         var nz: [97]u8 = undefined;
         const name = std.fmt.bufPrintZ(&nz, "{s}", .{p.name.get()}) catch return;
         var np: [*c]const u8 = name.ptr;
         _ = c.dbus_message_append_args(msg, c.DBUS_TYPE_STRING, &np, c.DBUS_TYPE_INVALID);
-        const reply = c.dbus_connection_send_with_reply_and_block(conn, msg, 500, null) orelse return;
-        defer c.dbus_message_unref(reply);
-        var s: [*c]const u8 = null;
-        if (c.dbus_message_get_args(reply, null, c.DBUS_TYPE_STRING, &s, c.DBUS_TYPE_INVALID) != 0 and s != null) p.owner.set(std.mem.sliceTo(s, 0));
+        self.ask(msg, .owner, p);
     }
 
     /// プレイヤーの全プロパティを読む(GetAll)
     fn getAll(self: *Mpris, p: *Player) void {
-        const conn = self.conn orelse return;
         var nz: [97]u8 = undefined;
         const dest = std.fmt.bufPrintZ(&nz, "{s}", .{p.name.get()}) catch return;
         const msg = c.dbus_message_new_method_call(dest.ptr, PATH, "org.freedesktop.DBus.Properties", "GetAll") orelse return;
         defer c.dbus_message_unref(msg);
         var ip: [*c]const u8 = IFACE_PLAYER;
         _ = c.dbus_message_append_args(msg, c.DBUS_TYPE_STRING, &ip, c.DBUS_TYPE_INVALID);
-        const reply = c.dbus_connection_send_with_reply_and_block(conn, msg, 800, null) orelse return;
-        defer c.dbus_message_unref(reply);
-        var it: c.DBusMessageIter = undefined;
-        if (c.dbus_message_iter_init(reply, &it) == 0) return;
-        applyProps(p, &it);
+        self.ask(msg, .props, p);
     }
 
     /// a{sv} のプロパティを Player に反映する(GetAll の返事・PropertiesChanged の 2 番目の引数)
@@ -267,6 +302,10 @@ pub const Mpris = struct {
             const t = c.dbus_message_get_type(msg);
             if ((t == c.DBUS_MESSAGE_TYPE_METHOD_RETURN or t == c.DBUS_MESSAGE_TYPE_ERROR) and self.pos_serial != 0 and c.dbus_message_get_reply_serial(msg) == self.pos_serial) {
                 self.onPositionReply(msg);
+                continue;
+            }
+            if (self.takeReply(msg)) {
+                changed = true;
                 continue;
             }
             if (t != c.DBUS_MESSAGE_TYPE_SIGNAL) continue;

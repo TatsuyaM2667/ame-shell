@@ -19,6 +19,9 @@ const netpanel = @import("../frame/netpanel.zig");
 /// libdbus の DBusError と同じレイアウト(notify.zig と同じ理由)
 const DBusError = extern struct { name: ?[*:0]const u8 = null, message: ?[*:0]const u8 = null, dummy: c_uint = 0, padding1: ?*anyopaque = null };
 
+const Query = struct { fd: c_int = -1, len: usize = 0, buf: [512]u8 = undefined, sw: ?*SysWatch = null };
+const BtReq = struct { serial: u32 = 0, on: bool = false };
+
 pub const SysWatch = struct {
     app: *App,
     uevent_fd: c_int = -1,
@@ -45,6 +48,13 @@ pub const SysWatch = struct {
     pend: [6]Pending = [_]Pending{.{}} ** 6,
     n_pend: usize = 0,
     pend_timer: loop.Timer,
+    /// Wi-Fi のラジオ・Bluetooth の電源(裏で聞いた最後の答え)と、聞いている最中の読み口(0 = Wi-Fi, 1 = Bluetooth)
+    wifi_on: ?bool = null,
+    bt_on: bool = false,
+    radio_q: [2]Query = .{ .{}, .{} },
+    /// 機器がつながった・切れた: 名前などを聞いている GetAll の返事待ち
+    bt_req: [4]BtReq = [_]BtReq{.{}} ** 4,
+    bt_req_next: usize = 0,
     /// FreeBSD: 直前にディスク(USB メモリ・SD カード)が現れた時刻。USB の「接続しました」を重ねて出さないため
     bsd_disk_ms: u64 = 0,
     /// 接続中の USB 機器の名前(抜いたときに名前を出すため。キーは sysfs の DEVPATH / FreeBSD の ugenX.Y)
@@ -145,6 +155,16 @@ pub const SysWatch = struct {
         _ = c.dbus_connection_read_write(conn, 0);
         while (c.dbus_connection_pop_message(conn)) |msg| {
             defer c.dbus_message_unref(msg);
+            if (c.dbus_message_get_type(msg) == c.DBUS_MESSAGE_TYPE_METHOD_RETURN) {
+                const rs = c.dbus_message_get_reply_serial(msg);
+                for (&self.bt_req) |*r| if (r.serial != 0 and r.serial == rs) {
+                    const on = r.on;
+                    r.* = .{};
+                    self.onBtProps(msg, on);
+                    break;
+                };
+                continue;
+            }
             if (c.dbus_message_get_type(msg) != c.DBUS_MESSAGE_TYPE_SIGNAL) continue;
             if (c.dbus_message_is_signal(msg, "org.freedesktop.login1.Manager", "PrepareForSleep") != 0 or
                 c.dbus_message_is_signal(msg, "org.freedesktop.ConsoleKit.Manager", "PrepareForSleep") != 0)
@@ -199,55 +219,70 @@ pub const SysWatch = struct {
             connected = b != 0;
         }
         const on = connected orelse return;
+        // 名前・種類は GetAll で聞く(返事は onDbus が拾って onBtProps へ。メインループを待たせない)
+        const conn = self.conn orelse return;
+        var pz: [160]u8 = undefined;
+        const p = std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return;
+        const m = c.dbus_message_new_method_call("org.bluez", p.ptr, "org.freedesktop.DBus.Properties", "GetAll") orelse return;
+        defer c.dbus_message_unref(m);
+        var i: [*c]const u8 = "org.bluez.Device1";
+        _ = c.dbus_message_append_args(m, c.DBUS_TYPE_STRING, &i, c.DBUS_TYPE_INVALID);
+        var serial: u32 = 0;
+        if (c.dbus_connection_send(conn, m, &serial) == 0) return;
+        c.dbus_connection_flush(conn);
+        self.bt_req[self.bt_req_next] = .{ .serial = serial, .on = on };
+        self.bt_req_next = (self.bt_req_next + 1) % self.bt_req.len;
+    }
+
+    /// つながった・切れた機器のプロパティ(GetAll の返事)から、AirPods ならカード、ほかは通知
+    fn onBtProps(self: *SysWatch, msg: *c.DBusMessage, on: bool) void {
         var nb: [96]u8 = undefined;
+        var mb: [64]u8 = undefined;
         var ib: [48]u8 = undefined;
-        const name = self.bluezProp(path, "Alias", &nb) orelse "Bluetooth の機器";
-        // AirPods(Apple の機器 ID v004C のヘッドホン)をつないだ: iPhone のようなカードで知らせる
-        if (on and self.app.cfg.airpods_popup) {
-            var mb: [64]u8 = undefined;
-            var ab: [24]u8 = undefined;
-            var ib2: [48]u8 = undefined;
-            const modalias = self.bluezProp(path, "Modalias", &mb) orelse "";
-            const icon2 = self.bluezProp(path, "Icon", &ib2) orelse "";
-            if (std.mem.indexOf(u8, modalias, "v004C") != null and std.mem.startsWith(u8, icon2, "audio")) {
-                if (self.bluezProp(path, "Address", &ab)) |addr| if (self.app.airpods_popup) |pp| {
-                    pp.show(addr, name);
-                    return;
-                };
+        var ab: [24]u8 = undefined;
+        var name: []const u8 = "Bluetooth の機器";
+        var modalias: []const u8 = "";
+        var icon: []const u8 = "";
+        var addr: ?[]const u8 = null;
+        var it: c.DBusMessageIter = undefined;
+        if (c.dbus_message_iter_init(msg, &it) != 0 and c.dbus_message_iter_get_arg_type(&it) == c.DBUS_TYPE_ARRAY) {
+            var a: c.DBusMessageIter = undefined;
+            c.dbus_message_iter_recurse(&it, &a);
+            while (c.dbus_message_iter_get_arg_type(&a) == c.DBUS_TYPE_DICT_ENTRY) : (_ = c.dbus_message_iter_next(&a)) {
+                var e: c.DBusMessageIter = undefined;
+                c.dbus_message_iter_recurse(&a, &e);
+                var k: [*c]const u8 = null;
+                c.dbus_message_iter_get_basic(&e, @ptrCast(&k));
+                if (k == null) continue;
+                _ = c.dbus_message_iter_next(&e);
+                var v: c.DBusMessageIter = undefined;
+                c.dbus_message_iter_recurse(&e, &v);
+                if (c.dbus_message_iter_get_arg_type(&v) != c.DBUS_TYPE_STRING) continue;
+                var s: [*c]const u8 = null;
+                c.dbus_message_iter_get_basic(&v, @ptrCast(&s));
+                if (s == null) continue;
+                const key = std.mem.sliceTo(k, 0);
+                const str = std.mem.sliceTo(s, 0);
+                if (std.mem.eql(u8, key, "Alias")) name = keep(&nb, str) else if (std.mem.eql(u8, key, "Modalias")) modalias = keep(&mb, str) else if (std.mem.eql(u8, key, "Icon")) icon = keep(&ib, str) else if (std.mem.eql(u8, key, "Address")) addr = keep(&ab, str);
             }
         }
+        // AirPods(Apple の機器 ID v004C のヘッドホン)をつないだ: iPhone のようなカードで知らせる
+        if (on and self.app.cfg.airpods_popup and std.mem.indexOf(u8, modalias, "v004C") != null and std.mem.startsWith(u8, icon, "audio")) {
+            if (addr) |ad| if (self.app.airpods_popup) |pp| {
+                pp.show(ad, name);
+                return;
+            };
+        }
         if (!self.app.cfg.notify_usb) return;
-        const icon = self.bluezProp(path, "Icon", &ib) orelse "";
         const kind: []const u8 = if (std.mem.startsWith(u8, icon, "audio-head")) "ヘッドホン" else if (std.mem.startsWith(u8, icon, "audio")) "オーディオ機器" else if (std.mem.eql(u8, icon, "input-mouse")) "マウス" else if (std.mem.eql(u8, icon, "input-keyboard")) "キーボード" else if (std.mem.startsWith(u8, icon, "input-gaming")) "ゲームパッド" else if (std.mem.startsWith(u8, icon, "phone")) "スマートフォン" else "Bluetooth の機器";
         var sb: [96]u8 = undefined;
         const summary = std.fmt.bufPrint(&sb, "{s}を{s}", .{ kind, if (on) "接続しました" else "切断しました" }) catch "Bluetooth";
         self.app.notifs.post("Bluetooth", summary, name, 0);
     }
 
-    /// BlueZ の機器の文字列のプロパティ(同期。すぐ返る)
-    fn bluezProp(self: *SysWatch, path: []const u8, prop: [*:0]const u8, buf: []u8) ?[]const u8 {
-        const conn = self.conn orelse return null;
-        var pz: [160]u8 = undefined;
-        const p = std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return null;
-        const m = c.dbus_message_new_method_call("org.bluez", p.ptr, "org.freedesktop.DBus.Properties", "Get") orelse return null;
-        var i: [*c]const u8 = "org.bluez.Device1";
-        var pr: [*c]const u8 = prop;
-        _ = c.dbus_message_append_args(m, c.DBUS_TYPE_STRING, &i, c.DBUS_TYPE_STRING, &pr, c.DBUS_TYPE_INVALID);
-        const r = c.dbus_connection_send_with_reply_and_block(conn, m, 500, null);
-        c.dbus_message_unref(m);
-        const reply = r orelse return null;
-        defer c.dbus_message_unref(reply);
-        var it: c.DBusMessageIter = undefined;
-        if (c.dbus_message_iter_init(reply, &it) == 0 or c.dbus_message_iter_get_arg_type(&it) != c.DBUS_TYPE_VARIANT) return null;
-        var v: c.DBusMessageIter = undefined;
-        c.dbus_message_iter_recurse(&it, &v);
-        if (c.dbus_message_iter_get_arg_type(&v) != c.DBUS_TYPE_STRING) return null;
-        var s: [*c]const u8 = null;
-        c.dbus_message_iter_get_basic(&v, @ptrCast(&s));
-        if (s == null) return null;
-        const str = std.mem.sliceTo(s, 0);
-        const n = @min(str.len, buf.len);
-        @memcpy(buf[0..n], str[0..n]);
+    fn keep(buf: []u8, s: []const u8) []const u8 {
+        const n = @min(s.len, buf.len);
+        @memcpy(buf[0..n], s[0..n]);
         return buf[0..n];
     }
 
@@ -267,16 +302,8 @@ pub const SysWatch = struct {
         self.debounce.ack();
         const app = self.app;
         if (self.dirty_power or self.dirty_net) app.refreshSys(false);
-        if (self.dirty_net) {
-            if (self.wifiEnabled()) |on| app.dashboard.store.wifi_on = @intFromBool(on);
-        }
-        if (self.dirty_bt) {
-            const on = self.btPowered();
-            app.dashboard.store.bt_on = @intFromBool(on);
-            for (app.outputs.items) |o| if (o.frame) |f| {
-                f.bar.bt_on = on;
-            };
-        }
+        // Wi-Fi のラジオ・Bluetooth の電源は裏で聞き直す(返事が来たら applyRadios)
+        if (self.dirty_net or self.dirty_bt) self.refreshRadios();
         // 開いているネットワークのパネルの一覧も新しく(キャッシュを読むだけなのですぐ終わる)
         for (app.outputs.items) |o| if (o.frame) |f| {
             if (!f.net.open) continue;
@@ -305,29 +332,80 @@ pub const SysWatch = struct {
         return c.dbus_bus_name_has_owner(conn, "org.freedesktop.NetworkManager", null) != 0;
     }
 
-    /// アダプタの電源が入っているか(FreeBSD: ng_ubt が付いたアダプタがあるか)
+    /// アダプタの電源が入っているか(裏で聞いた最後の答え。refreshRadios で更新)
     pub fn btPowered(self: *SysWatch) bool {
-        if (builtin.os.tag == .freebsd) {
-            var b: [256]u8 = undefined;
-            return sys.run(&.{ "sysctl", "-n", "dev.ubt.0.%desc" }, &b) != null;
-        }
-        if (!self.bluezRunning()) return false;
-        var out: [512]u8 = undefined;
-        const s = netdbus.run(&.{ "bluetoothctl", "show" }, &out) orelse return false;
-        return std.mem.indexOf(u8, s, "Powered: yes") != null;
+        return self.bt_on;
     }
 
-    /// Wi-Fi が使える状態か(Linux: NetworkManager のラジオ / FreeBSD: wpa_supplicant が切断状態でない)
-    pub fn wifiEnabled(_: *SysWatch) ?bool {
-        var out: [1024]u8 = undefined;
+    /// Wi-Fi が使える状態か(裏で聞いた最後の答え。null = まだ分からない)
+    pub fn wifiEnabled(self: *SysWatch) ?bool {
+        return self.wifi_on;
+    }
+
+    /// Wi-Fi のラジオと Bluetooth の電源を聞き直す。Linux は NetworkManager / BlueZ に netdbus のワーカーで
+    /// (返事が来たら applyRadios)。FreeBSD は wpa_cli / sysctl をその場で
+    pub fn refreshRadios(self: *SysWatch) void {
         if (builtin.os.tag == .freebsd) {
-            const s = sys.run(&.{ "wpa_cli", "status" }, &out) orelse return null;
-            const i = std.mem.indexOf(u8, s, "wpa_state=") orelse return null;
-            const st = s[i + 10 ..];
-            return !(std.mem.startsWith(u8, st, "DISCONNECTED") or std.mem.startsWith(u8, st, "INTERFACE_DISABLED"));
+            self.wifi_on = wifiNowBsd();
+            var b: [256]u8 = undefined;
+            self.bt_on = sys.run(&.{ "sysctl", "-n", "dev.ubt.0.%desc" }, &b) != null;
+            return self.applyRadios();
         }
-        const s = netdbus.run(&.{ "nmcli", "radio", "wifi" }, &out) orelse return null;
-        return std.mem.startsWith(u8, s, "enabled");
+        for (&self.radio_q, 0..) |*q, i| {
+            if (q.fd >= 0) continue;
+            // BlueZ が動いていないときに聞くと、デーモンを待って返ってこない
+            if (i == 1 and !self.bluezRunning()) {
+                self.bt_on = false;
+                self.applyRadios();
+                continue;
+            }
+            const argv: []const []const u8 = if (i == 0) &.{ "nmcli", "radio", "wifi" } else &.{ "bluetoothctl", "show" };
+            const fd = netdbus.spawn(argv) orelse continue;
+            q.* = .{ .fd = fd, .sw = self };
+            self.app.loop.add(fd, c.EPOLLIN | c.EPOLLHUP, q, onRadio) catch {
+                _ = c.close(fd);
+                q.fd = -1;
+            };
+        }
+    }
+
+    fn onRadio(ctx: *anyopaque, fd: c_int, _: u32) void {
+        const q: *Query = @ptrCast(@alignCast(ctx));
+        const n = c.read(fd, q.buf[q.len..].ptr, q.buf.len - q.len);
+        if (n > 0) {
+            q.len += @intCast(n);
+            if (q.len < q.buf.len) return;
+        } else if (n < 0 and std.posix.errno(n) == .AGAIN) return;
+        const self = q.sw.?;
+        self.app.loop.remove(fd);
+        _ = c.close(fd);
+        q.fd = -1;
+        const s = q.buf[0..q.len];
+        if (q == &self.radio_q[0]) {
+            self.wifi_on = if (s.len == 0) null else std.mem.startsWith(u8, s, "enabled");
+        } else self.bt_on = std.mem.indexOf(u8, s, "Powered: yes") != null;
+        self.applyRadios();
+    }
+
+    /// 覚えている状態をバー・ダッシュボード・開いているパネルへ
+    fn applyRadios(self: *SysWatch) void {
+        const app = self.app;
+        if (self.wifi_on) |on| app.dashboard.store.wifi_on = @intFromBool(on);
+        app.dashboard.store.bt_on = @intFromBool(self.bt_on);
+        for (app.outputs.items) |o| if (o.frame) |f| {
+            f.bar.bt_on = self.bt_on;
+        };
+        app.redrawBars();
+        if (app.dashboard.surf) |s| s.schedule();
+    }
+
+    /// FreeBSD: wpa_supplicant が切断状態でないか
+    fn wifiNowBsd() ?bool {
+        var out: [1024]u8 = undefined;
+        const s = sys.run(&.{ "wpa_cli", "status" }, &out) orelse return null;
+        const i = std.mem.indexOf(u8, s, "wpa_state=") orelse return null;
+        const st = s[i + 10 ..];
+        return !(std.mem.startsWith(u8, st, "DISCONNECTED") or std.mem.startsWith(u8, st, "INTERFACE_DISABLED"));
     }
 
     // ---------------- バッテリーの通知 ----------------

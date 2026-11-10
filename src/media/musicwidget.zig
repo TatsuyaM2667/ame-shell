@@ -60,6 +60,8 @@ pub const MusicWidget = struct {
     /// 最後にコンポジタへ伝えたずれ(ポインタの座標はこの位置のサーフェスが基準)
     applied_x: f32 = 0,
     applied_y: f32 = 0,
+    /// 最後に送った余白(同じ値を毎フレーム送らない。サーフェスを作り直したら null)
+    sent_margin: ?[4]i32 = null,
     /// サーフェスの大きさ(論理 px)
     w: f32 = 0,
     h: f32 = 0,
@@ -132,6 +134,7 @@ pub const MusicWidget = struct {
         self.spectrum.stop();
         if (self.surf) |s| s.destroy();
         self.surf = null;
+        self.sent_margin = null;
         self.out = null;
         self.pressed = false;
         self.moving = false;
@@ -246,7 +249,11 @@ pub const MusicWidget = struct {
         const bottom: i32 = if (self.corner.top()) 0 else -oy;
         const left: i32 = if (self.corner.left()) ox else 0;
         const right: i32 = if (self.corner.left()) 0 else -ox;
-        c.zwlr_layer_surface_v1_set_margin(ls, top, right, bottom, left);
+        const m = [4]i32{ top, right, bottom, left };
+        if (self.sent_margin == null or !std.mem.eql(i32, &self.sent_margin.?, &m)) {
+            c.zwlr_layer_surface_v1_set_margin(ls, top, right, bottom, left);
+            self.sent_margin = m;
+        }
         self.applied_x = @floatFromInt(ox);
         self.applied_y = @floatFromInt(oy);
         const sz = self.areaSize();

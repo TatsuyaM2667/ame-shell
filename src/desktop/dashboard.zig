@@ -185,8 +185,9 @@ pub const Dashboard = struct {
         if (self.surf) |s| s.schedule();
     }
 
-    /// Wi-Fi / Bluetooth の状態(開いたときと切り替え後だけ問い合わせる)
+    /// Wi-Fi / Bluetooth の状態(開いたときと切り替え後だけ問い合わせる)。今は覚えている値を出し、裏で聞き直す
     fn queryRadios(self: *Dashboard) void {
+        self.app.syswatch.refreshRadios();
         if (self.app.syswatch.wifiEnabled()) |on| self.store.wifi_on = @intFromBool(on);
         self.store.bt_on = @intFromBool(self.app.syswatch.btPowered());
     }
