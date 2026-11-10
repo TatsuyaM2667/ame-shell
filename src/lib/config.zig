@@ -108,6 +108,8 @@ pub const Config = struct {
     charge_anim: bool = true,
     /// ダイナミックアイランド(枠の上の中央。frame/island.zig)
     island: bool = true,
+    /// メモリが尽きそうなら知らせ、固まる直前にはカーネルが選ぶのと同じプロセスを止める(syswatch.zig)
+    memory_guard: bool = true,
     /// AirPods の頭の動きで操作する(airpods.zig)
     airpods_enabled: bool = false,
     airpods_yaw: f32 = 25,
@@ -383,6 +385,8 @@ fn apply(cfg: *Config, sec: []const u8, key: []const u8, val: []const u8, diag: 
             cfg.charge_anim = boolean(val) orelse true;
         } else if (eq(u8, key, "island")) {
             cfg.island = boolean(val) orelse true;
+        } else if (eq(u8, key, "memory-guard")) {
+            cfg.memory_guard = boolean(val) orelse true;
         } else ok = false;
     } else if (eq(u8, sec, "hand")) {
         if (eq(u8, key, "enabled")) {

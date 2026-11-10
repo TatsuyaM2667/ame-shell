@@ -15,6 +15,7 @@ const loop = @import("../platform/loop.zig");
 const sys = @import("../platform/sys.zig");
 const netdbus = @import("../platform/netdbus.zig");
 const netpanel = @import("../frame/netpanel.zig");
+const memguard = @import("memguard.zig");
 
 /// libdbus の DBusError と同じレイアウト(notify.zig と同じ理由)
 const DBusError = extern struct { name: ?[*:0]const u8 = null, message: ?[*:0]const u8 = null, dummy: c_uint = 0, padding1: ?*anyopaque = null };
@@ -55,6 +56,8 @@ pub const SysWatch = struct {
     /// 機器がつながった・切れた: 名前などを聞いている GetAll の返事待ち
     bt_req: [4]BtReq = [_]BtReq{.{}} ** 4,
     bt_req_next: usize = 0,
+    /// メモリが尽きそうなときの見張り(memguard.zig)
+    guard: memguard.Guard = undefined,
     /// FreeBSD: 直前にディスク(USB メモリ・SD カード)が現れた時刻。USB の「接続しました」を重ねて出さないため
     bsd_disk_ms: u64 = 0,
     /// 接続中の USB 機器の名前(抜いたときに名前を出すため。キーは sysfs の DEVPATH / FreeBSD の ugenX.Y)
@@ -72,6 +75,8 @@ pub const SysWatch = struct {
         }
         if (builtin.os.tag == .freebsd) self.openDevd();
         self.openSystemBus();
+        self.guard = .{ .app = app };
+        self.guard.start();
         // 起動直後の状態(バーの Bluetooth のアイコンなど)。描画が落ち着いてから 1 回だけ
         self.dirty_net = true;
         self.dirty_bt = true;
