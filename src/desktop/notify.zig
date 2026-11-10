@@ -69,6 +69,7 @@ fn copyTo(dst: []u8, len: *usize, src: []const u8) void {
     // マークアップ(<b> 等)は表示できないのでタグを取り除く
     var o: usize = 0;
     var in_tag = false;
+    var cut = false;
     for (src) |ch| {
         if (ch == '<') {
             in_tag = true;
@@ -79,14 +80,30 @@ fn copyTo(dst: []u8, len: *usize, src: []const u8) void {
             continue;
         }
         if (in_tag) continue;
-        if (o >= dst.len) break;
+        if (o >= dst.len) {
+            cut = true;
+            break;
+        }
         dst[o] = if (ch == '\n' or ch == '\t') ' ' else ch;
         o += 1;
     }
-    // UTF-8 の途中で切れていたら直前の文字境界まで戻す
-    while (o > 0 and o < src.len and (dst[o - 1] & 0xC0) == 0x80) o -= 1;
-    if (o > 0 and dst[o - 1] >= 0xC0) o -= 1;
+    // 切り詰めたときだけ、UTF-8 の途中で切れていたら直前の文字境界まで戻す
+    // (タグを除くと src より必ず短くなるので、src.len との比較では切り詰めを判定できない)
+    if (cut) {
+        while (o > 0 and (dst[o - 1] & 0xC0) == 0x80) o -= 1;
+        if (o > 0 and dst[o - 1] >= 0xC0) o -= 1;
+    }
     len.* = o;
+}
+
+test "copyTo: タグを除いても末尾の文字を消さず、切り詰めは文字境界で" {
+    var buf: [16]u8 = undefined;
+    var n: usize = 0;
+    copyTo(&buf, &n, "<b>通知</b>");
+    try std.testing.expectEqualStrings("通知", buf[0..n]);
+    var small: [4]u8 = undefined;
+    copyTo(&small, &n, "通知");
+    try std.testing.expectEqualStrings("通", small[0..n]);
 }
 
 /// 通知の画像の大きさ(表示は最大 44px なので、高解像度の画面でも足りる)

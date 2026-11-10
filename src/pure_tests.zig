@@ -3,6 +3,7 @@ const std = @import("std");
 const anim = @import("gfx/anim.zig");
 test {
     _ = @import("desktop/portal.zig");
+    _ = @import("desktop/notify.zig");
     _ = @import("lock/greeter.zig");
     _ = @import("gfx/png.zig");
     _ = @import("gfx/icons.zig");
