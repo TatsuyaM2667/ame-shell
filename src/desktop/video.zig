@@ -72,6 +72,7 @@ const Api = struct {
     rc_update: *const fn (*MpvRenderCtx) callconv(.C) u64,
     rc_render: *const fn (*MpvRenderCtx, [*]RenderParam) callconv(.C) c_int,
     rc_free: *const fn (*MpvRenderCtx) callconv(.C) void,
+    rc_report_swap: *const fn (*MpvRenderCtx) callconv(.C) void,
 };
 
 var api: ?Api = null;
@@ -104,6 +105,7 @@ fn loadApi() ?Api {
         .{ "rc_update", "mpv_render_context_update" },
         .{ "rc_render", "mpv_render_context_render" },
         .{ "rc_free", "mpv_render_context_free" },
+        .{ "rc_report_swap", "mpv_render_context_report_swap" },
     }) |p| {
         const sym = std.c.dlsym(h, p[1]) orelse {
             log.warn("libmpv に {s} がありません", .{p[1]});
@@ -128,8 +130,54 @@ pub fn isVideoPath(path: []const u8) bool {
 }
 
 fn getProc(_: ?*anyopaque, name: [*:0]const u8) callconv(.C) ?*anyopaque {
+    const n = std.mem.span(name);
+    // 同期オブジェクトは包んだものを渡す(sync の説明を参照)
+    if (std.mem.eql(u8, n, "glFenceSync")) return @constCast(@ptrCast(&sync.fence));
+    if (std.mem.eql(u8, n, "glDeleteSync")) return @constCast(@ptrCast(&sync.delete));
+    if (std.mem.eql(u8, n, "glClientWaitSync")) return @constCast(@ptrCast(&sync.clientWait));
     return @ptrCast(@constCast(c.eglGetProcAddress(name)));
 }
+
+/// libmpv(0.41)の描画 API は 1 コマごとに glFenceSync で同期オブジェクトを作り、消さない
+/// (30fps で 1 分に約 1,800 個。ドライバの中のメモリが増え続け、何時間かで数百 MB になった)。
+/// mpv に渡す関数を包み、手元には最近の 8 個だけを残して古いものは消す。消したものを mpv が待つ・消すときは
+/// 「もう終わっている」として扱う(GL のエラーを残さない)。どれもメインスレッド(壁紙の描画)からだけ呼ばれる
+const sync = struct {
+    const GLsync = ?*anyopaque;
+    const ALREADY_SIGNALED: c_uint = 0x911A;
+    const FenceFn = *const fn (c_uint, c_uint) callconv(.C) GLsync;
+    const DeleteFn = *const fn (GLsync) callconv(.C) void;
+    const WaitFn = *const fn (GLsync, c_uint, u64) callconv(.C) c_uint;
+    var ring = [_]GLsync{null} ** 8;
+    var next: usize = 0;
+
+    fn real(comptime T: type, comptime name: [:0]const u8) ?T {
+        return @ptrCast(c.eglGetProcAddress(name));
+    }
+    fn find(s: GLsync) ?usize {
+        if (s == null) return null;
+        for (ring, 0..) |r, i| if (r == s) return i;
+        return null;
+    }
+    fn fence(cond: c_uint, flags: c_uint) callconv(.C) GLsync {
+        const f = real(FenceFn, "glFenceSync") orelse return null;
+        const s = f(cond, flags) orelse return null;
+        if (ring[next] != null) if (real(DeleteFn, "glDeleteSync")) |d| d(ring[next]);
+        ring[next] = s;
+        next = (next + 1) % ring.len;
+        return s;
+    }
+    fn delete(s: GLsync) callconv(.C) void {
+        const i = find(s) orelse return; // こちらで消し済み
+        if (real(DeleteFn, "glDeleteSync")) |d| d(s);
+        ring[i] = null;
+    }
+    fn clientWait(s: GLsync, flags: c_uint, timeout: u64) callconv(.C) c_uint {
+        if (find(s) == null) return ALREADY_SIGNALED;
+        const w = real(WaitFn, "glClientWaitSync") orelse return ALREADY_SIGNALED;
+        return w(s, flags, timeout);
+    }
+};
 
 /// 1 本の動画を繰り返し再生し、コマを GL テクスチャへ描く。
 /// 通常は libmpv(ハードウェア復号・GPU で描画)。libmpv が無い・再生できないときは ffmpeg のプロセスで
@@ -354,6 +402,8 @@ pub const Player = struct {
             .{ .type = 0, .data = null },
         };
         _ = a.rc_render(self.rc, &params);
+        // 描き終えたことを知らせる(知らせないと mpv がコマごとの同期オブジェクトを溜め続け、メモリが増え続けた)
+        a.rc_report_swap(self.rc);
         // mpv が変えた GL の状態を、ame-shell の描画が前提とする状態へ戻す
         c.glBindFramebuffer(c.GL_FRAMEBUFFER, 0);
         c.glDisable(c.GL_SCISSOR_TEST);
