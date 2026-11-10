@@ -87,16 +87,30 @@ fn tiLeave(_: ?*anyopaque, t: ?*c.struct_zwp_text_input_v3, _: ?*c.struct_wl_sur
     aipanel.setPreedit("");
 }
 
+/// max バイトに収まる s の先頭の長さ(UTF-8 の文字の途中で切らない)
+fn fit(s: []const u8, max: usize) usize {
+    if (s.len <= max) return s.len;
+    var n = max;
+    while (n > 0 and s[n] & 0xC0 == 0x80) n -= 1;
+    return n;
+}
+
+test "fit は文字の途中で切らない" {
+    try std.testing.expectEqual(@as(usize, 3), fit("あい", 5));
+    try std.testing.expectEqual(@as(usize, 6), fit("あい", 6));
+    try std.testing.expectEqual(@as(usize, 2), fit("ab", 8));
+}
+
 fn tiPreedit(_: ?*anyopaque, _: ?*c.struct_zwp_text_input_v3, text: [*c]const u8, _: i32, _: i32) callconv(.C) void {
     const s: []const u8 = if (text != null) std.mem.span(text) else "";
-    const n = @min(s.len, st.pre.len);
+    const n = fit(s, st.pre.len);
     @memcpy(st.pre[0..n], s[0..n]);
     st.pre_len = n;
 }
 
 fn tiCommit(_: ?*anyopaque, _: ?*c.struct_zwp_text_input_v3, text: [*c]const u8) callconv(.C) void {
     const s: []const u8 = if (text != null) std.mem.span(text) else "";
-    const n = @min(s.len, st.commit.len - st.commit_len);
+    const n = fit(s, st.commit.len - st.commit_len);
     @memcpy(st.commit[st.commit_len .. st.commit_len + n], s[0..n]);
     st.commit_len += n;
 }

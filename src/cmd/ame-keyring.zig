@@ -171,8 +171,9 @@ fn readSecret(it: *Iter) ?Secret {
 }
 
 fn appendStr(it: *Iter, s: []const u8) void {
-    var buf: [1024]u8 = undefined;
-    const z = std.fmt.bufPrintZ(&buf, "{s}", .{s}) catch "";
+    // 長さに上限を置かない(固定の箱だと 1024 バイトを超える属性やラベルが空になり、読み書きで食い違う)
+    const z = std.heap.c_allocator.dupeZ(u8, s) catch return;
+    defer std.heap.c_allocator.free(z);
     var p: [*c]const u8 = z.ptr;
     _ = c.dbus_message_iter_append_basic(it, c.DBUS_TYPE_STRING, @ptrCast(&p));
 }

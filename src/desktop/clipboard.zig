@@ -184,6 +184,8 @@ fn onRead(_: *anyopaque, fd: c_int, _: u32) void {
     _ = c.close(fd);
     st.fd = -1;
     if (st.cb) |cb| cb(st.buf.items);
+    // 画像(最大 32MB)を貼ったあとの大きな入れ物は持ち続けない(文字の貼り付けの分だけ残す)
+    if (st.buf.capacity > 64 << 10) st.buf.clearAndFree();
 }
 
 fn offerMime(data: ?*anyopaque, _: ?*c.struct_ext_data_control_offer_v1, mime: [*c]const u8) callconv(.C) void {

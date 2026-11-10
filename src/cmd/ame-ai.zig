@@ -84,6 +84,8 @@ const LineReader = struct {
                 }
                 return null;
             }
+            // 改行の来ないまま 8MB を超える応答は壊れているとみなす(メモリを食い尽くさない)
+            if (self.buf.items.len + got > 8 << 20) return null;
             self.buf.appendSlice(tmp[0..got]) catch return null;
         }
     }

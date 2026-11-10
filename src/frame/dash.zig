@@ -199,7 +199,8 @@ fn drawDash(f: *Frame, cv: *gfx.Canvas, dt: f32, w: f32) bool {
         } else {
             cv.rectGrad(ux + 16, y0 + 18, 64, 64, 32, acc.lighten(0.35), acc);
             var ini: [4]u8 = undefined;
-            const n = std.unicode.utf8ByteSequenceLength(user[0]) catch 1;
+            // USER が空・壊れた UTF-8 でも user の外を読まない
+            const n = if (user.len == 0) 0 else @min(std.unicode.utf8ByteSequenceLength(user[0]) catch 1, user.len);
             @memcpy(ini[0..n], user[0..n]);
             if (ini[0] >= 'a' and ini[0] <= 'z') ini[0] -= 32;
             _ = cv.text(ux + 48, y0 + 61, 28, Color.hex(0x08101e), ini[0..n], .{ .bold = true, .alignment = .center });

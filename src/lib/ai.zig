@@ -75,6 +75,14 @@ pub fn readSmall(path: []const u8, buf: []u8) ?[]const u8 {
     const f = std.fs.cwd().openFile(path, .{}) catch return null;
     defer f.close();
     const n = f.readAll(buf) catch return null;
+    // 入れ物より大きいファイルは、途中で切った中身を使わない(後ろの行が黙って消えるので)
+    if (n == buf.len) {
+        var one: [1]u8 = undefined;
+        if ((f.read(&one) catch 0) > 0) {
+            std.log.warn("{s} が大きすぎます({d} バイトまで)", .{ path, buf.len });
+            return null;
+        }
+    }
     return buf[0..n];
 }
 
