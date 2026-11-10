@@ -145,7 +145,7 @@ pub const MusicWidget = struct {
     pub fn outputRemoved(self: *MusicWidget, o: *Output) void {
         if (self.out == o) {
             self.close();
-            self.update(); // 残っている出力に出し直す
+            // 出し直しは app が出力の一覧を更新してから(ここで開くと、消える出力をまた選びうる)
         }
     }
 

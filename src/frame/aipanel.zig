@@ -84,6 +84,11 @@ const State = struct {
 
 var st: State = .{};
 
+/// 枠が壊されるとき(出力の抜去・設定の読み直し)。返答の到着などで解放済みの枠を描き直さない
+pub fn frameDestroyed(f: *Frame) void {
+    if (st.frame == f) st.frame = null;
+}
+
 pub fn onOpen(f: *Frame) void {
     ai.ensure(f.app);
     agent.ensure(f.app);

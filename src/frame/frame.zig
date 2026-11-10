@@ -184,6 +184,9 @@ pub const Frame = struct {
 
     pub fn destroy(self: *Frame) void {
         self.spectrum.stop();
+        self.weather.cancel();
+        netpanel.cancel(&self.netv, &self.app.loop);
+        aipanel.frameDestroyed(self);
         self.app.loop.remove(self.osd_timer.fd);
         self.app.loop.remove(self.tick_timer.fd);
         _ = c.close(self.osd_timer.fd);

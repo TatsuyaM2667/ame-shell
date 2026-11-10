@@ -441,6 +441,7 @@ pub const App = struct {
         if (self.cfg.layout == .caelestia) {
             if (o.bar) |b| b.destroy();
             if (o.frame) |f| f.destroy();
+            o.frame = null; // 壊したまま残すと次の行で作り直されず、解放済みの枠を使い続ける
             o.bar = null;
             if (o.frame == null) o.frame = Frame.create(self, o) catch |e| blk: {
                 log.err("枠を作れません: {s}", .{@errorName(e)});
@@ -895,6 +896,8 @@ fn onGlobalRemove(data: ?*anyopaque, _: ?*c.struct_wl_registry, name: u32) callc
         // 出力が抜かれた: その出力のサーフェスを片付ける
         if (o.bar) |b| b.destroy();
         if (o.wall) |w| w.destroy();
+        if (o.frame) |f| f.destroy();
+        o.frame = null;
         if (o.river) |r| c.zriver_output_status_v1_destroy(r);
         if (app.focused_output == o) app.focused_output = null;
         if (app.toplevels) |t| for (t.items.items) |x| {
@@ -920,6 +923,7 @@ fn onGlobalRemove(data: ?*anyopaque, _: ?*c.struct_wl_registry, name: u32) callc
         _ = app.outputs.orderedRemove(i);
         app.alloc.destroy(o);
         if (app.focused_output == null and app.outputs.items.len > 0) app.focused_output = app.outputs.items[0];
+        if (app.musicw) |m| m.update(); // 残っている出力に出し直す
         return;
     }
 }

@@ -157,6 +157,16 @@ pub const Weather = struct {
         self.app.loop.add(fd, c.EPOLLIN | c.EPOLLHUP, self, onRead) catch {};
     }
 
+    /// 取得中なら止める(Frame を壊す前に。epoll に解放済みの self を残さない)
+    pub fn cancel(self: *Weather) void {
+        if (self.fd < 0) return;
+        self.app.loop.remove(self.fd);
+        _ = c.close(self.fd);
+        self.fd = -1;
+        if (self.pid > 0) _ = c.kill(self.pid, c.SIGTERM);
+        self.pid = 0;
+    }
+
     fn onRead(ctx: *anyopaque, fd: c_int, _: u32) void {
         const self: *Weather = @ptrCast(@alignCast(ctx));
         const n = c.read(fd, self.buf[self.len..].ptr, self.buf.len - self.len);
