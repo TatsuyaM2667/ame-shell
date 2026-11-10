@@ -142,6 +142,7 @@ pub fn detached(argv: []const []const u8) void {
 /// その場で実行して結果を返す(すぐ終わる問い合わせだけに使う: 状態の読み取り)
 pub fn run(argv: []const []const u8, out: []u8) ?[]const u8 {
     var a = Args.init(argv);
+    defer std.crypto.utils.secureZero(u8, std.mem.asBytes(&a));
     const o = std.heap.c_allocator.create(Out) catch return null;
     defer std.heap.c_allocator.destroy(o);
     o.* = .{};
@@ -153,6 +154,8 @@ pub fn run(argv: []const []const u8, out: []u8) ?[]const u8 {
 
 fn worker(job: *Job) void {
     defer std.heap.c_allocator.destroy(job);
+    // 接続のパスワードを含みうるので、返す前に消す
+    defer std.crypto.utils.secureZero(u8, std.mem.asBytes(&job.args));
     defer _ = c.close(job.wfd);
     const o = std.heap.c_allocator.create(Out) catch return;
     defer std.heap.c_allocator.destroy(o);

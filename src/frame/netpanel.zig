@@ -147,11 +147,30 @@ fn push(st: *State, j: Job) void {
     pump(st);
 }
 
+/// 動いているジョブと Bluetooth のスキャンを止める(Frame を壊す前に。epoll に解放済みの st を残さない)
+pub fn cancel(st: *State, lp: *loop.Loop) void {
+    for ([_]*c_int{ &st.fd, &st.scan_fd }, [_]*c_int{ &st.pid, &st.scan_pid }) |fd, pid| {
+        if (fd.* >= 0) {
+            lp.remove(fd.*);
+            _ = c.close(fd.*);
+            fd.* = -1;
+        }
+        if (pid.* > 0) _ = c.kill(pid.*, c.SIGTERM);
+        pid.* = 0;
+    }
+    if (st.running) |*r| std.crypto.utils.secureZero(u8, std.mem.asBytes(&r.args));
+    st.running = null;
+    std.crypto.utils.secureZero(u8, std.mem.asBytes(&st.queue));
+    st.n_queue = 0;
+}
+
 fn pump(st: *State) void {
     if (st.running != null or st.n_queue == 0) return;
-    const j = st.queue[0];
+    var j = st.queue[0];
     std.mem.copyForwards(Job, st.queue[0 .. st.n_queue - 1], st.queue[1..st.n_queue]);
     st.n_queue -= 1;
+    // 詰めたあと末尾に残る古い写し(パスワードを含みうる)を消す
+    std.crypto.utils.secureZero(u8, std.mem.asBytes(&st.queue[st.n_queue]));
     st.running = j;
     // 引数は running の中のバッファを指す(ジョブが終わるまで有効)
     var av: [11]?[*:0]const u8 = .{null} ** 11;
@@ -162,6 +181,11 @@ fn pump(st: *State) void {
     var sl: [10][]const u8 = undefined;
     for (0..r.argc) |i| sl[i] = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&r.args[i])), 0);
     const fd_opt = if (netdbus.handles(sl[0])) netdbus.spawn(sl[0..r.argc]) else sys.spawnReaderAll(av[0..r.argc], &st.pid);
+    // 接続のパスワードは渡し終えたら持たない(netdbus はジョブに写し済み、spawnReaderAll は exec 済み)
+    if (j.kind == .wifi_connect) {
+        std.crypto.utils.secureZero(u8, std.mem.asBytes(&r.args));
+        std.crypto.utils.secureZero(u8, std.mem.asBytes(&j.args));
+    }
     st.fd = fd_opt orelse {
         st.running = null;
         setStatus(st, "コマンドを実行できません", true);
