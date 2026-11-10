@@ -313,7 +313,7 @@ fn parseChat(alloc: std.mem.Allocator, list: *std.ArrayList(*Msg), txt: []const 
         const n0 = std.fmt.parseInt(usize, head[2..], 10) catch return;
         // I: 直前の発言に付けた画像のパス
         if (head[0] == 'I') {
-            if (nl + 1 + n0 > txt.len) return;
+            if (n0 > txt.len - (nl + 1)) return; // 足し算だと巨大な n0 であふれる
             if (list.items.len > 0) try list.items[list.items.len - 1].images.appendSlice(txt[nl + 1 .. nl + 1 + n0]);
             i = nl + 1 + n0 + 1;
             continue;
@@ -325,7 +325,7 @@ fn parseChat(alloc: std.mem.Allocator, list: *std.ArrayList(*Msg), txt: []const 
             else => return,
         };
         const n = std.fmt.parseInt(usize, head[2..], 10) catch return;
-        if (nl + 1 + n > txt.len) return;
+        if (n > txt.len - (nl + 1)) return;
         const m = try Msg.create(alloc, role);
         try m.text.appendSlice(txt[nl + 1 .. nl + 1 + n]);
         m.mono = head[0] == 'M';
@@ -793,6 +793,10 @@ test "chat round trip" {
     try parseChat(a, &list, "U 5\nhello\nA 7\nline1\nx\n");
     try std.testing.expectEqual(@as(usize, 2), list.items.len);
     try std.testing.expectEqualStrings("line1\nx", list.items[1].text.items);
+    // 壊れたバイト数(usize の最大値)でもあふれずに読むのをやめる
+    try parseChat(a, &list, "U 18446744073709551615\nx\n");
+    try parseChat(a, &list, "U 1\nx\nI 18446744073709551615\n");
+    try std.testing.expectEqual(@as(usize, 3), list.items.len);
 }
 
 test "conversation json" {
