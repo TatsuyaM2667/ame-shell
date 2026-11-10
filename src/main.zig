@@ -13,6 +13,8 @@ comptime {
 pub fn main() !u8 {
     // 日本語ロケール(xkb の compose / strftime 等のため)
     _ = c.setlocale(c.LC_ALL, "");
+    // 数値の書式だけは C に(libmpv は LC_NUMERIC が C でないと作成を断り、動画壁紙が CPU の重い ffmpeg 版に落ちる)
+    _ = c.setlocale(c.LC_NUMERIC, "C");
     // 子プロセス(ランチャーから起動したアプリ)のゾンビを残さない
     // (musl の SIG_IGN マクロは translate-c できないので std.posix を使う)
     const ign = std.posix.Sigaction{ .handler = .{ .handler = std.posix.SIG.IGN }, .mask = std.posix.empty_sigset, .flags = 0 };

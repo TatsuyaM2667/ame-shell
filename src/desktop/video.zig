@@ -175,8 +175,31 @@ pub const Player = struct {
             .{ "keep-open", "yes" },
             .{ "video-sync", "display-desync" },
             .{ "config", "no" },
+            // メモリを食うが壁紙には要らないもの: 組み込みの Lua スクリプト(1 本ずつ別スレッドと Lua ヒープを持つ)、
+            // youtube-dl 連携、先読みの大きな箱(既定 150MiB まで)
+            .{ "load-scripts", "no" },
+            .{ "ytdl", "no" },
+            .{ "osc", "no" },
+            .{ "load-stats-overlay", "no" },
+            .{ "load-console", "no" },
+            .{ "load-select", "no" },
+            .{ "load-positioning", "no" },
+            .{ "load-commands", "no" },
+            .{ "load-context-menu", "no" },
+            .{ "load-auto-profiles", "no" },
+            .{ "cache", "no" },
+            .{ "demuxer-max-bytes", "4MiB" },
+            .{ "demuxer-max-back-bytes", "0" },
         };
         for (opts) |o| _ = a.set_option_string(m, o[0], o[1]);
+        // 調べるとき: AME_MPV_LOG=<ファイル> で mpv のくわしいログ(ハードウェア復号が使われたかなど)
+        if (std.posix.getenv("AME_MPV_LOG")) |lp| {
+            var lb: [512]u8 = undefined;
+            if (std.fmt.bufPrintZ(&lb, "{s}", .{lp})) |lz| {
+                _ = a.set_option_string(m, "log-file", lz.ptr);
+                _ = a.set_option_string(m, "msg-level", "all=v");
+            } else |_| {}
+        }
         if (a.initialize(m) < 0) {
             last_error = "mpv を初期化できません";
             a.terminate_destroy(m);
