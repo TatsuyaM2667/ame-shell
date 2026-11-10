@@ -256,7 +256,7 @@ pub const Launcher = struct {
         const ph = &self.photos.items[i];
         if (ph.tex == 0 and ph.state == 2) if (ph.px) |px| {
             ph.tex = gfx.uploadImage(px, THUMB_W, THUMB_H);
-            self.cachePut("t:", ph.path, ph.tex);
+            ph.tex = self.cachePut("t:", ph.path, ph.tex);
             std.c.free(px);
             ph.px = null;
         };
@@ -793,7 +793,7 @@ pub const Launcher = struct {
         const wl = &self.walls.items[i];
         if (wl.tex == 0 and wl.state == 2) if (wl.px) |px| {
             wl.tex = gfx.uploadImage(px, THUMB_W, THUMB_H);
-            self.cachePut("t:", wl.path, wl.tex);
+            wl.tex = self.cachePut("t:", wl.path, wl.tex);
             std.c.free(px);
             wl.px = null;
         };
@@ -867,23 +867,32 @@ pub const Launcher = struct {
         e.icon_tex = gfx.uploadImage(px, ICON_PX, ICON_PX);
         std.c.free(px);
         e.icon_px = null;
-        self.cachePut("i:", e.icon, e.icon_tex);
+        e.icon_tex = self.cachePut("i:", e.icon, e.icon_tex);
     }
 
-    fn cachePut(self: *Launcher, comptime kind: []const u8, name: []const u8, tex: c.GLuint) void {
+    /// キャッシュに登録し、使うべきテクスチャを返す。同じキーに既にテクスチャがあれば、それを使い回して
+    /// 新しく作った方を捨てる(古い方を消すと、それを持っている別の行が消えたテクスチャを描いてしまう:
+    /// 同じ Icon= の .desktop が複数ある・壁紙と写真の一覧が同じファイルを含む、で起きる)
+    fn cachePut(self: *Launcher, comptime kind: []const u8, name: []const u8, tex: c.GLuint) c.GLuint {
         var kb: [700]u8 = undefined;
-        const k = std.fmt.bufPrint(&kb, kind ++ "{s}", .{name}) catch return;
+        const k = std.fmt.bufPrint(&kb, kind ++ "{s}", .{name}) catch return tex;
         const a = std.heap.c_allocator;
-        const gop = self.tex_cache.getOrPut(a, k) catch return;
+        const gop = self.tex_cache.getOrPut(a, k) catch return tex;
         if (gop.found_existing) {
-            if (gop.value_ptr.tex != 0 and gop.value_ptr.tex != tex) c.glDeleteTextures(1, &gop.value_ptr.tex);
+            if (gop.value_ptr.tex != 0) {
+                var mine = tex;
+                if (mine != 0 and mine != gop.value_ptr.tex) c.glDeleteTextures(1, &mine);
+                gop.value_ptr.gen = self.gen;
+                return gop.value_ptr.tex;
+            }
         } else {
             gop.key_ptr.* = a.dupe(u8, k) catch {
                 self.tex_cache.removeByPtr(gop.key_ptr);
-                return;
+                return tex;
             };
         }
         gop.value_ptr.* = .{ .tex = tex, .gen = self.gen };
+        return tex;
     }
 
     /// キャッシュにあればそのテクスチャ(0 = 見つからないと分かっている)。使ったしるしに今の世代を付ける
@@ -1244,17 +1253,17 @@ fn onIconsReady(ctx: *anyopaque, fd: c_int, _: u32) void {
             const e = &self.entries.items[r.idx];
             e.icon_px = r.px;
             e.icon_state = if (r.px != null) 2 else 1;
-            if (r.px == null) self.cachePut("i:", e.icon, 0);
+            if (r.px == null) _ = self.cachePut("i:", e.icon, 0);
         } else if (r.gen == self.gen and r.photo and r.idx < self.photos.items.len) {
             const ph = &self.photos.items[r.idx];
             ph.px = r.px;
             ph.state = if (r.px != null) 2 else 1;
-            if (r.px == null) self.cachePut("t:", ph.path, 0);
+            if (r.px == null) _ = self.cachePut("t:", ph.path, 0);
         } else if (r.gen == self.gen and r.thumb and !r.photo and r.idx < self.walls.items.len) {
             const wl = &self.walls.items[r.idx];
             wl.px = r.px;
             wl.state = if (r.px != null) 2 else 1;
-            if (r.px == null) self.cachePut("t:", wl.path, 0);
+            if (r.px == null) _ = self.cachePut("t:", wl.path, 0);
         } else if (r.px) |p| std.c.free(p); // 古い走査の結果
     }
     w.results.clearRetainingCapacity();
