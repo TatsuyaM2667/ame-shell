@@ -428,7 +428,7 @@ pub fn pointer(f: *Frame, which: Which, ev: surface.PointerEvent, lx: f32, ly: f
         .osd => {
             const n: f32 = if (app.sys.brightness != null) 2 else 1;
             const sh = (f.osd.h.x - 24) / n - 10;
-            hov = @intFromFloat(@max(0, (ly - 12) / (sh + 10)));
+            hov = @intFromFloat(std.math.clamp((ly - 12) / (sh + 10), 0, n - 1)); // 下端の余白で n 本目(無い輝度)に流さない
         },
         else => {},
     };
