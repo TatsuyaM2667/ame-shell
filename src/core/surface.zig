@@ -70,7 +70,9 @@ pub const Surface = struct {
 
     pub fn createLayer(app: *App, h: Handler, o: LayerOpts) !*Surface {
         const s = try app.alloc.create(Surface);
+        errdefer app.alloc.destroy(s);
         const wl = c.wl_compositor_create_surface(app.compositor) orelse return error.Surface;
+        errdefer c.wl_surface_destroy(wl);
         s.* = .{ .app = app, .handler = h, .wl = wl };
         c.wl_surface_set_user_data(wl, s);
         _ = c.wl_surface_add_listener(wl, &surface_listener, s);
@@ -88,7 +90,9 @@ pub const Surface = struct {
 
     pub fn createLock(app: *App, h: Handler, lock: *c.struct_ext_session_lock_v1, output: *c.struct_wl_output) !*Surface {
         const s = try app.alloc.create(Surface);
+        errdefer app.alloc.destroy(s);
         const wl = c.wl_compositor_create_surface(app.compositor) orelse return error.Surface;
+        errdefer c.wl_surface_destroy(wl);
         s.* = .{ .app = app, .handler = h, .wl = wl };
         c.wl_surface_set_user_data(wl, s);
         _ = c.wl_surface_add_listener(wl, &surface_listener, s);

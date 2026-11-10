@@ -195,7 +195,12 @@ fn pump(st: *State) void {
         std.log.warn("netpanel: frame 未設定", .{});
         return;
     };
-    f.app.loop.add(st.fd, c.EPOLLIN | c.EPOLLHUP, st, onRead) catch {};
+    f.app.loop.add(st.fd, c.EPOLLIN | c.EPOLLHUP, st, onRead) catch {
+        _ = c.close(st.fd);
+        st.fd = -1;
+        st.running = null;
+        setStatus(st, "コマンドを実行できません", true);
+    };
 }
 
 fn onRead(ctx: *anyopaque, fd: c_int, _: u32) void {
@@ -416,7 +421,11 @@ fn startBtScan(st: *State) void {
         st.busy_scan = false;
         return;
     };
-    f.app.loop.add(st.scan_fd, c.EPOLLIN | c.EPOLLHUP, st, onScanRead) catch {};
+    f.app.loop.add(st.scan_fd, c.EPOLLIN | c.EPOLLHUP, st, onScanRead) catch {
+        _ = c.close(st.scan_fd);
+        st.scan_fd = -1;
+        st.busy_scan = false;
+    };
 }
 
 /// 見つかった機器は BlueZ のシグナルで syswatch が一覧を読み直す。ここでは終わり(EOF)だけを見る
@@ -552,7 +561,11 @@ fn refreshLater(st: *State, secs: u8) void {
     var nb: [4]u8 = undefined;
     const s = std.fmt.bufPrintZ(&nb, "{d}", .{secs}) catch return;
     st.scan_fd = sys.spawnReader(&.{ "sleep", s.ptr }, &st.scan_pid) orelse return;
-    f.app.loop.add(st.scan_fd, c.EPOLLIN | c.EPOLLHUP, st, onScanRead) catch {};
+    f.app.loop.add(st.scan_fd, c.EPOLLIN | c.EPOLLHUP, st, onScanRead) catch {
+        _ = c.close(st.scan_fd);
+        st.scan_fd = -1;
+        st.busy_scan = false;
+    };
 }
 
 fn refreshWifiBsd(st: *State, rescan: bool) void {

@@ -44,7 +44,7 @@ pub const Media = struct {
     curl_pid: c_int = 0,
     curl_path: [512]u8 = undefined,
     curl_path_len: usize = 0,
-    restart_timer: loop.Timer,
+
     lyrics: *Lyrics = undefined,
     shuffle: bool = false,
     loop_mode: u8 = 0, // 0=なし 1=プレイリスト 2=1 曲
@@ -54,7 +54,7 @@ pub const Media = struct {
 
     pub fn create(app: *App) !*Media {
         const self = try app.alloc.create(Media);
-        self.* = .{ .app = app, .restart_timer = try loop.Timer.init() };
+        self.* = .{ .app = app };
         self.lyrics = try Lyrics.create(app);
         self.lyrics.ctx = app;
         self.lyrics.on_change = struct {
@@ -163,11 +163,18 @@ pub const Media = struct {
             if (self.curl_fd >= 0) {
                 self.app.loop.remove(self.curl_fd);
                 _ = c.close(self.curl_fd);
+                // 前の曲の取得は止める(書きかけのファイルを読ませない)
+                if (self.curl_pid > 0) _ = c.kill(self.curl_pid, c.SIGTERM);
             }
             var url_z: [520]u8 = undefined;
             const uz = std.fmt.bufPrintZ(&url_z, "{s}", .{url}) catch return;
-            self.curl_fd = sys.spawnReader(&.{ "curl", "-sfL", "--max-time", "8", "--max-filesize", "8000000", "-o", p.ptr, uz.ptr }, &self.curl_pid) orelse return;
-            self.app.loop.add(self.curl_fd, c.EPOLLIN | c.EPOLLHUP, self, onCurl) catch {};
+            // .part に取り、最後まで取れたときだけ本来の名前へ(途中で失敗・中断したものをキャッシュとして読まない)。
+            // パスと URL は引数で渡す(sh の文字列に埋め込まない)
+            self.curl_fd = sys.spawnReader(&.{ "/bin/sh", "-c", "curl -sfL --max-time 8 --max-filesize 8000000 -o \"$1.part\" \"$2\" && mv -f \"$1.part\" \"$1\"", "sh", p.ptr, uz.ptr }, &self.curl_pid) orelse return;
+            self.app.loop.add(self.curl_fd, c.EPOLLIN | c.EPOLLHUP, self, onCurl) catch {
+                _ = c.close(self.curl_fd);
+                self.curl_fd = -1;
+            };
         } else {
             self.dropArt();
         }

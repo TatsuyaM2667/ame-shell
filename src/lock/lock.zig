@@ -331,7 +331,15 @@ pub const Lock = struct {
         };
         self.spectrum.stop();
         for (&self.views) |*v| {
-            if (v.*) |vv| vv.surf.destroy();
+            if (v.*) |vv| {
+                // 波紋のために写し取った途中で終わった(強制解除など)なら、その絵も捨てる
+                if (vv.snap != 0) {
+                    self.app.gpu.makeCurrent(vv.surf.egl_surf);
+                    var tex = vv.snap;
+                    c.glDeleteTextures(1, &tex);
+                }
+                vv.surf.destroy();
+            }
             v.* = null;
         }
         if (self.session) |s| {
@@ -447,7 +455,12 @@ pub const Lock = struct {
         self.auth_fd = fds[0];
         self.busy = true;
         self.setMsg("確認しています…");
-        self.app.loop.add(fds[0], c.EPOLLIN | c.EPOLLHUP, self, onAuthDone) catch {};
+        self.app.loop.add(fds[0], c.EPOLLIN | c.EPOLLHUP, self, onAuthDone) catch {
+            _ = c.close(fds[0]);
+            self.auth_fd = -1;
+            self.busy = false;
+            self.setMsg("確認できませんでした。もう一度入力してください");
+        };
         self.scheduleAll();
     }
 
@@ -533,7 +546,10 @@ pub const Lock = struct {
         _ = c.close(fds[1]);
         self.face_pid = pid;
         self.face_fd = fds[0];
-        self.app.loop.add(fds[0], c.EPOLLIN | c.EPOLLHUP, self, onGreeterFace) catch {};
+        self.app.loop.add(fds[0], c.EPOLLIN | c.EPOLLHUP, self, onGreeterFace) catch {
+            _ = c.close(fds[0]);
+            self.face_fd = -1;
+        };
         faceauth.setStatus(.scanning, "顔を確認しています…");
         self.scheduleAll();
     }

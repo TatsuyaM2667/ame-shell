@@ -154,7 +154,10 @@ pub const Weather = struct {
         const loc = std.fmt.bufPrintZ(&lb, "{s}", .{self.app.cfg.weather_location.get()}) catch return;
         const fd = sys.spawnReader(&.{ "ame-weather", "--json", loc.ptr }, &self.pid) orelse return;
         self.fd = fd;
-        self.app.loop.add(fd, c.EPOLLIN | c.EPOLLHUP, self, onRead) catch {};
+        self.app.loop.add(fd, c.EPOLLIN | c.EPOLLHUP, self, onRead) catch {
+            _ = c.close(fd);
+            self.fd = -1;
+        };
     }
 
     /// 取得中なら止める(Frame を壊す前に。epoll に解放済みの self を残さない)

@@ -141,12 +141,18 @@ pub const Frame = struct {
 
     pub fn create(app: *App, out: *Output) !*Frame {
         const self = try app.alloc.create(Frame);
+        errdefer app.alloc.destroy(self);
+        // 途中で失敗したら、それまでに作ったもの(timerfd・待ち受けの登録)を戻す
+        const osd_timer = try loop.Timer.init();
+        errdefer _ = c.close(osd_timer.fd);
+        const tick_timer = try loop.Timer.init();
+        errdefer _ = c.close(tick_timer.fd);
         self.* = .{
             .app = app,
             .out = out,
             .surf = undefined,
-            .osd_timer = try loop.Timer.init(),
-            .tick_timer = try loop.Timer.init(),
+            .osd_timer = osd_timer,
+            .tick_timer = tick_timer,
             .weather = .{ .app = app },
             .spectrum = .{ .app = app },
         };
@@ -155,7 +161,9 @@ pub const Frame = struct {
         self.spectrum.ctx = self;
         self.spectrum.on_frame = redrawCb;
         try app.loop.add(self.osd_timer.fd, c.EPOLLIN, self, onOsdTimer);
+        errdefer app.loop.remove(self.osd_timer.fd);
         try app.loop.add(self.tick_timer.fd, c.EPOLLIN, self, onTick);
+        errdefer app.loop.remove(self.tick_timer.fd);
         const all = c.ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | c.ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
             c.ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | c.ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
         self.surf = try Surface.createLayer(app, .{

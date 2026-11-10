@@ -25,8 +25,15 @@ pub const Loop = struct {
         var ev = std.mem.zeroes(c.struct_epoll_event);
         ev.events = events;
         ev.data.fd = fd;
-        if (c.epoll_ctl(self.epfd, c.EPOLL_CTL_ADD, fd, &ev) != 0) return error.EpollAdd;
-        try self.entries.put(fd, .{ .ctx = ctx, .cb = cb });
+        if (c.epoll_ctl(self.epfd, c.EPOLL_CTL_ADD, fd, &ev) != 0) {
+            std.log.warn("loop: fd {d} を待ち受けに登録できません", .{fd});
+            return error.EpollAdd;
+        }
+        self.entries.put(fd, .{ .ctx = ctx, .cb = cb }) catch |e| {
+            _ = c.epoll_ctl(self.epfd, c.EPOLL_CTL_DEL, fd, null);
+            std.log.warn("loop: fd {d} を登録できません(メモリ不足)", .{fd});
+            return e;
+        };
     }
 
     pub fn remove(self: *Loop, fd: c_int) void {
@@ -76,7 +83,7 @@ pub const Timer = struct {
             .it_value = .{ .tv_sec = @intCast(first_ms / 1000), .tv_nsec = @intCast((first_ms % 1000) * 1_000_000) },
             .it_interval = .{ .tv_sec = @intCast(interval_ms / 1000), .tv_nsec = @intCast((interval_ms % 1000) * 1_000_000) },
         };
-        _ = linux.timerfd_settime(self.fd, .{}, &spec, null);
+        if (linux.E.init(linux.timerfd_settime(self.fd, .{}, &spec, null)) != .SUCCESS) std.log.warn("timerfd_settime failed (fd={d})", .{self.fd});
     }
 
     pub fn disarm(self: Timer) void {

@@ -146,8 +146,15 @@ pub const Fonts = struct {
         var face: c.FT_Face = null;
         if (c.FT_New_Face(self.ft, file, index, &face) != 0) return null;
         _ = c.FT_Set_Pixel_Sizes(face, 0, @intFromFloat(BASE_PX));
-        const hb = c.hb_ft_font_create_referenced(face) orelse return null;
-        self.faces.append(.{ .ft = face, .hb = hb, .path_hash = h }) catch return null;
+        const hb = c.hb_ft_font_create_referenced(face) orelse {
+            _ = c.FT_Done_Face(face);
+            return null;
+        };
+        self.faces.append(.{ .ft = face, .hb = hb, .path_hash = h }) catch {
+            c.hb_font_destroy(hb);
+            _ = c.FT_Done_Face(face);
+            return null;
+        };
         return @intCast(self.faces.items.len - 1);
     }
 

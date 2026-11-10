@@ -377,7 +377,11 @@ pub fn send(text: []const u8) void {
     st.t0 = nowMs();
     setStatus("{s} が作業しています…", .{name(st.idx)});
     st.fd = sys.spawnAgent(av.list.items, input, cwdz.ptr, &st.pid) orelse return addError("CLI を起動できませんでした");
-    app.loop.add(st.fd, c.EPOLLIN | c.EPOLLHUP, &st, onRead) catch {};
+    app.loop.add(st.fd, c.EPOLLIN | c.EPOLLHUP, &st, onRead) catch {
+        _ = c.close(st.fd);
+        st.fd = -1;
+        return addError("CLI の出力を受け取れません");
+    };
     st.turns += 1;
     saveChat();
     redraw();

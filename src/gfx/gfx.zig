@@ -660,6 +660,7 @@ fn solidTex(rgba: u32) c.GLuint {
 
 fn shader(kind: c.GLenum, src: []const u8) !c.GLuint {
     const s = c.glCreateShader(kind);
+    errdefer c.glDeleteShader(s);
     const ptr: [*c]const u8 = src.ptr;
     const len: c.GLint = @intCast(src.len);
     c.glShaderSource(s, 1, &ptr, &len);
@@ -678,8 +679,14 @@ fn shader(kind: c.GLenum, src: []const u8) !c.GLuint {
 
 pub fn program(vs: []const u8, fs: []const u8) !c.GLuint {
     const p = c.glCreateProgram();
-    c.glAttachShader(p, try shader(c.GL_VERTEX_SHADER, vs));
-    c.glAttachShader(p, try shader(c.GL_FRAGMENT_SHADER, fs));
+    errdefer c.glDeleteProgram(p);
+    // シェーダはリンクの後は要らない(消す印を付けておけば、プログラムと一緒に片付く)
+    const v = try shader(c.GL_VERTEX_SHADER, vs);
+    defer c.glDeleteShader(v);
+    const f = try shader(c.GL_FRAGMENT_SHADER, fs);
+    defer c.glDeleteShader(f);
+    c.glAttachShader(p, v);
+    c.glAttachShader(p, f);
     c.glLinkProgram(p);
     var ok: c.GLint = 0;
     c.glGetProgramiv(p, c.GL_LINK_STATUS, &ok);
@@ -691,6 +698,22 @@ pub fn program(vs: []const u8, fs: []const u8) !c.GLuint {
         return error.Program;
     }
     return p;
+}
+
+/// uniform の場所を覚えておく(毎フレームの glGetUniformLocation をやめる)。名前ごとに最近の 4 つのプログラムの分。
+/// プログラムは作ったら消さないので、番号が別のプログラムに使い回されることはない
+fn uloc(prog: c.GLuint, comptime name: [:0]const u8) c.GLint {
+    const S = struct {
+        var progs = [_]c.GLuint{0} ** 4;
+        var locs = [_]c.GLint{-1} ** 4;
+        var next: usize = 0;
+    };
+    for (S.progs, 0..) |p, i| if (p == prog) return S.locs[i];
+    const l = c.glGetUniformLocation(prog, name);
+    S.progs[S.next] = prog;
+    S.locs[S.next] = l;
+    S.next = (S.next + 1) % S.progs.len;
+    return l;
 }
 
 // ---------------------------------------------------------------------------
@@ -763,18 +786,18 @@ pub const Backdrop = struct {
         c.glViewport(0, 0, self.scene.w, self.scene.h);
         c.glUseProgram(gpu.wall);
         const P = gpu.wall;
-        c.glUniform2f(c.glGetUniformLocation(P, "u_res"), @floatFromInt(self.scene.w), @floatFromInt(self.scene.h));
-        c.glUniform1f(c.glGetUniformLocation(P, "u_time"), p.time);
-        c.glUniform1i(c.glGetUniformLocation(P, "u_mode"), p.mode);
-        c.glUniform1i(c.glGetUniformLocation(P, "u_prev_mode"), p.prev_mode);
-        c.glUniform1f(c.glGetUniformLocation(P, "u_mix"), p.mix);
-        c.glUniform2f(c.glGetUniformLocation(P, "u_img_size"), p.img_w, p.img_h);
-        c.glUniform2f(c.glGetUniformLocation(P, "u_prev_size"), p.prev_w, p.prev_h);
-        c.glUniform3f(c.glGetUniformLocation(P, "u_ca"), p.ca.r, p.ca.g, p.ca.b);
-        c.glUniform3f(c.glGetUniformLocation(P, "u_cb"), p.cb.r, p.cb.g, p.cb.b);
-        c.glUniform3f(c.glGetUniformLocation(P, "u_cc"), p.cc.r, p.cc.g, p.cc.b);
-        c.glUniform1i(c.glGetUniformLocation(P, "u_trans"), p.trans);
-        c.glUniform2f(c.glGetUniformLocation(P, "u_origin"), p.origin[0], p.origin[1]);
+        c.glUniform2f(uloc(P, "u_res"), @floatFromInt(self.scene.w), @floatFromInt(self.scene.h));
+        c.glUniform1f(uloc(P, "u_time"), p.time);
+        c.glUniform1i(uloc(P, "u_mode"), p.mode);
+        c.glUniform1i(uloc(P, "u_prev_mode"), p.prev_mode);
+        c.glUniform1f(uloc(P, "u_mix"), p.mix);
+        c.glUniform2f(uloc(P, "u_img_size"), p.img_w, p.img_h);
+        c.glUniform2f(uloc(P, "u_prev_size"), p.prev_w, p.prev_h);
+        c.glUniform3f(uloc(P, "u_ca"), p.ca.r, p.ca.g, p.ca.b);
+        c.glUniform3f(uloc(P, "u_cb"), p.cb.r, p.cb.g, p.cb.b);
+        c.glUniform3f(uloc(P, "u_cc"), p.cc.r, p.cc.g, p.cc.b);
+        c.glUniform1i(uloc(P, "u_trans"), p.trans);
+        c.glUniform2f(uloc(P, "u_origin"), p.origin[0], p.origin[1]);
         c.glActiveTexture(c.GL_TEXTURE3);
         c.glBindTexture(c.GL_TEXTURE_2D, if (p.img != 0) p.img else gpu.black_tex);
         c.glActiveTexture(c.GL_TEXTURE4);
@@ -1038,17 +1061,17 @@ pub const Canvas = struct {
         c.glBlendFunc(c.GL_ONE, c.GL_ONE_MINUS_SRC_ALPHA);
         c.glUseProgram(g.liquid);
         const P = g.liquid;
-        c.glUniform4f(c.glGetUniformLocation(P, "u_rect"), (px - ext) / fbw * 2 - 1, (py - ext) / fbh * 2 - 1, (px + ext) / fbw * 2 - 1, (py + ext) / fbh * 2 - 1);
-        c.glUniform2f(c.glGetUniformLocation(P, "u_c"), px, py);
-        c.glUniform1f(c.glGetUniformLocation(P, "u_r"), rr);
-        c.glUniform1f(c.glGetUniformLocation(P, "u_amp"), am);
-        c.glUniform1f(c.glGetUniformLocation(P, "u_t"), self.time);
-        c.glUniform1f(c.glGetUniformLocation(P, "u_rot"), rot);
-        c.glUniform1f(c.glGetUniformLocation(P, "u_px"), s);
-        c.glUniform1f(c.glGetUniformLocation(P, "u_a"), a);
-        c.glUniform3f(c.glGetUniformLocation(P, "u_ca"), ca.r, ca.g, ca.b);
-        c.glUniform3f(c.glGetUniformLocation(P, "u_cb"), cb.r, cb.g, cb.b);
-        c.glUniform1fv(c.glGetUniformLocation(P, "u_v"), 48, vals.ptr);
+        c.glUniform4f(uloc(P, "u_rect"), (px - ext) / fbw * 2 - 1, (py - ext) / fbh * 2 - 1, (px + ext) / fbw * 2 - 1, (py + ext) / fbh * 2 - 1);
+        c.glUniform2f(uloc(P, "u_c"), px, py);
+        c.glUniform1f(uloc(P, "u_r"), rr);
+        c.glUniform1f(uloc(P, "u_amp"), am);
+        c.glUniform1f(uloc(P, "u_t"), self.time);
+        c.glUniform1f(uloc(P, "u_rot"), rot);
+        c.glUniform1f(uloc(P, "u_px"), s);
+        c.glUniform1f(uloc(P, "u_a"), a);
+        c.glUniform3f(uloc(P, "u_ca"), ca.r, ca.g, ca.b);
+        c.glUniform3f(uloc(P, "u_cb"), cb.r, cb.g, cb.b);
+        c.glUniform1fv(uloc(P, "u_v"), 48, vals.ptr);
         c.glBindVertexArray(g.empty_vao);
         c.glDrawArrays(c.GL_TRIANGLE_STRIP, 0, 4);
         c.glBindVertexArray(0);
@@ -1066,22 +1089,22 @@ pub const Canvas = struct {
         c.glBlendFunc(c.GL_ONE, c.GL_ONE_MINUS_SRC_ALPHA);
         c.glUseProgram(P);
         c.glBindVertexArray(g.empty_vao);
-        c.glUniform2f(c.glGetUniformLocation(P, "u_size"), self.size[0], self.size[1]);
-        c.glUniform1f(c.glGetUniformLocation(P, "u_scale"), self.scale);
-        c.glUniform2f(c.glGetUniformLocation(P, "u_output"), self.output[0], self.output[1]);
-        c.glUniform2f(c.glGetUniformLocation(P, "u_origin"), self.origin[0], self.origin[1]);
-        c.glUniform1f(c.glGetUniformLocation(P, "u_time"), self.time);
-        c.glUniform4f(c.glGetUniformLocation(P, "u_hole"), sh.hole[0], sh.hole[1], sh.hole[2], sh.hole[3]);
-        c.glUniform1f(c.glGetUniformLocation(P, "u_hole_r"), sh.hole_r);
-        c.glUniform4fv(c.glGetUniformLocation(P, "u_box"), @intCast(sh.n), @ptrCast(&sh.boxes));
-        c.glUniform2fv(c.glGetUniformLocation(P, "u_boxp"), @intCast(sh.n), @ptrCast(&sh.params));
-        c.glUniform1i(c.glGetUniformLocation(P, "u_n"), @intCast(sh.n));
-        c.glUniform4f(c.glGetUniformLocation(P, "u_tint"), sh.tint.r, sh.tint.g, sh.tint.b, sh.tint.a);
-        c.glUniform4f(c.glGetUniformLocation(P, "u_rim"), sh.rim.r, sh.rim.g, sh.rim.b, sh.rim.a);
-        c.glUniform4f(c.glGetUniformLocation(P, "u_sheen"), sh.sheen.r, sh.sheen.g, sh.sheen.b, sh.sheen.a);
-        c.glUniform1f(c.glGetUniformLocation(P, "u_shadow"), sh.shadow);
-        c.glUniform1f(c.glGetUniformLocation(P, "u_sparkle"), sh.sparkle);
-        c.glUniform1i(c.glGetUniformLocation(P, "u_blur"), 1);
+        c.glUniform2f(uloc(P, "u_size"), self.size[0], self.size[1]);
+        c.glUniform1f(uloc(P, "u_scale"), self.scale);
+        c.glUniform2f(uloc(P, "u_output"), self.output[0], self.output[1]);
+        c.glUniform2f(uloc(P, "u_origin"), self.origin[0], self.origin[1]);
+        c.glUniform1f(uloc(P, "u_time"), self.time);
+        c.glUniform4f(uloc(P, "u_hole"), sh.hole[0], sh.hole[1], sh.hole[2], sh.hole[3]);
+        c.glUniform1f(uloc(P, "u_hole_r"), sh.hole_r);
+        c.glUniform4fv(uloc(P, "u_box"), @intCast(sh.n), @ptrCast(&sh.boxes));
+        c.glUniform2fv(uloc(P, "u_boxp"), @intCast(sh.n), @ptrCast(&sh.params));
+        c.glUniform1i(uloc(P, "u_n"), @intCast(sh.n));
+        c.glUniform4f(uloc(P, "u_tint"), sh.tint.r, sh.tint.g, sh.tint.b, sh.tint.a);
+        c.glUniform4f(uloc(P, "u_rim"), sh.rim.r, sh.rim.g, sh.rim.b, sh.rim.a);
+        c.glUniform4f(uloc(P, "u_sheen"), sh.sheen.r, sh.sheen.g, sh.sheen.b, sh.sheen.a);
+        c.glUniform1f(uloc(P, "u_shadow"), sh.shadow);
+        c.glUniform1f(uloc(P, "u_sparkle"), sh.sparkle);
+        c.glUniform1i(uloc(P, "u_blur"), 1);
         c.glActiveTexture(c.GL_TEXTURE1);
         c.glBindTexture(c.GL_TEXTURE_2D, self.blur_tex);
         c.glActiveTexture(c.GL_TEXTURE0);

@@ -111,7 +111,11 @@ pub const Lyrics = struct {
             self.state = .none;
             return;
         };
-        self.app.loop.add(self.fd, c.EPOLLIN | c.EPOLLHUP, self, onRead) catch {};
+        self.app.loop.add(self.fd, c.EPOLLIN | c.EPOLLHUP, self, onRead) catch {
+            _ = c.close(self.fd);
+            self.fd = -1;
+            self.state = .none;
+        };
     }
 
     fn onRead(ctx: *anyopaque, fd: c_int, _: u32) void {

@@ -465,7 +465,11 @@ pub fn send(text: []const u8) void {
     st.status_len = 0;
     // 新しいプロセスグループで動かす(止めるときに curl・MCP サーバもまとめて止める)
     st.fd = sys.spawnAgent(argv[0..n], conv.items, "/", &st.pid) orelse return fail(am, "ame-ai を起動できませんでした");
-    app.loop.add(st.fd, c.EPOLLIN | c.EPOLLHUP, &st, onRead) catch {};
+    app.loop.add(st.fd, c.EPOLLIN | c.EPOLLHUP, &st, onRead) catch {
+        _ = c.close(st.fd);
+        st.fd = -1;
+        return fail(am, "ame-ai の出力を受け取れません");
+    };
 }
 
 fn fail(m: *Msg, why: []const u8) void {
@@ -508,14 +512,15 @@ fn onRead(_: *anyopaque, fd: c_int, _: u32) void {
 fn feed(bytes: []const u8) void {
     var rest = bytes;
     while (std.mem.indexOfScalar(u8, rest, '\n')) |nl| {
-        st.line.appendSlice(rest[0..nl]) catch {};
+        // 1 行は 8MB まで(agent.zig と同じ。改行の来ない出力でメモリを食い尽くさない)
+        if (st.line.items.len + nl < 8 << 20) st.line.appendSlice(rest[0..nl]) catch {};
         const l = st.alloc.dupe(u8, st.line.items) catch return;
         defer st.alloc.free(l);
         st.line.clearRetainingCapacity();
         handleEvent(l);
         rest = rest[nl + 1 ..];
     }
-    st.line.appendSlice(rest) catch {};
+    if (st.line.items.len + rest.len < 8 << 20) st.line.appendSlice(rest) catch {};
 }
 
 /// 今の返事(無ければ、ツールの結果のあとの新しい返事を作る)
@@ -638,7 +643,11 @@ pub fn fetchModels(i: usize) void {
     st.model_prov = i;
     _ = st.model_arena.reset(.retain_capacity);
     st.model_list.clearRetainingCapacity();
-    app.loop.add(st.mfd, c.EPOLLIN | c.EPOLLHUP, &st, onModels) catch {};
+    app.loop.add(st.mfd, c.EPOLLIN | c.EPOLLHUP, &st, onModels) catch {
+        _ = c.close(st.mfd);
+        st.mfd = -1;
+        return setModelErr("ame-ai の出力を受け取れません");
+    };
 }
 
 fn setModelErr(s: []const u8) void {
