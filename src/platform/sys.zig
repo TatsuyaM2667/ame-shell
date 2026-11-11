@@ -106,8 +106,13 @@ pub fn battery() Battery {
         const type_path = std.fmt.bufPrintZ(&p, "/sys/class/power_supply/{s}/type", .{name}) catch continue;
         const ty = readFile(type_path, &t) orelse continue;
         if (std.mem.eql(u8, ty, "Battery") and !b.present) {
+            // つないだ機器の電池(scope=Device。iPhone の apple_mfi_fastcharge・マウスなど)と、残量の無いものは
+            // この PC の電池ではない(先に見つかると 0% と出ていた)
+            var sc: [16]u8 = undefined;
+            const scope_path = std.fmt.bufPrintZ(&p, "/sys/class/power_supply/{s}/scope", .{name}) catch continue;
+            if (std.mem.eql(u8, readFile(scope_path, &sc) orelse "", "Device")) continue;
             const cap = std.fmt.bufPrintZ(&p, "/sys/class/power_supply/{s}/capacity", .{name}) catch continue;
-            b.percent = @intCast(std.math.clamp(readInt(cap) orelse 0, 0, 100));
+            b.percent = @intCast(std.math.clamp(readInt(cap) orelse continue, 0, 100));
             var sbuf: [32]u8 = undefined;
             const st_path = std.fmt.bufPrintZ(&p, "/sys/class/power_supply/{s}/status", .{name}) catch continue;
             const st = readFile(st_path, &sbuf) orelse "";

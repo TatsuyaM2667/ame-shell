@@ -502,7 +502,8 @@ fn stats(app: *App, out: []u8) []const u8 {
     const avg = if (fs.frames > 0) fs.sum_dt / @as(f64, @floatFromInt(fs.frames)) else 0;
     var refresh: f32 = 60;
     if (app.activeOutput()) |o| refresh = @as(f32, @floatFromInt(o.refresh_mhz)) / 1000;
-    return std.fmt.bufPrint(out, "uptime_s={d:.1} cpu_time_s={d:.3} rss_mb={d:.1} frames={d} avg_frame_ms={d:.2} max_frame_ms={d:.2} render_avg_us={d} render_max_us={d} refresh_hz={d:.1} startup_ms={d} glyphs={d} glyph_raster_avg_us={d}", .{
+    const bat = app.sys.battery;
+    return std.fmt.bufPrint(out, "uptime_s={d:.1} cpu_time_s={d:.3} rss_mb={d:.1} frames={d} avg_frame_ms={d:.2} max_frame_ms={d:.2} render_avg_us={d} render_max_us={d} refresh_hz={d:.1} startup_ms={d} glyphs={d} glyph_raster_avg_us={d} battery={s}{d}% charging={} on_ac={}", .{
         app.timeSec(),
         cpu_s,
         @as(f64, @floatFromInt(rss_kb)) / 1024.0,
@@ -515,6 +516,10 @@ fn stats(app: *App, out: []u8) []const u8 {
         app.startup_ms,
         @import("../gfx/text.zig").raster_n,
         if (@import("../gfx/text.zig").raster_n > 0) @import("../gfx/text.zig").raster_ns / @import("../gfx/text.zig").raster_n / 1000 else 0,
+        if (bat.present) "" else "none:",
+        bat.percent,
+        bat.charging,
+        bat.on_ac,
     }) catch "error";
 }
 
