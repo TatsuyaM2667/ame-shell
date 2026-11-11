@@ -262,6 +262,13 @@ fn isSaved(st: *const State, ssid: []const u8) bool {
     return false;
 }
 
+/// Wi-Fi の一覧の並び: 接続中 → 保存済み → 電波の強い順(a が b より前なら true)
+fn netBefore(_: void, a: WifiNet, b: WifiNet) bool {
+    if (a.active != b.active) return a.active;
+    if (a.saved != b.saved) return a.saved;
+    return a.signal > b.signal;
+}
+
 fn finish(st: *State, j: Job, out: []const u8) void {
     if (is_bsd) return finishBsd(st, j, out);
     const trimmed = std.mem.trim(u8, out, " \n");
@@ -292,22 +299,25 @@ fn finish(st: *State, j: Job, out: []const u8) void {
                     if (sig > st.nets[k].signal) st.nets[k].signal = sig;
                     continue;
                 }
-                if (st.n_nets >= MAX_ITEMS) break;
                 var e = WifiNet{ .signal = sig, .secure = f[3].len > 0 and !std.mem.eql(u8, f[3], "--"), .active = active };
                 e.ssid_len = @min(ssid.len, e.ssid.len);
                 @memcpy(e.ssid[0..e.ssid_len], ssid[0..e.ssid_len]);
                 e.saved = isSaved(st, e.name());
-                st.nets[st.n_nets] = e;
-                st.n_nets += 1;
+                if (st.n_nets < MAX_ITEMS) {
+                    st.nets[st.n_nets] = e;
+                    st.n_nets += 1;
+                    continue;
+                }
+                // いっぱい: いちばん後ろに並ぶもの(弱い・保存していない)より前に並ぶなら入れ替える。
+                // 一覧は順不同で届くので、先着順に打ち切ると接続中・保存済みの SSID が落ちることがあった
+                var worst: usize = 0;
+                for (st.nets[1..st.n_nets], 1..) |*w, k| if (netBefore({}, st.nets[worst], w.*)) {
+                    worst = k;
+                };
+                if (netBefore({}, e, st.nets[worst])) st.nets[worst] = e;
             }
             // 接続中 → 保存済み → 電波の強い順
-            std.mem.sort(WifiNet, st.nets[0..st.n_nets], {}, struct {
-                fn lt(_: void, a: WifiNet, b: WifiNet) bool {
-                    if (a.active != b.active) return a.active;
-                    if (a.saved != b.saved) return a.saved;
-                    return a.signal > b.signal;
-                }
-            }.lt);
+            std.mem.sort(WifiNet, st.nets[0..st.n_nets], {}, netBefore);
             restartAppear(st);
         },
         .wifi_saved => {

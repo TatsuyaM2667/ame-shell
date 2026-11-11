@@ -320,7 +320,8 @@ const Bus = struct {
 };
 
 const Paths = struct {
-    p: [48][128:0]u8 = undefined,
+    // 人の多い所ではアクセスポイントが 100 を超える(実機: 108)。48 では残りを黙って捨て、目当ての SSID が見つからなかった
+    p: [256][128:0]u8 = undefined,
     n: usize = 0,
     fn add(self: *Paths, s: []const u8) void {
         if (self.n >= self.p.len or s.len >= 128) return;
