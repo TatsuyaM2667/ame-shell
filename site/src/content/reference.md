@@ -35,6 +35,7 @@ shell {
   ui-scale 1.25
   super-launcher on         // Super を単独で押して離すとランチャー
   tap-to-click on           // タッチパッドのタップでクリック
+  memory-guard on           // メモリが尽きそうなら知らせ、固まる直前にはいちばん使っているアプリを止める
   // weather-location "Sapporo"
 }
 theme {
@@ -85,7 +86,7 @@ lock { enabled on }
 ```
 ame-ctl launcher toggle|open [検索語]|close
 ame-ctl dashboard toggle|open|close|dashboard|media|performance|workspaces
-ame-ctl ai toggle|open|close|clear|pick|mcp|api|send <文>   (AI チャット)
+ame-ctl ai toggle|open|close|clear|pick|mcp|api|send <文>|attach <画像>   (AI チャット)
 ame-ctl ai agent <claude|opencode|gemini|codex|…> <フォルダ> [new|last|<会話の id>]   (コーディング CLI)
 ame-ctl network | bluetooth | wallpaper-picker | session | sidebar | utilities | close-all
 ame-ctl volume up|down|mute|<0-100>      ame-ctl brightness up|down
@@ -94,10 +95,29 @@ ame-ctl accent '#ff88aa'|reset           ame-ctl notify <テキスト>
 ame-ctl workspace <1-9>
 ame-ctl window close|fullscreen|float|focus-next|focus-prev|swap-next|swap-prev   (River 0.5)
 ame-ctl lock | reload | widgets reload | stats | restart | quit
+ame-ctl watch                            (出来事を 1 行 1 つの JSON で流し続ける)
+ame-ctl net wifi|saved|radio|ssid|bt|bt-devices   (Wi-Fi・Bluetooth の状態)
 ```
 
 - `ame-ctl restart`: 新しい版に入れ替えます。**窓とワークスペースはそのまま**です(River 0.5 の WM の状態を引き継ぎます)。
 - `ame-ctl stats`: 稼働時間・CPU 時間・RSS・フレーム数・平均と最大の描画時間。
+- `ame-ctl watch`: 最初に今の状態(`{"event":"hello",…}`)、そのあとワークスペース・フォーカス・窓の開閉・通知・曲・ロックが起きるたびに 1 行。例: `ame-ctl watch | jq -r 'select(.event=="workspace").workspace'`。
+
+## 小さなコマンド {#tools}
+
+ame-shell と一緒に入る、端末からも使える道具です(詳しくは[小さな道具](#/tech-tools))。
+
+| コマンド | すること |
+|---|---|
+| `ame-lyrics [-d 秒] アーティスト 曲名` | 同期歌詞を探して LRC で出す |
+| `ame-ai [-p 会社] [-m モデル] [-i 画像]` | AI と話す(標準入力の質問 → 返事) |
+| `ame-agent [-f 形式]` | コーディング CLI の出力を共通の JSON の行に |
+| `ame-config check [ファイル]` | 設定ファイルの間違いを行番号つきで出す |
+| `ame-weather [--json] [場所]` | 今の天気 |
+| `ame-airpods head` / `battery` / `find` | AirPods の頭の動き・電池 |
+| `ame-handtrack` | カメラの手の認識(JSON の行) |
+| `ame-keyring` / `ame-keyring list` | 鍵束(Secret Service)。セッションが自動で起動します |
+| `scripts/zram-setup.sh` | 圧縮したスワップ(zram)を有効にする(`doas` で。`--remove` でやめる) |
 
 ## 環境変数 {#env}
 
@@ -127,5 +147,8 @@ ame-ctl lock | reload | widgets reload | stats | restart | quit
 | `~/.config/ame-shell/river5-extra.sh` | River 0.5 のセッションの開始時に読む追加の設定 |
 | `~/.local/state/ame-shell/session.log` | セッションのログ |
 | `~/.local/state/ame-shell/wallpaper` | 壁紙ピッカーで最後に選んだ壁紙 |
+| `~/.local/state/ame-shell/ai-chat`・`ai-images/` | AI チャットの会話・送った画像 |
+| `~/.config/ame-shell/ai-keys` | AI の API キー(0600) |
+| `~/.local/share/ame-shell/keyring/` | 鍵束(`login.keyring` は XChaCha20-Poly1305 で暗号化、`master.key` は 0600) |
 | `~/Pictures/wallpapers`・`~/.local/share/ame-shell/wallpapers` | 壁紙のフォルダ |
 | `$XDG_RUNTIME_DIR/lyrics/<プレーヤー名>.lrc` | プレーヤーから渡す同期歌詞 |

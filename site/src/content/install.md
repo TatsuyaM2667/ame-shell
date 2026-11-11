@@ -104,3 +104,5 @@ ame-update --no-pkg   # ame-shell だけ(--no-self でパッケージだけ)
 | Bluetooth(FreeBSD) | `sh scripts/freebsd-bluetooth.sh --check` |
 | AirPods が繋がらない(Linux) | `doas sh session/bt-airpods-fix.sh`(BlueZ を BR/EDR 接続に) |
 | 動画の壁紙が重い | `grep -E 'video|ffmpeg|mpv' ~/.local/state/ame-shell/session.log` で、どの方法で再生しているかを確認 |
+| 重くなる・急に固まる | スワップの無い機械でメモリが尽きている。`doas sh scripts/zram-setup.sh` で圧縮したスワップを作る。止まったアプリは `grep memguard ~/.local/state/ame-shell/session.log` で分かる([メモリ](#/tech-memory)) |
+| 設定が効かない | `ame-config check` で、間違っている行と理由が出る |

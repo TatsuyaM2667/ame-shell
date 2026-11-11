@@ -94,6 +94,8 @@
 - 右上にガラスのカードとして右から滑り込み、上のカードが消えると下のカードがばねで詰めます。消えるときは右へ流れて薄くなります。アクション(ボタン)・置き換え・期限に対応し、緊急の通知では枠が赤く光ります。
 - すでに別の通知デーモン(mako・swaync など)が動いていれば、名前を奪わずに譲ります。
 - 通知センター(Super+N)で履歴を見られます。通知停止(Do Not Disturb)も切り替えられます。
+- **送り主のアイコン**: 通知に付いてきた画像(Discord なら相手のアイコン)を丸く出し、無ければアプリのアイコンを出します。ロック画面の通知も同じです。
+- **押すとそのアプリへ**: 通知を押すと、送ってきたアプリの窓があるワークスペースへ移ってその窓を前に出します(River 0.5 のセッション)。ロック画面で押した通知は、解除したあとに開きます。
 
 ## AI チャット(右・Super+C) {#ai}
 
@@ -103,19 +105,20 @@
 - **API キー**: 会社を選んで「API キーを入れる」から貼り付け(Ctrl+V)て保存します。保存先は `~/.config/ame-shell/ai-keys`(自分だけが読める 0600)。環境変数(`OPENAI_API_KEY`・`ANTHROPIC_API_KEY`・`GEMINI_API_KEY`・`OPENROUTER_API_KEY`・`MOONSHOT_API_KEY` など)でも渡せます。キーは curl のコマンドラインに出さず、標準入力から渡します。
 - **会話**: Enter で送信・Shift+Enter で改行・送信中は ■ で止める(Ctrl+C)。返事は届いた分から表示し、見出し・箇条書き・コード・引用を見やすくします。DeepSeek R1 などの「考えている途中」も薄く出します。返事の下の「コピー」でクリップボードへ。＋(Ctrl+L)で新しい会話。会話は `~/.local/state/ame-shell/ai-chat` に残り、ame-shell を読み込み直しても続きから話せます。
 - **日本語入力**: fcitx5 などで変換しながら入力できます(text-input-v3。変換中の文字は下線、候補の窓は入力位置に出ます)。
+- **画像を送る**: 画像をコピーしてパネルで Ctrl+V、または入力欄の左の画像ボタンでファイルを選びます(1 回に 4 枚まで、送る前は下に小さく並び、× で外せます)。大きい画像は長い辺 1568 px の PNG に縮めてから送ります。Claude・OpenAI 互換の画像入力に対応したモデルで使えます。コーディング CLI には画像のパスを頼みごとに添えます。`ame-ctl ai attach <画像>` でも付けられます。
 - 毎回最初に渡す指示は設定 `ai { system "…" }`。
 - **開いたまま他の窓で入力できます**: 開いた直後はパネルに入力でき、他の窓をクリックするとそちらに入力が移ります。もう一度 Super+C を押すと、閉じずにパネルへ入力が戻ります(パネルをクリックしても戻ります)。
 
 ### コーディング CLI(Claude Code など) {#ai-cli}
 
-- パネルの上の名前を押すと、会社の一覧の下に **コーディング CLI** が並びます(入っているものだけ選べます): Claude Code・OpenCode・Gemini CLI・Codex CLI・Kimi CLI・Qwen Code・Cursor Agent・Amp・GitHub Copilot CLI・Crush・Goose・Aider。
+- パネルの上の名前を押すと、会社の一覧の下に **コーディング CLI** が並びます(入っているものだけ選べます): Claude Code・Antigravity CLI(`agy`)・OpenCode・Gemini CLI・Codex CLI・Kimi CLI・Qwen Code・Cursor Agent・Amp・GitHub Copilot CLI・Crush・Goose・Aider。
 - CLI を選ぶ → **作業フォルダ**を選ぶ(最近使ったフォルダ・Claude Code の記録のあるフォルダが並ぶ。パスを入れて Tab で補完)→ **会話**を選ぶ(新しい会話 / 前回の続き / Claude Code は過去の会話の一覧)。
 - **新しいプロジェクト**: 作業フォルダを選ぶ画面で名前(例: `my-app`)かパスを入れ、「＋ 新しいプロジェクトを作る」を選ぶと、フォルダを作って(git があれば `git init` も)そのまま新しい会話を始めます。名前だけのときの置き場は設定 `ai { projects-dir "~/…" }`(既定は `~/projects`、無ければホーム)。
 - **Claude Code の続き**: 過去の会話を選ぶと、`~/.claude/projects/<フォルダ>/<id>.jsonl` の記録を読み込んで表示し、次の頼みごとから `claude --resume <id>` で続きを話します(`claude -c` と同じ続き方)。
 - 端末に出る作業の様子をチャットに映します: 返事は届いた分から、ツールの実行は「Bash: ls -la」「Edit: main.zig」のような見出しと結果の最初の数行で、終わると時間と費用も出ます。JSON の出力が無い CLI は、端末の文字をそのまま等幅で出します。
 - **許可**(パネルの「編集を許可」を押すと切り替え): 編集を許可(既定)/ 全部許可(確認なしでコマンドも実行。赤く表示)/ 計画だけ / 確認する(許可の要る操作は止まる。パネルからは許可できません)。
 - ■ で止めると、CLI と、その CLI が起動したコマンドもまとめて止めます。
-- 自分で CLI を足す: `~/.config/ame-shell/agents` に「名前 | 形式 | コマンド」を 1 行ずつ(形式は claude / gemini / codex / opencode / kimi / raw、`{prompt}` が頼みごとに置き換わる)。例: `Antigravity | raw | agy chat {prompt}`。
+- 自分で CLI を足す: `~/.config/ame-shell/agents` に「名前 | 形式 | コマンド」を 1 行ずつ(形式は claude / gemini / codex / opencode / kimi / antigravity / raw、`{prompt}` が頼みごとに置き換わる)。例: `My CLI | raw | mycli --ask {prompt}`。
 - `ame-ctl ai agent claude ~/projects/foo [new|last|<会話の id>]` でも始められます。API のチャットに戻る: 会社を選ぶか `ame-ctl ai api`。
 
 ### MCP サーバ {#ai-mcp}
@@ -236,6 +239,9 @@ pub fn frame(dt: f32, w: f32, _: f32) bool {
 - **ファイル**(Super+E): Thunar を、端末と同じ半透明のテーマ(AmeGlass)で開きます。ほかの GTK アプリの見た目は変えません。
 - **日本語入力**: fcitx5 + Mozc。Chimera などパッケージの無い環境では `sh install.sh --mozc` でソースからビルドします。
 - **画面の拡大率**: 画素の細かさを見て自動で決めます(14 インチ 2880x1800 なら 1.5 など)。
+- **ライブ壁紙は窓を開いても止まりません**: 透明にした端末などから見えるように、止めるのは全画面の窓で覆われたときだけです。
+- **鍵束**: Zed などがしまう API キー・パスワードを、自前の鍵束(`ame-keyring`、gnome-keyring の代わり)が暗号化して保存します。再起動しても消えません。
+- **メモリの見張り**: メモリが残り 10% を切ると、いちばん使っているアプリと量を通知します。3% を切ると(固まる直前)、いちばんメモリを使っているアプリを止めて知らせます。止めたくなければ `shell { memory-guard off }`。スワップが無い機械は `doas sh scripts/zram-setup.sh` で圧縮したスワップ(zram)を作るのがおすすめです。[メモリ](#/tech-memory)
 - **無線のブロック解除**: Linux ではセッションの開始時に `rfkill unblock all`。
 - **タッチパッド**: タップでクリック(River 0.5 の `river_libinput_config_v1`)。
 - **設定**は `~/.config/ame-shell/config.ame`。**保存した瞬間に反映**されます。[設定の一覧](#/reference)

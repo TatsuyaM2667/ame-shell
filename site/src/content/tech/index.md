@@ -8,7 +8,7 @@
 4. **得られた結果**(計測値・挙動)
 5. **ほかの方法との違い**(採らなかった案と、その理由)
 
-> 引用しているコードと数値は、すべて 2026 年 10 月時点の `master` のものです。計測は Ryzen 7 7735HS / Radeon 680M / Mesa 26.2 / Chimera Linux(musl)、ReleaseFast ビルドで行っています。
+> 引用しているコードと数値は、特に書いていなければ 2026 年 10〜11 月の `master` のものです。計測は Ryzen 7 7735HS / Radeon 680M / Mesa 26.2 / Chimera Linux(musl)、ReleaseFast ビルドで行っています。
 
 :::easy このページを読む前に
 デスクトップの画面は、たくさんの部品(バー・壁紙・通知・窓)でできています。ふつうは、部品ごとに別々のプログラムが動いています。ame-shell は、それを**1 つのプログラム**にまとめ、全部を同じ方法で描き、同じ方法で動かしています。
@@ -31,27 +31,25 @@ ame-shell のコードは、次の 6 つの原則で一貫しています。各�
 
 ## ファイルの地図 {#map}
 
-本体は Zig 約 17,600 行、Odin 192 行です。
+本体は Zig 約 42,700 行、Odin 369 行です(2026 年 11 月)。`src/` は役割ごとのフォルダに分けています。
 
-| 層 | ファイル(行数) | 役割 | 解説 |
-|---|---|---|---|
-| 入口 | `main.zig`(80)・`app.zig`(1090) | 起動・Wayland のグローバル・出力・入力の配送・メインループ | [起動とイベントループ](#/tech-loop)・[Wayland](#/tech-wayland) |
-| 基盤 | `platform/loop.zig`(96) | epoll + timerfd | [起動とイベントループ](#/tech-loop) |
-| 基盤 | `surface.zig`(307) | layer-shell / session-lock のサーフェス、フレーム駆動の描画 | [Wayland](#/tech-wayland) |
-| 描画 | `gfx.zig`(1181) | GLES3 の 2D レンダラ、ガラス、枠、壁紙のシェーダ | [GPU レンダラ](#/tech-gpu)・[ガラス](#/tech-glass) |
-| 描画 | `text.zig`(363) | fontconfig → HarfBuzz → FreeType → SDF アトラス | [文字](#/tech-text) |
-| 動き | `anim/anim.odin`(192)・`anim.zig`(126) | ばね・あいまい検索・主色抽出(Odin)と Zig 側の型 | [ばね](#/tech-anim) |
-| 配色 | `theme.zig`(310) | 壁紙・アルバムアートから配色、エラーの赤い光 | [ガラス・壁紙・配色](#/tech-glass) |
-| WM | `wm/wm.zig`(1233)・`wm/binds.zig`(98) | River 0.5 のウィンドウマネージャ、キー割り当て | [ウィンドウマネージャ](#/tech-wm) |
-| UI | `frame/*.zig`(約 4,000) | 枠・縦バー・ドロワー・ダッシュボード・ネットワークのパネル | [枠とドロワー](#/tech-frame) |
-| UI | `launcher.zig`(1219)・`icons.zig`(212)・`wallpick.zig`(383) | ランチャー・アイコン索引・壁紙ピッカー | [ランチャー](#/tech-launcher) |
-| UI | `wallpaper.zig`(463)・`video.zig`(501) | 壁紙(シェーダ・画像・動画)と切り替え | [ガラス・壁紙](#/tech-glass)・[メディア](#/tech-media) |
-| データ | `media.zig`(331)・`lyrics.zig`(319)・`audio.zig`(223) | MPRIS・同期歌詞・音の出力先 | [メディア](#/tech-media) |
-| データ | `notify.zig`(589)・`lock.zig`(408) | 通知サーバ・ロック画面 | [通知とロック](#/tech-notify-lock) |
-| 拡張 | `wasm.zig`(223)・`widget_abi.zig`(71)・`widgets/*.zig` | wasm3 でウィジェットを動かす | [WebAssembly](#/tech-wasm) |
-| OS | `platform/sys.zig`(409)・`platform/bsd.zig`(159)・`platform/supertap.zig`(151) | システム情報・電源・Super 単独の検出 | [OS 対応](#/tech-platform) |
-| 操作 | `config.zig`(345)・`ipc.zig`(242)・`ctl.zig`(59) | 設定の言語・Unix ソケット・ame-ctl | [設定と ame-ctl](#/tech-config) |
-| 起動 | `session/*`(POSIX sh) | ame-session・ame-river5-init・ame-update・インストーラ | [セッション](#/tech-session) |
+| フォルダ(行数) | 役割 | 解説 |
+|---|---|---|
+| `main.zig`・`core/`(2,263) | 起動・Wayland のグローバル・出力・入力の配送・ame-ctl の口・サーフェス | [起動とイベントループ](#/tech-loop)・[Wayland](#/tech-wayland)・[設定と ame-ctl](#/tech-config) |
+| `platform/`(2,566) | epoll + timerfd・OS ごとの違い・D-Bus(NetworkManager / BlueZ)・malloc の差し替え | [OS 対応](#/tech-platform)・[メモリ](#/tech-memory) |
+| `gfx/`(2,830) | GLES3 の 2D レンダラ・文字・アイコン・配色・波紋 | [GPU レンダラ](#/tech-gpu)・[文字](#/tech-text)・[ガラス](#/tech-glass) |
+| `frame/`(7,543) | 枠・縦バー・ドロワー・ダッシュボード・島・AI とネットワークのパネル | [枠とドロワー](#/tech-frame) |
+| `desktop/`(8,361) | ランチャー・通知・壁紙と動画・OSD・スクショ・日本語入力・システムの変化・メモリの見張り | [ランチャー](#/tech-launcher)・[通知とロック](#/tech-notify-lock)・[メモリ](#/tech-memory) |
+| `lock/`(1,966) | ロック画面とログイン画面 | [通知とロック](#/tech-notify-lock) |
+| `media/`(2,420) | 再生中の曲(MPRIS)・歌詞・音の出力先・曲のウィジェット | [メディア](#/tech-media) |
+| `ai/`(2,065) | AI チャット・コーディング CLI・MCP | [小さな道具](#/tech-tools) |
+| `wm/`(2,520) | River 0.5 のウィンドウマネージャ | [ウィンドウマネージャ](#/tech-wm) |
+| `widget/`(294)・`widgets/` | wasm3 でウィジェットを動かす | [WebAssembly](#/tech-wasm) |
+| `device/`・`hand/`・`face/`(4,012) | AirPods・手の操作・顔の認証 | — |
+| `lib/`(3,019) | 画面にも OS にも依存しない部品(試験つき) | [小さな道具](#/tech-tools) |
+| `cmd/`(2,456) | 小さな道具(ame-lyrics・ame-ai・ame-agent・ame-config・ame-weather・ame-airpods・ame-handtrack・ame-keyring) | [小さな道具](#/tech-tools) |
+| `anim/*.odin`(369) | ばね・あいまい検索・主色抽出・FFT・画像の縮小 | [ばね](#/tech-anim) |
+| `session/*`(POSIX sh) | ame-session・ame-river5-init・インストーラ | [セッション](#/tech-session) |
 
 ## 全体の構成 {#overview}
 

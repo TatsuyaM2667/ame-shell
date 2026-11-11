@@ -11,4 +11,5 @@ pub const items = .{
     .{ "blog/2026-10-28-site", "このサイトを WebAssembly で作った", "2026-10-28", @embedFile("2026-10-28-site.md") },
     .{ "blog/2026-11-02-own", "cava も playerctl も nmcli も grim もやめた", "2026-11-02", @embedFile("2026-11-02-own.md") },
     .{ "blog/2026-11-02-ripple", "ロック画面の波紋と、紙のようにたわむ窓", "2026-11-02", @embedFile("2026-11-02-ripple.md") },
+    .{ "blog/2026-11-11-memory", "メモリが返ってこない: libc の mimalloc と、消されない GPU の同期オブジェクト", "2026-11-11", @embedFile("2026-11-11-memory.md") },
 };

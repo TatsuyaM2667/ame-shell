@@ -62,6 +62,8 @@ const static_pages = [_]Page{
     t("tech-wasm", "WebAssembly ウィジェット", @embedFile("content/tech/wasm.md")),
     t("tech-platform", "OS 対応(Linux と FreeBSD)", @embedFile("content/tech/platform.md")),
     t("tech-config", "設定と ame-ctl", @embedFile("content/tech/config.md")),
+    t("tech-tools", "小さな道具(Unix 哲学)", @embedFile("content/tech/tools.md")),
+    t("tech-memory", "メモリ", @embedFile("content/tech/memory.md")),
     t("tech-session", "セッションとインストーラ", @embedFile("content/tech/session.md")),
     t("tech-site", "このサイトの作り", @embedFile("content/tech/site.md")),
 } ++ convList(.wiki, @import("content/wiki/list.zig").items) ++ convList(.blog, @import("content/blog/list.zig").items);
