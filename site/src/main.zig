@@ -17,7 +17,8 @@ const std = @import("std");
 
 const refpages = @import("refpages");
 
-const Sec = enum(u32) { doc, tech, ref, wiki, blog };
+/// 区分。番号は app.js の並び(doc, tech, ref, wiki, blog, learn)と合わせる
+const Sec = enum(u32) { doc, tech, ref, wiki, blog, learn };
 
 const Page = struct {
     slug: []const u8,
@@ -30,6 +31,9 @@ const Page = struct {
 
 fn d(slug: []const u8, title: []const u8, src: []const u8) Page {
     return .{ .slug = slug, .title = title, .src = src, .sec = .doc };
+}
+fn lp(slug: []const u8, title: []const u8, src: []const u8) Page {
+    return .{ .slug = slug, .title = title, .src = src, .sec = .learn };
 }
 fn t(slug: []const u8, title: []const u8, src: []const u8) Page {
     return .{ .slug = slug, .title = title, .src = src, .sec = .tech };
@@ -44,6 +48,9 @@ const static_pages = [_]Page{
     d("compare", "ほかの WM と比較", @embedFile("content/compare.md")),
     d("install", "インストール", @embedFile("content/install.md")),
     d("reference", "設定とコマンド", @embedFile("content/reference.md")),
+    // ---- 学ぶ(学習用。レベル順) ----
+    lp("learn", "学ぶ: はじめに", @embedFile("content/learn/index.md")),
+    lp("learn/spring", "ばね(spring_step)", @embedFile("content/learn/spring.md")),
     // ---- 技術解説 ----
     t("tech", "全体像", @embedFile("content/tech/index.md")),
     t("tech-lang", "言語とツールチェイン", @embedFile("content/tech/lang.md")),
@@ -108,7 +115,7 @@ fn findSlug(s: []const u8) ?usize {
     return null;
 }
 
-/// 区分(0 ドキュメント / 1 技術解説 / 2 関数リファレンス / 3 Wiki / 4 ブログ)
+/// 区分(0 ドキュメント / 1 技術解説 / 2 関数リファレンス / 3 Wiki / 4 ブログ / 5 学ぶ)
 export fn page_section(i: u32) u32 {
     return if (i < pages.len) @intFromEnum(pages[i].sec) else 0;
 }
@@ -125,6 +132,7 @@ export fn render_nav(cur: u32) u32 {
     const sec: Sec = if (cur < pages.len) pages[cur].sec else .doc;
     const items = [_]struct { s: Sec, href: []const u8, label: []const u8 }{
         .{ .s = .doc, .href = "#/", .label = "docs" },
+        .{ .s = .learn, .href = "#/learn", .label = "学ぶ" },
         .{ .s = .tech, .href = "#/tech", .label = "技術解説" },
         .{ .s = .ref, .href = "#/ref", .label = "関数リファレンス" },
         .{ .s = .wiki, .href = "#/wiki", .label = "Wiki" },
@@ -246,6 +254,7 @@ export fn render_toc(i: u32) u32 {
     raw(switch (p.sec) {
         .tech => "技術解説",
         .ref => "ファイル",
+        .learn => "学ぶ(レベル順)",
         else => "ドキュメント",
     });
     raw("</p>");
@@ -436,7 +445,7 @@ fn splitId(s: []const u8, n: u32) Heading {
     return .{ .text = tt, .id = id };
 }
 
-/// 行内の書式: **太字** `コード` [文字](URL) [[wiki の項目]] [[項目|文字]]
+/// 行内の書式: **太字** `コード` [文字](URL) [[wiki の項目]] [[項目|文字]] {{用語|その場で開く説明}}
 fn inlineText(s: []const u8) void {
     var k: usize = 0;
     var plain: usize = 0;
@@ -457,6 +466,21 @@ fn inlineText(s: []const u8) void {
                 raw("<strong>");
                 inlineText(s[k + 2 .. e]);
                 raw("</strong>");
+                k = e + 2;
+                plain = k;
+                continue;
+            }
+        } else if (s[k] == '{' and k + 1 < s.len and s[k + 1] == '{') {
+            // {{用語|説明}}: 押すとその場で説明が開く(別のページへ飛ばない)
+            if (std.mem.indexOfPos(u8, s, k + 2, "}}")) |e| {
+                const inner = s[k + 2 .. e];
+                const bar = std.mem.indexOfScalar(u8, inner, '|') orelse inner.len;
+                esc(s[plain..k]);
+                raw("<span class=\"term\"><button type=\"button\" class=\"term-w\" aria-expanded=\"false\">");
+                inlineText(inner[0..bar]);
+                raw("</button><span class=\"term-d\" hidden>");
+                if (bar < inner.len) inlineText(inner[bar + 1 ..]);
+                raw("</span></span>");
                 k = e + 2;
                 plain = k;
                 continue;
@@ -695,6 +719,31 @@ fn renderDoc(src: []const u8, page: Page) void {
                 raw("<div class=\"demo\" data-demo=\"");
                 esc(arg);
                 raw("\"></div>");
+            } else if (std.mem.eql(u8, kind, "code")) {
+                // ::code パス:行 名前 | 説明 → GitHub のその行へのリンク(learn/tools/refcheck.zig が実在を検査する)
+                var a = std.mem.tokenizeScalar(u8, arg, ' ');
+                const loc = a.next() orelse "";
+                const name = trim(a.rest());
+                const colon = std.mem.lastIndexOfScalar(u8, loc, ':') orelse loc.len;
+                raw("<p class=\"codeloc\"><a href=\"https://github.com/TatsuyaM2667/ame-shell/blob/master/");
+                esc(loc[0..colon]);
+                if (colon < loc.len) {
+                    raw("#L");
+                    esc(loc[colon + 1 ..]);
+                }
+                raw("\" target=\"_blank\" rel=\"noopener\"><code>");
+                esc(loc);
+                raw("</code></a>");
+                if (name.len > 0) {
+                    raw(" の <code>");
+                    esc(name);
+                    raw("</code>");
+                }
+                if (cap.len > 0) {
+                    raw(" — ");
+                    inlineText(cap);
+                }
+                raw("</p>");
             } else if (std.mem.eql(u8, kind, "stats")) {
                 raw("<div class=\"stats\">");
                 mode = .stats;

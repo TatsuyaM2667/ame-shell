@@ -316,3 +316,48 @@ body[data-sec=wiki] .foot p { color: var(--w-sub); }
   body[data-sec=wiki] main { padding: 14px 16px 30px; }
   body[data-sec=wiki] .infobox { float: none; width: 100%; margin: 0 0 14px; }
 }
+
+/* ---- 学ぶ(body[data-sec=learn]): 短く区切る・次にやることを固定・押すまで動かない ---- */
+body[data-sec=learn] { font-size: 16px; line-height: 1.9; }
+body[data-sec=learn] p { max-width: 62ch; }
+.lbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 14px; font-size: 13px; }
+.lbar button { font: inherit; color: var(--hi); background: var(--bg2); border: 1px solid var(--line2); padding: 3px 10px; cursor: pointer; }
+.lbar button[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
+.lbar .prog { color: var(--sub); }
+.lhead { margin: 10px 0 18px; padding: 10px 14px; border: 1px solid var(--line2); background: var(--bg2); }
+.lhead p { margin: 2px 0; }
+.lhead b { display: inline-block; min-width: 13ch; color: var(--sub); font-weight: 400; }
+.steps { display: grid; gap: 2px; margin: 14px 0 22px; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--bg2); }
+.chk { display: flex; align-items: center; gap: 10px; margin: 6px 0; cursor: pointer; }
+.chk input { width: 18px; height: 18px; accent-color: var(--green); }
+.chk:has(input:checked) { color: var(--sub); text-decoration: line-through; }
+textarea.memo { width: 100%; margin: 8px 0 12px; padding: 8px 10px; font: 14px/1.6 var(--mono); color: var(--hi); background: var(--bg2); border: 1px solid var(--line2); resize: vertical; }
+details.hint, details.answer { margin: 8px 0; border: 1px solid var(--line2); background: var(--bg2); }
+details.hint > summary, details.answer > summary { padding: 6px 12px; cursor: pointer; color: var(--accent); list-style-position: inside; }
+details.answer > summary { color: var(--yellow); }
+details[open] { padding: 0 12px 8px; }
+details[open] > summary { margin: 0 -12px 6px; border-bottom: 1px solid var(--line2); }
+.term { display: inline; }
+.term-w { font: inherit; color: var(--hi); background: none; border: 0; border-bottom: 1px dotted var(--accent); padding: 0; cursor: help; }
+.term-w[aria-expanded=true] { color: var(--accent); }
+.term-d { display: block; margin: 4px 0 8px; padding: 6px 10px; font-size: 14px; color: var(--text); background: var(--bg2); border-left: 3px solid var(--accent); }
+.term-d[hidden] { display: none; }
+.codeloc { margin: 4px 0; font-size: 14px; }
+.nextbar { position: sticky; bottom: 0; z-index: 5; margin: 30px -14px 0; padding: 10px 14px; font-size: 14px; background: #14202c; border-top: 2px solid var(--accent); }
+.nextbar b { color: var(--accent); margin-right: 10px; }
+.resume, .today-box { margin: 14px 0; padding: 12px 14px; border: 1px solid var(--line2); background: var(--bg2); }
+a.go { display: inline-block; padding: 4px 12px; color: var(--bg); background: var(--accent); font-weight: 700; }
+a.go:hover { text-decoration: none; filter: brightness(1.1); }
+.demo .readout { margin: 10px 0 0; font-size: 13px; color: var(--hi); }
+.demo .legend i { display: inline-block; width: 22px; height: 0; margin-right: 6px; vertical-align: middle; border-top: 3px solid #7ab8ff; }
+.demo .legend i.dash { border-top: 2px dashed #aab4c8; }
+.demo .legend i.thin { border-top: 1px solid #ffc878; }
+.demo select { font: inherit; color: var(--hi); background: var(--bg); border: 1px solid var(--line2); }
+/* 集中モード: 横の欄・足・飾りを隠す */
+body.focus .toc, body.focus .foot, body.focus .manhead, body.focus .pager { display: none; }
+body.focus .layout { grid-template-columns: minmax(0, var(--max)); }
+/* 動きを減らす: 移り変わりの動きを止める(デモは結果だけを描く) */
+body.calm *, body.calm *::before, body.calm *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+@media (prefers-reduced-motion: reduce) {
+  body[data-sec=learn] *, body[data-sec=learn] *::before, body[data-sec=learn] *::after { animation: none !important; transition: none !important; }
+}

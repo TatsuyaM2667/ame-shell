@@ -63,7 +63,7 @@ function render() {
     const main = document.getElementById("main");
     main.innerHTML = out(S.render_page(idx));
     main.dataset.page = i < 0 ? "missing" : slug || "home";
-    document.body.dataset.sec = i < 0 ? "doc" : ["doc", "tech", "ref", "wiki", "blog"][S.page_section(idx)];
+    document.body.dataset.sec = i < 0 ? "doc" : ["doc", "tech", "ref", "wiki", "blog", "learn"][S.page_section(idx)];
     document.getElementById("nav").innerHTML = out(S.render_nav(idx));
     document.getElementById("toc").innerHTML = i < 0 ? "" : out(S.render_toc(idx));
     const title = i < 0 ? "見つかりません" : out(S.page_title(idx));
@@ -131,9 +131,13 @@ function setupPage(root) {
   heads.forEach((h) => ho.observe(h));
   cleanups.push(() => ho.disconnect());
 
+  // 学ぶ: チェック・メモ・次にやること・集中モード
+  if (document.body.dataset.sec === "learn") setupLearn(root, curSlug);
+  else document.body.classList.remove("focus", "calm");
+
   // デモ
   root.querySelectorAll(".demo[data-demo]").forEach((el) => {
-    const f = { spring: springDemo, fuzzy: fuzzyDemo, color: colorDemo }[el.dataset.demo];
+    const f = { spring: springDemo, fuzzy: fuzzyDemo, color: colorDemo, "spring-lab": springLab }[el.dataset.demo];
     if (f) f(el);
   });
 }
@@ -470,6 +474,256 @@ function colorDemo(el) {
   });
 }
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// 学ぶ(#/learn …): チェック・メモ・次にやること・集中モード・動きを減らす。
+// 覚えるのはこのブラウザの localStorage だけ(どこにも送らない)。
+// ---------------------------------------------------------------------------
+
+const LS = "ame-learn:";
+const lsGet = (k) => { try { return localStorage.getItem(LS + k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { if (v === null) localStorage.removeItem(LS + k); else localStorage.setItem(LS + k, v); } catch (e) {} };
+const calmWanted = () => lsGet("calm") === "1" || matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function setupLearn(root, slug) {
+  lsSet("last", slug);
+  lsSet("last-title", document.title.replace(/ — ame-shell$/, ""));
+  document.body.classList.toggle("focus", lsGet("focus") === "1");
+  document.body.classList.toggle("calm", calmWanted());
+
+  // 上のスイッチ(集中モード・動きを減らす)と進み具合
+  const bar = document.createElement("div");
+  bar.className = "lbar";
+  bar.innerHTML = `
+    <button type="button" data-t="focus" aria-pressed="false">集中モード</button>
+    <button type="button" data-t="calm" aria-pressed="false">動きを減らす</button>
+    <span class="prog" aria-live="polite"></span>`;
+  root.prepend(bar);
+  const sync = () => {
+    for (const b of bar.querySelectorAll("button")) {
+      const on = b.dataset.t === "calm" ? calmWanted() : lsGet("focus") === "1";
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+      b.textContent = (b.dataset.t === "calm" ? "動きを減らす" : "集中モード") + (on ? ": オン" : ": オフ");
+    }
+  };
+  bar.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-t]");
+    if (!b) return;
+    const k = b.dataset.t;
+    lsSet(k, lsGet(k) === "1" ? null : "1");
+    document.body.classList.toggle("focus", lsGet("focus") === "1");
+    document.body.classList.toggle("calm", calmWanted());
+    sync();
+  });
+  sync();
+
+  // 用語: 押すとその場で説明を開く
+  root.querySelectorAll(".term-w").forEach((b) => {
+    b.addEventListener("click", () => {
+      const d = b.nextElementSibling;
+      d.hidden = !d.hidden;
+      b.setAttribute("aria-expanded", d.hidden ? "false" : "true");
+    });
+  });
+
+  // チェック: 同じ鍵のものはページの中でそろえる
+  const boxes = [...root.querySelectorAll("input[type=checkbox][data-k]")];
+  const steps = [...root.querySelectorAll(".steps input[data-k]")];
+  for (const cb of boxes) cb.checked = lsGet("chk:" + cb.dataset.k) === "1";
+  const nextBar = document.createElement("div");
+  nextBar.className = "nextbar";
+  root.append(nextBar);
+  const update = () => {
+    const done = steps.filter((s) => s.checked).length;
+    bar.querySelector(".prog").textContent = steps.length ? `進み具合 ${done} / ${steps.length} ステップ` : "";
+    const next = steps.find((s) => !s.checked);
+    if (!steps.length) { nextBar.hidden = true; return; }
+    nextBar.hidden = false;
+    nextBar.innerHTML = next
+      ? `<b>次にやること</b> <span>${esc(next.parentElement.textContent.trim())}</span>`
+      : `<b>このレッスンは終わりました</b> <span>明日、最後の 3 問を何も見ずに答えてください</span>`;
+  };
+  for (const cb of boxes) {
+    cb.addEventListener("change", () => {
+      lsSet("chk:" + cb.dataset.k, cb.checked ? "1" : null);
+      for (const o of boxes) if (o.dataset.k === cb.dataset.k) o.checked = cb.checked;
+      update();
+    });
+  }
+  update();
+  cleanups.push(() => nextBar.remove());
+
+  // メモ
+  root.querySelectorAll("textarea.memo[data-k]").forEach((t) => {
+    t.value = lsGet("memo:" + t.dataset.k) || "";
+    t.addEventListener("input", () => lsSet("memo:" + t.dataset.k, t.value || null));
+  });
+
+  // 「続きから」(学ぶのトップ)
+  const rs = root.querySelector(".resume");
+  if (rs) {
+    const last = lsGet("last-before");
+    rs.innerHTML = last && last !== "learn"
+      ? `<a class="go" href="#/${esc(last)}">続きから: ${esc(lsGet("last-before-title") || last)} →</a>`
+      : `<p>はじめてですね。下の「今日やること」から始めてください。</p>`;
+  }
+  if (slug !== "learn") { lsSet("last-before", slug); lsSet("last-before-title", lsGet("last-title")); }
+}
+
+// ---------------------------------------------------------------------------
+// デモ: ばねの実験台(Odin の ame_spring_step をそのまま呼ぶ)。押すまで動かない。
+// ---------------------------------------------------------------------------
+function springLab(el) {
+  const FR = 1 / 60;
+  const T_END = 3;
+  el.innerHTML = `
+    <h4><span class="tag">WebAssembly</span>ばねの実験台 — anim/anim.odin の spring_step を 1/60 秒ずつ呼んでいます</h4>
+    <div class="row">
+      <button type="button" data-a="A">A: response 0.3・damping 0.3</button>
+      <button type="button" data-a="B">B: response 0.3・damping 1.0</button>
+    </div>
+    <div class="row">
+      <label>response <input type="range" min="0.05" max="1" step="0.01" value="0.3" data-k="r"> <span data-v="r"></span></label>
+      <label>damping <input type="range" min="0.1" max="1.5" step="0.01" value="1" data-k="d"> <span data-v="d"></span></label>
+    </div>
+    <canvas height="260" role="img" aria-label="位置と速さの折れ線"></canvas>
+    <div class="row">
+      <button type="button" data-a="play">▶ 再生</button>
+      <button type="button" data-a="frame">⏭ 1 コマ</button>
+      <button type="button" data-a="reset">↺ 最初から</button>
+      <label>速さ <select data-k="speed"><option value="0.25">0.25 倍</option><option value="0.5">0.5 倍</option><option value="1" selected>1 倍</option></select></label>
+    </div>
+    <div class="row">
+      <button type="button" data-a="flip">目標を -50 へ</button>
+      <button type="button" data-a="pause2">2 秒止める</button>
+    </div>
+    <p class="readout" aria-live="polite"></p>
+    <div class="row legend"><span><i class="solid"></i>今の位置(実線)</span><span><i class="dash"></i>前の位置(灰色の点線)</span><span><i class="thin"></i>速さ(下の細い線)</span></div>`;
+  const cv = el.querySelector("canvas");
+  const ctx = cv.getContext("2d");
+  const sp = () => new Float32Array(A.memory.buffer, base + 256, 5); // { x, v, target, response, damping }
+  const st = { t: 0, peak: 0, stopAt: -1, running: false, raf: 0, acc: 0, last: 0, cur: [], ghost: [], marks: [] };
+  const params = () => ({ r: parseFloat(el.querySelector("[data-k=r]").value), d: parseFloat(el.querySelector("[data-k=d]").value) });
+  const label = () => {
+    const p = params();
+    el.querySelector("[data-v=r]").textContent = p.r.toFixed(2) + " 秒";
+    el.querySelector("[data-v=d]").textContent = p.d.toFixed(2);
+  };
+  const reset = (keepGhost) => {
+    if (keepGhost && st.cur.length > 1) st.ghost = st.cur;
+    const p = params();
+    sp().set([0, 0, 100, p.r, p.d]);
+    Object.assign(st, { t: 0, peak: 0, stopAt: -1, cur: [[0, 0, 0]], marks: [] });
+    stop();
+    draw();
+  };
+  const tick = (dt) => {
+    const moving = A.ame_spring_step(base + 256, dt) !== 0;
+    st.t += dt;
+    const s = sp();
+    st.peak = Math.max(st.peak, s[0]);
+    if (!moving && st.stopAt < 0) st.stopAt = st.t;
+    st.cur.push([st.t, s[0], s[1]]);
+  };
+  const stop = () => {
+    st.running = false;
+    cancelAnimationFrame(st.raf);
+    el.querySelector("[data-a=play]").textContent = "▶ 再生";
+  };
+  const loop = (now) => {
+    const speed = parseFloat(el.querySelector("[data-k=speed]").value);
+    st.acc += Math.min(0.1, (now - st.last) / 1000) * speed;
+    st.last = now;
+    while (st.acc >= FR && st.t < T_END) { tick(FR); st.acc -= FR; }
+    draw();
+    if (st.t >= T_END) return stop();
+    st.raf = requestAnimationFrame(loop);
+  };
+  const play = () => {
+    if (st.t >= T_END) reset(true);
+    if (document.body.classList.contains("calm")) { // 動きを減らす: 結果だけを描く
+      while (st.t < T_END) tick(FR);
+      return draw();
+    }
+    st.running = true;
+    st.last = performance.now();
+    st.acc = 0;
+    el.querySelector("[data-a=play]").textContent = "⏸ 一時停止";
+    st.raf = requestAnimationFrame(loop);
+  };
+  el.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-a]");
+    if (!b) return;
+    const a = b.dataset.a;
+    if (a === "A" || a === "B") {
+      el.querySelector("[data-k=r]").value = 0.3;
+      el.querySelector("[data-k=d]").value = a === "A" ? 0.3 : 1.0;
+      label();
+      reset(true);
+    } else if (a === "play") st.running ? stop() : play();
+    else if (a === "frame") { stop(); if (st.t < T_END) tick(FR); draw(); }
+    else if (a === "reset") reset(true);
+    else if (a === "flip") {
+      const s = sp();
+      s[2] = s[2] === 100 ? -50 : 100;
+      st.marks.push([st.t, "目標 → " + s[2]]);
+      b.textContent = s[2] === 100 ? "目標を -50 へ" : "目標を 100 へ";
+      draw();
+    } else if (a === "pause2") {
+      st.marks.push([st.t, "2 秒止めた"]);
+      tick(2); // ame-shell と同じ関数に dt = 2 秒を渡す(中で 0.1 秒までに抑えられる)
+      st.t -= 2; // 横軸は動いた時間だけにする(止めた 2 秒は描かない)
+      st.cur[st.cur.length - 1][0] = st.t;
+      draw();
+    }
+  });
+  el.querySelectorAll("input[type=range]").forEach((inp) => inp.addEventListener("input", () => { label(); reset(true); }));
+  cleanups.push(stop);
+
+  function draw() {
+    const dpr = devicePixelRatio || 1;
+    const W = cv.clientWidth, H = 260;
+    if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const L = 44, R = W - 12, top = 12, mid = 180, vbot = 250;
+    const X = (t) => L + (t / T_END) * (R - L);
+    const Y = (x) => mid - ((x + 80) / 240) * (mid - top); // -80 … 160
+    ctx.font = "12px 'Noto Sans JP', sans-serif";
+    ctx.fillStyle = "rgba(200,212,236,.8)";
+    for (const v of [-50, 0, 100, 150]) {
+      ctx.strokeStyle = v === 100 ? "rgba(255,255,255,.35)" : "rgba(160,190,255,.12)";
+      ctx.setLineDash(v === 100 ? [4, 4] : []);
+      ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(R, Y(v)); ctx.stroke();
+      ctx.fillText(String(v), 6, Y(v) + 4);
+    }
+    ctx.setLineDash([]);
+    for (let s = 0; s <= T_END; s++) ctx.fillText(s + " 秒", X(s) - 10, vbot + 8 > H ? H - 2 : vbot + 8);
+    const line = (pts, k, col, dash, w, ys) => {
+      ctx.strokeStyle = col; ctx.lineWidth = w; ctx.setLineDash(dash);
+      ctx.beginPath();
+      pts.forEach((p, i) => { const y = ys(p[k]); i ? ctx.lineTo(X(p[0]), y) : ctx.moveTo(X(p[0]), y); });
+      ctx.stroke(); ctx.setLineDash([]);
+    };
+    const VY = (v) => 215 - Math.max(-30, Math.min(30, v / 40)); // 速さは下の帯に小さく
+    line(st.ghost, 1, "rgba(170,180,200,.6)", [5, 4], 2, Y);
+    line(st.cur, 1, "#7ab8ff", [], 2.5, Y);
+    line(st.cur, 2, "rgba(255,200,120,.9)", [], 1, VY);
+    ctx.fillStyle = "rgba(200,212,236,.8)";
+    ctx.fillText("速さ", 6, 219);
+    for (const [t, txt] of st.marks) {
+      ctx.strokeStyle = "rgba(255,255,255,.5)";
+      ctx.beginPath(); ctx.moveTo(X(t), top); ctx.lineTo(X(t), mid); ctx.stroke();
+      ctx.fillText(txt, Math.min(X(t) + 4, R - 90), top + 12);
+    }
+    const s = sp();
+    el.querySelector(".readout").textContent =
+      `時刻 ${st.t.toFixed(2)} 秒 ・ 位置 ${s[0].toFixed(1)} ・ 速さ ${s[1].toFixed(1)} ・ 最大 ${st.peak.toFixed(1)} ・ ` +
+      (st.stopAt >= 0 ? `止まった: ${st.stopAt.toFixed(2)} 秒` : "まだ動いている");
+  }
+  label();
+  reset(false);
+}
 
 async function main() {
   try {
