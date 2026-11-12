@@ -23,8 +23,8 @@ const fixed = [_]Bind{
     .{ .keysym = c.XKB_KEY_Return, .mods = SUPER, .action = .{ .spawn = "ame-terminal" } },
     .{ .keysym = c.XKB_KEY_t, .mods = SUPER, .action = .{ .spawn = "ame-terminal" } },
     .{ .keysym = c.XKB_KEY_b, .mods = SUPER, .action = .{ .spawn = "firefox" } },
-    // ファイルマネージャ(thunar。無ければフォルダを開く既定のアプリ)
-    .{ .keysym = c.XKB_KEY_e, .mods = SUPER, .action = .{ .spawn = "command -v thunar >/dev/null 2>&1 && exec thunar || exec xdg-open \"$HOME\"" } },
+    // ファイルマネージャ(ame-filemanager → thunar → フォルダを開く既定のアプリ。~/.local/bin に入れた ame-filemanager も探す)
+    .{ .keysym = c.XKB_KEY_e, .mods = SUPER, .action = .{ .spawn = "PATH=\"$HOME/.local/bin:$PATH\"; command -v ame-filemanager >/dev/null 2>&1 && exec ame-filemanager; command -v thunar >/dev/null 2>&1 && exec thunar; exec xdg-open \"$HOME\"" } },
     .{ .keysym = c.XKB_KEY_s, .mods = SUPER, .action = .{ .spawn = "$HOME/.local/bin/control-center.sh" } },
     // ame-shell を読み込み直す(更新を入れた後など。窓はそのまま)。録画はサイドバーのボタンから
     .{ .keysym = c.XKB_KEY_r, .mods = SUPER | SHIFT, .action = .{ .ame = "restart" } },

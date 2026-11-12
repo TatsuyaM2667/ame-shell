@@ -38,12 +38,12 @@ const BTN_MIDDLE = 0x112;
 const ALL_EDGES = c.RIVER_WINDOW_V1_EDGES_TOP | c.RIVER_WINDOW_V1_EDGES_BOTTOM | c.RIVER_WINDOW_V1_EDGES_LEFT | c.RIVER_WINDOW_V1_EDGES_RIGHT;
 const SCRATCH_TAG: u32 = 1 << 20;
 
-/// ame-shell が半透明にしている窓か(Thunar の AmeGlass・ghostty・foot)。たわむ絵で透け具合を戻すため(wobble.zig)
+/// 半透明の窓か(ame-filemanager・Thunar の AmeGlass・ghostty・foot)。たわむ絵で透け具合を戻すため(wobble.zig)
 fn isGlassy(app_id: []const u8) bool {
     var buf: [96]u8 = undefined;
     const n = @min(app_id.len, buf.len);
     const low = std.ascii.lowerString(buf[0..n], app_id[0..n]);
-    for ([_][]const u8{ "thunar", "ghostty", "foot" }) |k| if (std.mem.indexOf(u8, low, k) != null) return true;
+    for ([_][]const u8{ "ame-filemanager", "thunar", "ghostty", "foot" }) |k| if (std.mem.indexOf(u8, low, k) != null) return true;
     return false;
 }
 

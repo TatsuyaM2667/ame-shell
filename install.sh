@@ -401,8 +401,20 @@ for d in client.conf.d pipewire-pulse.conf.d; do
 done
 
 # ---------------------------------------------------------------------------
-# フォルダを開くアプリ(ファイルマネージャ): 決まっていない、または KDE の Dolphin(消した場合など)なら thunar に
-if command -v thunar >/dev/null 2>&1 && command -v xdg-mime >/dev/null 2>&1; then
+# フォルダを開くアプリ(ファイルマネージャ): ame-filemanager が入っていれば、それに(thunar・未設定・Dolphin のときだけ。ほかを選んでいればそのまま)
+fm_desk=""
+for d in "${XDG_DATA_HOME:-$HOME/.local/share}/applications" /usr/local/share/applications /usr/share/applications; do
+    [ -f "$d/ame-filemanager.desktop" ] && fm_desk=ame-filemanager.desktop && break
+done
+if [ -n "$fm_desk" ] && command -v xdg-mime >/dev/null 2>&1; then
+    cur=$(xdg-mime query default inode/directory 2>/dev/null)
+    case "$cur" in
+        ""|thunar.desktop|*Thunar*|*dolphin*|*kfmclient*|org.kde.*)
+            xdg-mime default ame-filemanager.desktop inode/directory && info "フォルダを開くアプリ: ame-filemanager(Super+E)" ;;
+        *) info "フォルダを開くアプリ: $cur(そのまま)" ;;
+    esac
+# 無ければ: 決まっていない、または KDE の Dolphin(消した場合など)なら thunar に
+elif command -v thunar >/dev/null 2>&1 && command -v xdg-mime >/dev/null 2>&1; then
     cur=$(xdg-mime query default inode/directory 2>/dev/null)
     case "$cur" in
         ""|*dolphin*|*kfmclient*|org.kde.*)
