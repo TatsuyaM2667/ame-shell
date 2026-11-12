@@ -66,18 +66,11 @@ pub fn build(b: *std.Build) void {
         .aarch64 => "-target:linux_arm64",
         else => "-target:linux_amd64",
     };
-    const odin = b.addSystemCommand(&.{ "odin", "build" });
-    odin.addDirectoryArg(b.path("anim"));
-    odin.addArgs(&.{
+    const anim_obj = addOdinObject(b, "anim.o", &.{
         "-build-mode:obj",  "-no-entry-point",           "-o:speed",
         "-no-bounds-check", "-default-to-nil-allocator", "-no-thread-local",
         "-reloc-mode:pic",  odin_target,
     });
-    const anim_obj = odin.addPrefixedOutputFileArg("-out:", "anim.o");
-    // ディレクトリ引数は中身の変更を追跡しないため、ソースを明示的に入力に加える。
-    odin.addFileInput(b.path("anim/anim.odin"));
-    odin.addFileInput(b.path("anim/fft.odin"));
-    odin.addFileInput(b.path("anim/image.odin"));
 
     // --- wasm3: WASM ウィジェットの実行ランタイム(C, MIT) ---
     const wasm3_files = [_][]const u8{
@@ -219,13 +212,10 @@ pub fn build(b: *std.Build) void {
 
     // --- WASM ウィジェット(Zig → wasm32-freestanding) ---
     // アニメーションコアは同じ Odin ソースを wasm32 にもビルドしてウィジェットへリンクする。
-    const odin_wasm = b.addSystemCommand(&.{ "odin", "build" });
-    odin_wasm.addDirectoryArg(b.path("anim"));
-    odin_wasm.addArgs(&.{ "-build-mode:obj", "-no-entry-point", "-o:size", "-no-bounds-check", "-default-to-nil-allocator", "-target:freestanding_wasm32" });
-    const anim_wasm = odin_wasm.addPrefixedOutputFileArg("-out:", "anim_wasm.o");
-    odin_wasm.addFileInput(b.path("anim/anim.odin"));
-    odin_wasm.addFileInput(b.path("anim/fft.odin"));
-    odin_wasm.addFileInput(b.path("anim/image.odin"));
+    const anim_wasm = addOdinObject(b, "anim_wasm.o", &.{
+        "-build-mode:obj",           "-no-entry-point",             "-o:size", "-no-bounds-check",
+        "-default-to-nil-allocator", "-target:freestanding_wasm32",
+    });
     const abi_mod = b.createModule(.{ .root_source_file = b.path("src/widget/widget_abi.zig") });
     const wasm_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
     for ([_][]const u8{ "clock", "sysmon", "media", "calendar", "controls" }) |name| {
@@ -341,6 +331,36 @@ pub fn build(b: *std.Build) void {
         ct.linkLibC();
         test_step.dependOn(&b.addRunArtifact(ct).step);
     }
+}
+
+/// anim/ を Odin でオブジェクトにし、Zig が読める `out_name` を返す。
+/// Odin の dev-2026-07 nightly は `-out:anim.o` と渡しても `anim.obj` を書く
+/// (出力先をディレクトリと誤認して拡張子を .obj に固定する不具合。dev-2026-08 で修正済み)。
+/// どちらの Odin でも同じ名前にそろうよう、sh で包んで .obj を .o に直す。
+fn addOdinObject(b: *std.Build, out_name: []const u8, flags: []const []const u8) std.Build.LazyPath {
+    const odin = b.addSystemCommand(&.{
+        "sh",
+        "-c",
+        \\set -e
+        \\out=$1
+        \\dir=$2
+        \\shift 2
+        \\rm -f "$out" "${out%.*}.obj"
+        \\odin build "$dir" "$@" -out:"$out"
+        \\if [ ! -f "$out" ]; then
+        \\    mv "${out%.*}.obj" "$out"
+        \\fi
+        ,
+        "sh",
+    });
+    const out = odin.addOutputFileArg(out_name);
+    odin.addDirectoryArg(b.path("anim"));
+    odin.addArgs(flags);
+    // ディレクトリ引数は中身の変更を追跡しないため、ソースを明示的に入力に加える。
+    odin.addFileInput(b.path("anim/anim.odin"));
+    odin.addFileInput(b.path("anim/fft.odin"));
+    odin.addFileInput(b.path("anim/image.odin"));
+    return out;
 }
 
 /// libdbus を使う(ヘッダの場所は ame-shell 本体と同じ。FreeBSD は pkg-config を使わない)
