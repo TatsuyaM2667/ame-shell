@@ -730,7 +730,7 @@ pub const Frame = struct {
         if (nh > 0 and !self.notif.open) self.notif.show(false);
         if (nh <= 0 and self.notif.open) self.notif.hide();
         self.notif.setSize(notif_w, @max(nh, 1));
-        self.util.setSize(360, 206);
+        self.util.setSize(420, 206);
         self.side.setSize(400, self.side.h.x);
         self.ai.setSize(aipanel.W, self.ai.h.x);
         if (island.size(self)) |isz| {

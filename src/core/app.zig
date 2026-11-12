@@ -512,6 +512,7 @@ pub const App = struct {
         }
         const old = self.cfg;
         self.cfg = cfg;
+        if (@import("../frame/island.zig").loadPref()) |on| self.cfg.island = on;
         anim.speed_scale = cfg.anim_speed;
         if (!first) {
             log.info("設定を再読込しました", .{});

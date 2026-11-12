@@ -34,6 +34,8 @@ const WS_MS = 1400;
 
 const State = struct {
     timer: ?loop.Timer = null,
+    /// 隠していてタイマーを止めた(また出したとき ensure が arm し直す)
+    stopped: bool = false,
     app: ?*App = null,
     rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(1),
     // 目
@@ -94,7 +96,13 @@ fn set(buf: []u8, len: *usize, s: []const u8) void {
 }
 
 fn ensure(app: *App) void {
-    if (st.timer != null) return;
+    if (st.timer != null) {
+        if (st.stopped) {
+            st.stopped = false;
+            arm();
+        }
+        return;
+    }
     st.app = app;
     st.rng = std.Random.DefaultPrng.init(loop.nowMs());
     st.timer = loop.Timer.init() catch return;
@@ -129,6 +137,11 @@ fn arm() void {
 
 fn onTimer(_: *anyopaque, _: c_int, _: u32) void {
     if (st.timer) |t| t.ack();
+    // 隠している間は起きない(タイマーは 1 回きりなので、arm しなければ止まる。出すと size() → ensure が arm し直す)
+    if (st.app) |a| if (!a.cfg.island) {
+        st.stopped = true;
+        return;
+    };
     const now = loop.nowMs();
     const r = st.rng.random();
     // カーソルが止まって少したった: 前を向いて、また自分できょろきょろ
@@ -181,6 +194,37 @@ fn onTimer(_: *anyopaque, _: c_int, _: u32) void {
     }
     arm();
     redrawAll();
+}
+
+// ---------------------------------------------------------------------------
+// ユーティリティのボタンでの出す / 隠す(~/.local/state/ame-shell/island に on / off。設定の island より優先)
+// ---------------------------------------------------------------------------
+
+fn prefPath(buf: []u8) ?[]const u8 {
+    var d: [400]u8 = undefined;
+    const dir = @import("ame_lib").ai.stateDir(&d) orelse return null;
+    return std.fmt.bufPrint(buf, "{s}/island", .{dir}) catch null;
+}
+
+/// ボタンで選んだもの。選んでいなければ null(設定の island を使う)
+pub fn loadPref() ?bool {
+    var pb: [512]u8 = undefined;
+    var buf: [8]u8 = undefined;
+    const d = std.fs.cwd().readFile(prefPath(&pb) orelse return null, &buf) catch return null;
+    const v = std.mem.trim(u8, d, " \t\r\n");
+    if (std.mem.eql(u8, v, "on")) return true;
+    if (std.mem.eql(u8, v, "off")) return false;
+    return null;
+}
+
+pub fn toggle(app: *App) void {
+    app.cfg.island = !app.cfg.island;
+    var pb: [512]u8 = undefined;
+    if (prefPath(&pb)) |p| {
+        if (std.fs.path.dirname(p)) |d| std.fs.cwd().makePath(d) catch {};
+        std.fs.cwd().writeFile(.{ .sub_path = p, .data = if (app.cfg.island) "on" else "off" }) catch {};
+    }
+    app.redrawAll();
 }
 
 // ---------------------------------------------------------------------------

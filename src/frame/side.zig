@@ -108,10 +108,10 @@ fn drawNotifs(f: *Frame, cv: *gfx.Canvas, w: f32) bool {
 // ユーティリティ(右下): トグルと電源プロファイル、録画
 // ---------------------------------------------------------------------------
 
-const UtilBtn = enum(u8) { wifi, bt, dnd, inhibit, record, screenshot, hand, airpods, saver, balanced, perf };
-const N_UTIL = 11;
-/// 大きいボタン(上の 2 段 × 4 列)の数。残りは電源プロファイル
-const N_BIG = 8;
+const UtilBtn = enum(u8) { wifi, bt, dnd, inhibit, record, screenshot, hand, airpods, island, saver, balanced, perf };
+const N_UTIL = 12;
+/// 大きいボタン(上の 2 段 × 5 列。最後の 1 つは空き)の数。残りは電源プロファイル
+const N_BIG = 9;
 
 fn utilButtons(f: *Frame) [N_UTIL]struct { b: UtilBtn, icon: []const u8, label: []const u8, on: bool } {
     const d = f.app.dashboard;
@@ -128,6 +128,8 @@ fn utilButtons(f: *Frame) [N_UTIL]struct { b: UtilBtn, icon: []const u8, label: 
         .{ .b = .hand, .icon = "\u{F1821}", .label = if (hand_on) @import("../hand/hand.zig").modeLabel(@import("../hand/hand.zig").mode()) else "ハンド操作", .on = hand_on },
         // 左右のイヤホンの形。AirPods の頭の動きで操作する(airpods.zig)
         .{ .b = .airpods, .icon = "\u{F184F}", .label = "AirPods 操作", .on = ap_on },
+        // ダイナミックアイランド(上の中央の目)を出す / 隠す(island.zig。設定の island より優先して覚える)
+        .{ .b = .island, .icon = "\u{F0208}", .label = "アイランド", .on = f.app.cfg.island },
         .{ .b = .saver, .icon = "\u{F032A}", .label = "省電力", .on = f.sidev.profile == .saver },
         .{ .b = .balanced, .icon = "\u{F05D1}", .label = "バランス", .on = f.sidev.profile == .balanced },
         .{ .b = .perf, .icon = "\u{F0463}", .label = "高性能", .on = f.sidev.profile == .performance },
@@ -137,10 +139,10 @@ fn utilButtons(f: *Frame) [N_UTIL]struct { b: UtilBtn, icon: []const u8, label: 
 fn utilRect(i: usize, w: f32) [4]f32 {
     const pad: f32 = 14;
     if (i < N_BIG) {
-        // 4 列 × 2 段
-        const bw = (w - pad * 2 - 3 * 8) / 4;
-        const col: f32 = @floatFromInt(i % 4);
-        const row: f32 = @floatFromInt(i / 4);
+        // 5 列 × 2 段
+        const bw = (w - pad * 2 - 4 * 8) / 5;
+        const col: f32 = @floatFromInt(i % 5);
+        const row: f32 = @floatFromInt(i / 5);
         return .{ pad + col * (bw + 8), 44 + row * 58, bw, 50 };
     }
     const bw = (w - pad * 2 - 2 * 8) / 3;
@@ -222,6 +224,7 @@ fn utilPress(f: *Frame, i: usize) void {
         },
         .hand => @import("../hand/hand.zig").toggle(app),
         .airpods => @import("../device/airpods.zig").toggle(app),
+        .island => @import("island.zig").toggle(app),
         .saver => data.setPowerProfile(.saver),
         .balanced => data.setPowerProfile(.balanced),
         .perf => data.setPowerProfile(.performance),
