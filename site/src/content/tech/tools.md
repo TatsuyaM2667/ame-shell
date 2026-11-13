@@ -7,7 +7,7 @@ ame-shell は「画面を描く 1 つのプロセス」と「画面の要らな�
 :::easy このページを読む前に
 Unix には「1 つのことをうまくやる小さな道具を、パイプ(`|`)でつないで使う」という考え方があります。`ls | grep zig` のように、ある道具の出力を別の道具の入力にできるのは、どの道具も「文字」でやりとりしているからです。
 
-ame-shell の歌詞さがし・AI との会話・天気・鍵束なども、そういう小さな道具になっています。だから ame-shell が無くても、端末で `ame-weather Tokyo` と打てば天気が出ます。
+ame-shell の歌詞さがし・AI との会話・天気・鍵束なども、そういう小さな道具になっています。だから ame-shell が無くても、端末で `ame-kuraokami Tokyo` と打てば天気が出ます。
 :::
 
 ## 考え方 {#idea}
@@ -27,7 +27,7 @@ ame-shell の歌詞さがし・AI との会話・天気・鍵束なども、そ�
 | `CLI の出力 \| ame-agent [-f 形式]` | Claude Code・Gemini・Codex・OpenCode・Kimi・Antigravity の出力を共通の出来事に | JSON の行 → 出来事の JSON の行 |
 | `ame-agent sessions [フォルダ]` / `history フォルダ id` | Claude Code の会話の一覧・記録 | → JSON の行 |
 | `ame-config check [ファイル]` / `path` | 設定ファイルの文法と値を確かめる・場所を出す | → 「ファイル:行: 内容」。終了コード 0 / 1 警告 / 2 読めない |
-| `ame-weather [--json] [場所]` | 今の天気(wttr.in) | → 「12°C 晴れ(場所)」/ JSON。終了コード 0 / 1 分からない / 2 つながらない |
+| `ame-kuraokami [--json] [場所]` | 今の天気(wttr.in) | → 「12°C 晴れ(場所)」/ JSON。終了コード 0 / 1 分からない / 2 つながらない |
 | `ame-airpods head` / `battery` / `find` | AirPods の頭の動き・電池・接続中のもの(AAP、Linux) | → 1 行 1 つの JSON(head は止めるまで流し続ける) |
 | `ame-handtrack [-d カメラ]` | カメラに映った手の形と位置・関節 21 点 | → 1 行 1 つの JSON(止めるまで流し続ける) |
 | `ame-keyring` / `ame-keyring list` | 鍵束(`org.freedesktop.secrets`)。Zed などが API キーをしまう(gnome-keyring の代わり) | D-Bus の Secret Service / 一覧 |
@@ -45,7 +45,7 @@ ame-config check || echo "設定に間違いがあります"
 
 ## 終了コードで答える {#exit}
 
-小さな道具は、結果の「種類」を終了コードで返します。例えば `ame-weather` は、0 = 取れた、1 = 場所が分からない、2 = つながらない。ame-shell はこれを見て、「場所の名前を見直して」と「ネットにつながっていません」を出し分けます。シェルスクリプトからも `if ame-weather …; then` で同じ判断ができます。
+小さな道具は、結果の「種類」を終了コードで返します。例えば `ame-kuraokami` は、0 = 取れた、1 = 場所が分からない、2 = つながらない。ame-shell はこれを見て、「場所の名前を見直して」と「ネットにつながっていません」を出し分けます。シェルスクリプトからも `if ame-kuraokami …; then` で同じ判断ができます。
 
 ## 鍵束(ame-keyring) {#keyring}
 
@@ -57,7 +57,7 @@ Zed などのアプリは、API キーを `org.freedesktop.secrets`(Secret Servi
 
 ## 単独のリポジトリにも {#split}
 
-`src/cmd` の道具は、どれも単独でビルドできるリポジトリにも切り出してあります([ame-lyrics](https://github.com/TatsuyaM2667/ame-lyrics)・[ame-ai](https://github.com/TatsuyaM2667/ame-ai)・[ame-agent](https://github.com/TatsuyaM2667/ame-agent)・[ame-config](https://github.com/TatsuyaM2667/ame-config)・[ame-weather](https://github.com/TatsuyaM2667/ame-weather)・[ame-airpods](https://github.com/TatsuyaM2667/ame-airpods)・[ame-handtrack](https://github.com/TatsuyaM2667/ame-handtrack)・[ame-keyring](https://github.com/TatsuyaM2667/ame-keyring))。正本は ame-shell(全部入り)で、`sh scripts/split-repos.sh` が、道具が使う `src/lib` の部品だけを集めて各リポジトリを生成・同期します。
+`src/cmd` の道具は、どれも単独でビルドできるリポジトリにも切り出してあります([ame-lyrics](https://github.com/TatsuyaM2667/ame-lyrics)・[ame-ai](https://github.com/TatsuyaM2667/ame-ai)・[ame-agent](https://github.com/TatsuyaM2667/ame-agent)・[ame-config](https://github.com/TatsuyaM2667/ame-config)・[ame-kuraokami](https://github.com/TatsuyaM2667/ame-kuraokami)・[ame-airpods](https://github.com/TatsuyaM2667/ame-airpods)・[ame-handtrack](https://github.com/TatsuyaM2667/ame-handtrack)・[ame-keyring](https://github.com/TatsuyaM2667/ame-keyring))。正本は ame-shell(全部入り)で、`sh scripts/split-repos.sh` が、道具が使う `src/lib` の部品だけを集めて各リポジトリを生成・同期します。
 
 新しい機能を足すときは、画面が要らない部分をまず `src/lib/` に純粋な関数として書いて試験を付け、外から使える意味があれば `src/cmd/` にコマンドを足します(`build.zig` の `cmds` と `session/install-session.sh` にも名前を足す)。
 

@@ -1,9 +1,10 @@
-// ame-light: 画面の明るさを読む / 変える(brightnessctl の代わり)。
+// amaterasu: 画面の明るさを読む / 変える(brightnessctl の代わり)。
+// 名前は光の神、天照大神(あまてらす)から。
 //
-//   ame-light                 今の明るさ(0〜100 の数)を 1 行
-//   ame-light set 40          40% に(40% とも書ける)
-//   ame-light set +5 / -5     5% 明るく / 暗く(brightnessctl の 5%+ / 5%- の書き方も読む)
-//   ame-light restore         最後に set した明るさに戻す(起動時。カーネルは再起動のたびにファームウェアの値に戻すので)
+//   amaterasu                 今の明るさ(0〜100 の数)を 1 行
+//   amaterasu set 40          40% に(40% とも書ける)
+//   amaterasu set +5 / -5     5% 明るく / 暗く(brightnessctl の 5%+ / 5%- の書き方も読む)
+//   amaterasu restore         最後に set した明るさに戻す(起動時。カーネルは再起動のたびにファームウェアの値に戻すので)
 //
 // set した明るさ(%)は $XDG_STATE_HOME/ame-shell/light に覚える。
 //
@@ -16,7 +17,7 @@ const sysbus = @import("sysbus.zig");
 const c = sysbus.c;
 
 fn usage() noreturn {
-    std.io.getStdErr().writeAll("使い方: ame-light [set <0-100 | +N | -N> | restore]\n") catch {};
+    std.io.getStdErr().writeAll("使い方: amaterasu [set <0-100 | +N | -N> | restore]\n") catch {};
     std.process.exit(2);
 }
 

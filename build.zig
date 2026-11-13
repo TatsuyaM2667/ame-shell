@@ -189,7 +189,7 @@ pub fn build(b: *std.Build) void {
     }
     b.installArtifact(ctl);
 
-    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai", "ame-agent", "ame-config", "ame-weather", "ame-airpods", "ame-handtrack", "ame-keyring", "ame-light", "ame-power" };
+    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai", "ame-agent", "ame-config", "ame-kuraokami", "ame-airpods", "ame-handtrack", "ame-keyring", "amaterasu", "ame-tajikara" };
     // --- 画面を持たない小さな道具(標準入出力でやりとりする。src/cmd/。libc だけ)---
     for (cmds) |name| {
         const t = b.addExecutable(.{
@@ -210,7 +210,7 @@ pub fn build(b: *std.Build) void {
 
     // --- Odin で書いた小さな道具(odin/<名前>/。標準入出力でやりとりする)---
     // 別の OS 向けに作るとき(FreeBSD の試しビルドなど)は Odin のリンクに相手の sysroot が要るので作らない
-    const odin_cmds = [_][]const u8{ "ame-vol", "ame-spectrum" };
+    const odin_cmds = [_][]const u8{ "ame-uzume", "ame-hamon" };
     const native = target.query.isNativeOs() and target.query.isNativeCpu();
     for (odin_cmds) |name| {
         if (!native) break;
@@ -425,7 +425,7 @@ fn addOdinInputs(b: *std.Build, run: *std.Build.Step.Run, name: []const u8) void
 
 /// D-Bus を使う小さな道具(鍵束・明るさ・電源プロファイル)
 fn usesDbus(name: []const u8) bool {
-    for ([_][]const u8{ "ame-keyring", "ame-light", "ame-power" }) |n| if (std.mem.eql(u8, name, n)) return true;
+    for ([_][]const u8{ "ame-keyring", "amaterasu", "ame-tajikara" }) |n| if (std.mem.eql(u8, name, n)) return true;
     return false;
 }
 

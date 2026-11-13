@@ -1,8 +1,9 @@
-// ame-power: 電源プロファイルを読む / 変える(powerprofilesctl の代わり)。
+// ame-tajikara: 電源プロファイルを読む / 変える(powerprofilesctl の代わり)。
+// 名前は力の神、天手力男神(あめのたぢからお)から。
 //
-//   ame-power                 今のプロファイル(power-saver / balanced / performance)を 1 行
-//   ame-power set <名前>      変える(power-saver・balanced・performance)
-//   ame-power restore         最後に set したプロファイルに戻す(ログインのとき)
+//   ame-tajikara                 今のプロファイル(power-saver / balanced / performance)を 1 行
+//   ame-tajikara set <名前>      変える(power-saver・balanced・performance)
+//   ame-tajikara restore         最後に set したプロファイルに戻す(ログインのとき)
 //
 // power-profiles-daemon に D-Bus で直接たずねる(新しい名前 org.freedesktop.UPower.PowerProfiles、無ければ古い net.hadess.PowerProfiles)。
 // set したものは $XDG_STATE_HOME/ame-shell/power に覚える(デーモンが起動のたびに別のものに戻すことがあるので)。
@@ -18,7 +19,7 @@ const services = [_]Svc{
 const names = [_][:0]const u8{ "power-saver", "balanced", "performance" };
 
 fn usage() noreturn {
-    std.io.getStdErr().writeAll("使い方: ame-power [set power-saver|balanced|performance | restore]\n") catch {};
+    std.io.getStdErr().writeAll("使い方: ame-tajikara [set power-saver|balanced|performance | restore]\n") catch {};
     std.process.exit(2);
 }
 

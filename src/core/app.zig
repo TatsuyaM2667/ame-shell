@@ -729,9 +729,9 @@ pub const App = struct {
         self.redrawBars();
     }
 
-    /// `ame-vol watch` を常駐させる。音量が変わるたびに「45」/「45 muted」の 1 行が来る(読み直しは要らない)
+    /// `ame-uzume watch` を常駐させる。音量が変わるたびに「45」/「45 muted」の 1 行が来る(読み直しは要らない)
     fn startPactl(self: *App) void {
-        const fd = sys.spawnReader(&.{ "ame-vol", "watch" }, &self.pactl_pid) orelse return;
+        const fd = sys.spawnReader(&.{ "ame-uzume", "watch" }, &self.pactl_pid) orelse return;
         self.pactl_fd = fd;
         self.loop.add(fd, c.EPOLLIN, self, onPactl) catch {};
     }
@@ -744,7 +744,7 @@ pub const App = struct {
             const n = c.read(fd, &buf, buf.len);
             if (n <= 0) {
                 if (n == 0 or events & c.EPOLLHUP != 0) {
-                    // ame-vol が終了した(PipeWire 再起動など)。監視をやめる。
+                    // ame-uzume が終了した(PipeWire 再起動など)。監視をやめる。
                     self.loop.remove(fd);
                     _ = c.close(fd);
                     self.pactl_fd = -1;

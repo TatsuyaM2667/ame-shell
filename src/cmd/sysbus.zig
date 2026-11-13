@@ -1,4 +1,4 @@
-// システムの D-Bus を呼ぶ小さな道具の共通部分(ame-light・ame-power)。libdbus の薄い包み。
+// システムの D-Bus を呼ぶ小さな道具の共通部分(amaterasu・ame-tajikara)。libdbus の薄い包み。
 const std = @import("std");
 pub const c = @cImport(@cInclude("dbus/dbus.h"));
 

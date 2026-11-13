@@ -1,6 +1,7 @@
-// ame-spectrum: 今鳴っている音を周波数ごとの棒の高さにして、1 行ずつ流す(cava の代わり)。
+// ame-hamon: 今鳴っている音を周波数ごとの棒の高さにして、1 行ずつ流す(cava の代わり)。
+// 名前は波紋(はもん)から。雨粒が水面に広げる輪のように、音を広げて見せる。
 //
-//   ame-spectrum [-b 本数]     1 行 = 棒の高さ(0〜1000)を ';' でつないだもの(cava の raw ascii と同じ形)
+//   ame-hamon [-b 本数]     1 行 = 棒の高さ(0〜1000)を ';' でつないだもの(cava の raw ascii と同じ形)
 //
 // 音は PulseAudio の録音の口(PipeWire なら pipewire-pulse)の @DEFAULT_MONITOR@ から、libpulse-simple を実行時に読んで取る。
 // 計算: 窓をかけて FFT(anim/fft.odin。ame-shell と同じもの)、50Hz〜12kHz を対数で分け、dB にして最近の大きい音で
@@ -113,20 +114,20 @@ parse_bars :: proc(args: []string) -> int {
 main :: proc() {
 	bars := parse_bars(os.args[1:])
 	if bars == 0 {
-		fmt.eprintln("使い方: ame-spectrum [-b 本数(1〜256)]")
+		fmt.eprintln("使い方: ame-hamon [-b 本数(1〜256)]")
 		os.exit(2)
 	}
 	pa, ok := load()
 	if !ok {
-		fmt.eprintln("ame-spectrum: libpulse-simple が見つかりません")
+		fmt.eprintln("ame-hamon: libpulse-simple が見つかりません")
 		os.exit(1)
 	}
 	ss := Sample_Spec{format = 5, rate = RATE, channels = 1} // PA_SAMPLE_FLOAT32LE・モノラル
 	attr := Buffer_Attr{max(u32), max(u32), max(u32), max(u32), CHUNK * 4}
 	err: i32
-	s := pa.new(nil, "ame-spectrum", 2, "@DEFAULT_MONITOR@", "spectrum", &ss, nil, &attr, &err)
+	s := pa.new(nil, "ame-hamon", 2, "@DEFAULT_MONITOR@", "spectrum", &ss, nil, &attr, &err)
 	if s == nil {
-		fmt.eprintln("ame-spectrum: 音を取り込めません(@DEFAULT_MONITOR@)")
+		fmt.eprintln("ame-hamon: 音を取り込めません(@DEFAULT_MONITOR@)")
 		os.exit(1)
 	}
 	t := new(Tables)
@@ -141,7 +142,7 @@ main :: proc() {
 	sb := strings.builder_make()
 	for {
 		if pa.read(s, &buf, size_of(buf), &err) < 0 {
-			fmt.eprintln("ame-spectrum: 音の取り込みが止まりました")
+			fmt.eprintln("ame-hamon: 音の取り込みが止まりました")
 			os.exit(1)
 		}
 		// 古いサンプルを前へ詰めて、新しいものを後ろへ

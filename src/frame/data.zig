@@ -2,7 +2,7 @@
 //  * GPU/CPU 温度・GPU 使用率・ストレージ … ダッシュボードが開いている間の 1 秒ティックで読む
 //  * 天気 … wttr.in を curl で非同期取得(30 分キャッシュ)。完了は pipe の EOF で知る
 //  * 音声スペクトラム … メディアタブ・ロック画面で曲が流れている間だけ、録音して FFT(cava は使わない)
-//  * 電源プロファイル … ame-power(src/cmd)(ユーティリティを開いたとき)
+//  * 電源プロファイル … ame-tajikara(src/cmd)(ユーティリティを開いたとき)
 const std = @import("std");
 const c = @import("../c.zig");
 const sys = @import("../platform/sys.zig");
@@ -144,7 +144,7 @@ pub const Weather = struct {
     on_update: ?*const fn (ctx: *anyopaque) void = null,
     ctx: *anyopaque = undefined,
 
-    /// 30 分以上経っていれば取り直す(ダッシュボードを開いたときに呼ぶ)。取るのは ame-weather(src/cmd/ame-weather.zig)
+    /// 30 分以上経っていれば取り直す(ダッシュボードを開いたときに呼ぶ)。取るのは ame-kuraokami(src/cmd/ame-kuraokami.zig)
     pub fn refresh(self: *Weather) void {
         if (self.fd >= 0) return;
         if (self.fetched_ms != 0 and loop.nowMs() - self.fetched_ms < 30 * 60 * 1000) return;
@@ -152,7 +152,7 @@ pub const Weather = struct {
         // 場所は shell { weather-location "Sapporo" }。無ければ IP アドレスから推定
         var lb: [128]u8 = undefined;
         const loc = std.fmt.bufPrintZ(&lb, "{s}", .{self.app.cfg.weather_location.get()}) catch return;
-        const fd = sys.spawnReader(&.{ "ame-weather", "--json", loc.ptr }, &self.pid) orelse return;
+        const fd = sys.spawnReader(&.{ "ame-kuraokami", "--json", loc.ptr }, &self.pid) orelse return;
         self.fd = fd;
         self.app.loop.add(fd, c.EPOLLIN | c.EPOLLHUP, self, onRead) catch {
             _ = c.close(fd);
@@ -206,7 +206,7 @@ pub const Weather = struct {
 };
 
 // ---------------------------------------------------------------------------
-// 音声スペクトラム(メディアの波形)。cava の代わりの小さな道具 ame-spectrum(odin/ame-spectrum)を動かし、
+// 音声スペクトラム(メディアの波形)。cava の代わりの小さな道具 ame-hamon(odin/ame-hamon)を動かし、
 // 1 行 = 棒の高さ(0〜1000)を ';' でつないだもの を読むだけ(録音・FFT・音量のそろえは向こうがする)。
 //  * 見えている間だけ動かす(start / stop)。無音の間は向こうが何も書かないので、描画も起きない
 // ---------------------------------------------------------------------------
@@ -215,7 +215,7 @@ pub const BARS = 48;
 
 pub const Spectrum = struct {
     app: *App,
-    /// ame-spectrum の出力を読む fd(動いていなければ -1)
+    /// ame-hamon の出力を読む fd(動いていなければ -1)
     fd: c_int = -1,
     pid: c_int = 0,
     values: [BARS]f32 = [_]f32{0} ** BARS,
@@ -247,7 +247,7 @@ pub const Spectrum = struct {
     /// 波形の代わりに出す説明(出せているときは null)
     pub fn problem(self: *const Spectrum) ?[]const u8 {
         return switch (self.state) {
-            .missing => "音を取り込めないため波形を表示できません(ame-spectrum が必要です)",
+            .missing => "音を取り込めないため波形を表示できません(ame-hamon が必要です)",
             .failed => "音を取り込めませんでした(PipeWire / PulseAudio を確認)",
             .ok, .idle => if (self.running() and loop.nowMs() -| @max(self.started_ms, self.sound_ms) > SILENT_MS)
                 "音を拾えていません(PipeWire / PulseAudio を確認)"
@@ -261,12 +261,12 @@ pub const Spectrum = struct {
         const now = loop.nowMs();
         if ((self.state == .missing or self.state == .failed) and now < self.retry_ms) return;
         self.retry_ms = now + RETRY_MS;
-        if (!sys.hasCommand("ame-spectrum")) {
-            if (self.state != .missing) std.log.warn("spectrum: ame-spectrum が見つかりません。メディアの波形は表示されません", .{});
+        if (!sys.hasCommand("ame-hamon")) {
+            if (self.state != .missing) std.log.warn("spectrum: ame-hamon が見つかりません。メディアの波形は表示されません", .{});
             self.state = .missing;
             return;
         }
-        self.fd = sys.spawnReader(&.{ "ame-spectrum", "-b", std.fmt.comptimePrint("{d}", .{BARS}) }, &self.pid) orelse {
+        self.fd = sys.spawnReader(&.{ "ame-hamon", "-b", std.fmt.comptimePrint("{d}", .{BARS}) }, &self.pid) orelse {
             self.state = .failed;
             return;
         };
@@ -296,7 +296,7 @@ pub const Spectrum = struct {
             const n = c.read(fd, &buf, buf.len);
             if (n <= 0) {
                 if (n == 0 or events & c.EPOLLHUP != 0) {
-                    std.log.warn("spectrum: ame-spectrum が止まりました(音を取り込めない)", .{});
+                    std.log.warn("spectrum: ame-hamon が止まりました(音を取り込めない)", .{});
                     self.state = .failed;
                     self.stop();
                     if (self.on_frame) |f| f(self.ctx);
@@ -362,7 +362,7 @@ pub const Profile = enum { unknown, saver, balanced, performance };
 
 pub fn powerProfile() Profile {
     var out: [64]u8 = undefined;
-    const s = sys.run(&.{"ame-power"}, &out) orelse return .unknown;
+    const s = sys.run(&.{"ame-tajikara"}, &out) orelse return .unknown;
     if (std.mem.eql(u8, s, "power-saver")) return .saver;
     if (std.mem.eql(u8, s, "balanced")) return .balanced;
     if (std.mem.eql(u8, s, "performance")) return .performance;
@@ -376,7 +376,7 @@ pub fn setPowerProfile(p: Profile) void {
         else => "balanced",
     };
     var out: [64]u8 = undefined;
-    _ = sys.run(&.{ "ame-power", "set", name }, &out);
+    _ = sys.run(&.{ "ame-tajikara", "set", name }, &out);
 }
 
 // ---------------------------------------------------------------------------

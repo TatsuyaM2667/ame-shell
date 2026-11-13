@@ -400,7 +400,7 @@ pub const Frame = struct {
         self.updateTick();
         if (self.dash.open) self.weather.refresh();
         if (self.util.open and !self.util_queried) {
-            // 開いた瞬間に一度だけ(D-Bus の問い合わせ・ame-power は数 ms〜数十 ms かかるので毎フレームは呼ばない)
+            // 開いた瞬間に一度だけ(D-Bus の問い合わせ・ame-tajikara は数 ms〜数十 ms かかるので毎フレームは呼ばない)
             self.util_queried = true;
             self.sidev.profile = data.powerProfile();
             self.app.dashboard.queryRadiosPub();

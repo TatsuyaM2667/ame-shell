@@ -47,7 +47,7 @@ ame-shell のコードは、次の 6 つの原則で一貫しています。各�
 | `widget/`(294)・`widgets/` | wasm3 でウィジェットを動かす | [WebAssembly](#/tech-wasm) |
 | `device/`・`hand/`・`face/`(4,012) | AirPods・手の操作・顔の認証 | — |
 | `lib/`(3,019) | 画面にも OS にも依存しない部品(試験つき) | [小さな道具](#/tech-tools) |
-| `cmd/`(2,456) | 小さな道具(ame-lyrics・ame-ai・ame-agent・ame-config・ame-weather・ame-airpods・ame-handtrack・ame-keyring) | [小さな道具](#/tech-tools) |
+| `cmd/`(2,456) | 小さな道具(ame-lyrics・ame-ai・ame-agent・ame-config・ame-kuraokami・ame-airpods・ame-handtrack・ame-keyring) | [小さな道具](#/tech-tools) |
 | `anim/*.odin`(369) | ばね・あいまい検索・主色抽出・FFT・画像の縮小 | [ばね](#/tech-anim) |
 | `session/*`(POSIX sh) | ame-session・ame-river5-init・インストーラ | [セッション](#/tech-session) |
 

@@ -16,7 +16,7 @@
 | `CLI の出力 \| ame-agent [-f 形式]` | Claude Code・Gemini・Codex・OpenCode・Kimi の出力を共通の出来事に | JSON の行 → 出来事の JSON の行 |
 | `ame-agent sessions [フォルダ]` / `history フォルダ id` | Claude Code の会話の一覧・記録 | → JSON の行 |
 | `ame-config check [ファイル]` / `path` | 設定ファイルの文法と値を確かめる・場所を出す | → 「ファイル:行: 内容」。終了コード 0 / 1 警告 / 2 読めない |
-| `ame-weather [--json] [場所]` | 今の天気(wttr.in) | → 「12°C 晴れ(場所)」/ JSON。終了コード 0 / 1 分からない / 2 つながらない |
+| `ame-kuraokami [--json] [場所]` | 今の天気(wttr.in) | → 「12°C 晴れ(場所)」/ JSON。終了コード 0 / 1 分からない / 2 つながらない |
 | `ame-airpods head` / `battery` / `find` | AirPods の頭の動き・電池・接続中のもの(AAP、Linux) | → 1 行 1 つの JSON(head は止めるまで流し続ける) |
 | `ame-handtrack [-d カメラ]` | カメラに映った手の形と位置・関節 21 点(ame-hand で推論) | → 1 行 1 つの JSON(status / frame。止めるまで流し続ける) |
 | `ame-keyring` / `ame-keyring list` | 鍵束(org.freedesktop.secrets)。Zed などが API キー・パスワードをしまう(gnome-keyring の代わり) | D-Bus の Secret Service / 名前と属性の一覧 |
@@ -28,7 +28,7 @@
 `claude -p 直して --output-format stream-json --verbose | ame-agent -C "$PWD" | jq -r 'select(.type=="tool").title'`
 
 src/cmd の道具は、どれも単独でビルドできるリポジトリにも切り出してある
-([ame-lyrics](https://github.com/TatsuyaM2667/ame-lyrics)・[ame-ai](https://github.com/TatsuyaM2667/ame-ai)・[ame-agent](https://github.com/TatsuyaM2667/ame-agent)・[ame-config](https://github.com/TatsuyaM2667/ame-config)・[ame-weather](https://github.com/TatsuyaM2667/ame-weather)・[ame-airpods](https://github.com/TatsuyaM2667/ame-airpods)・[ame-handtrack](https://github.com/TatsuyaM2667/ame-handtrack)・[ame-keyring](https://github.com/TatsuyaM2667/ame-keyring))。
+([ame-lyrics](https://github.com/TatsuyaM2667/ame-lyrics)・[ame-ai](https://github.com/TatsuyaM2667/ame-ai)・[ame-agent](https://github.com/TatsuyaM2667/ame-agent)・[ame-config](https://github.com/TatsuyaM2667/ame-config)・[ame-kuraokami](https://github.com/TatsuyaM2667/ame-kuraokami)・[ame-airpods](https://github.com/TatsuyaM2667/ame-airpods)・[ame-handtrack](https://github.com/TatsuyaM2667/ame-handtrack)・[ame-keyring](https://github.com/TatsuyaM2667/ame-keyring))。
 正本はこの ame-shell(全部入り)で、切り出したものは `sh scripts/split-repos.sh` が生成して同期する(道具を直したら実行し直す)。
 
 ## ソースの置き場
@@ -49,7 +49,7 @@ src/
   hand/ face/  手の操作(認識は ame-handtrack を動かす)・顔の認証(カメラ)
   platform/  OS ごとの違い(Linux / FreeBSD)・イベントループ
   lib/       画面にも OS にも依存しない部品(lrc・ai・mcp・agentfmt・appid・config・weather・aap・secretstore)
-  cmd/       小さな道具(ame-lyrics・ame-ai・ame-agent・ame-config・ame-weather・ame-airpods・ame-handtrack・ame-keyring)
+  cmd/       小さな道具(ame-lyrics・ame-ai・ame-agent・ame-config・ame-kuraokami・ame-airpods・ame-handtrack・ame-keyring)
 anim/        Odin: ばね・あいまい検索・主色抽出・FFT・画像の縮小(C ABI。wasm32 にも同じものをビルド)
 widgets/     WASM ウィジェット(Zig → wasm32)
 ```

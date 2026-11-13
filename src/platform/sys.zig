@@ -158,7 +158,7 @@ pub fn brightness() ?f32 {
     return null;
 }
 
-/// sysfs への書き込みは通常 root だけなので ame-light(src/cmd。書けなければ logind に頼む)に任せる。
+/// sysfs への書き込みは通常 root だけなので amaterasu(src/cmd。書けなければ logind に頼む)に任せる。
 pub fn setBrightnessDelta(percent: i32) void {
     var arg: [16]u8 = undefined;
     const a = if (percent >= 0)
@@ -172,7 +172,7 @@ pub fn setBrightnessDelta(percent: i32) void {
         _ = run(&.{ "backlight", if (percent >= 0) "incr" else "decr", n.ptr }, &out);
         return;
     }
-    _ = run(&.{ "ame-light", "set", a.ptr }, &out);
+    _ = run(&.{ "amaterasu", "set", a.ptr }, &out);
 }
 
 /// 明るさを 0〜1 で(ダッシュボード・サイドバーのスライダー)。真っ暗にはしない
@@ -182,16 +182,16 @@ pub fn setBrightness(level: f32) void {
     const a = std.fmt.bufPrintZ(&arg, "{d}", .{pct}) catch return;
     var out: [64]u8 = undefined;
     // FreeBSD の backlight(8) は数だけで、その割合にする
-    if (is_bsd) _ = run(&.{ "backlight", a.ptr }, &out) else _ = run(&.{ "ame-light", "set", a.ptr }, &out);
+    if (is_bsd) _ = run(&.{ "backlight", a.ptr }, &out) else _ = run(&.{ "amaterasu", "set", a.ptr }, &out);
 }
 
-// ---------------- 音量(ame-vol: odin/ame-vol。PulseAudio の口に libpulse で話す。set / mute した値を覚える) ----------------
+// ---------------- 音量(ame-uzume: odin/ame-uzume。PulseAudio の口に libpulse で話す。set / mute した値を覚える) ----------------
 
 pub const Volume = struct { known: bool = false, level: f32 = 0, muted: bool = false };
 
 pub fn volume() Volume {
     var out: [128]u8 = undefined;
-    const s = run(&.{"ame-vol"}, &out) orelse {
+    const s = run(&.{"ame-uzume"}, &out) orelse {
         // FreeBSD で PipeWire が無いときは mixer(8)
         if (is_bsd) if (bsd.mixerVolume(run)) |m| return .{ .known = true, .level = m.level, .muted = m.muted };
         return .{};
@@ -199,7 +199,7 @@ pub fn volume() Volume {
     return parseVolume(s);
 }
 
-/// ame-vol の 1 行(「45」/「45 muted」)を読む(ame-vol watch の行も同じ形)
+/// ame-uzume の 1 行(「45」/「45 muted」)を読む(ame-uzume watch の行も同じ形)
 pub fn parseVolume(s: []const u8) Volume {
     var it = std.mem.tokenizeAny(u8, s, " \n");
     const pct = std.fmt.parseInt(u32, it.next() orelse return .{}, 10) catch return .{};
@@ -214,8 +214,8 @@ pub fn setVolumeDelta(percent: i32) void {
     else
         std.fmt.bufPrintZ(&arg, "-{d}", .{-percent}) catch return;
     var out: [8]u8 = undefined;
-    // ame-vol は 100% を超えない(耳とスピーカーの保護)
-    if (run(&.{ "ame-vol", "set", a.ptr }, &out) == null and is_bsd) {
+    // ame-uzume は 100% を超えない(耳とスピーカーの保護)
+    if (run(&.{ "ame-uzume", "set", a.ptr }, &out) == null and is_bsd) {
         var mb: [32]u8 = undefined;
         const m = std.fmt.bufPrintZ(&mb, "vol.volume={s}{d:.2}", .{ if (percent >= 0) "+" else "-", @as(f32, @floatFromInt(@abs(percent))) / 100 }) catch return;
         _ = run(&.{ "mixer", m.ptr }, &out);
@@ -226,7 +226,7 @@ pub fn setVolume(level: f32) void {
     var arg: [16]u8 = undefined;
     const a = std.fmt.bufPrintZ(&arg, "{d}", .{@as(u32, @intFromFloat(@round(std.math.clamp(level, 0, 1) * 100)))}) catch return;
     var out: [8]u8 = undefined;
-    if (run(&.{ "ame-vol", "set", a.ptr }, &out) == null and is_bsd) {
+    if (run(&.{ "ame-uzume", "set", a.ptr }, &out) == null and is_bsd) {
         var mb: [32]u8 = undefined;
         const m = std.fmt.bufPrintZ(&mb, "vol.volume={d:.2}", .{std.math.clamp(level, 0, 1)}) catch return;
         _ = run(&.{ "mixer", m.ptr }, &out);
@@ -235,7 +235,7 @@ pub fn setVolume(level: f32) void {
 
 pub fn toggleMute() void {
     var out: [8]u8 = undefined;
-    if (run(&.{ "ame-vol", "mute" }, &out) == null and is_bsd) {
+    if (run(&.{ "ame-uzume", "mute" }, &out) == null and is_bsd) {
         _ = run(&.{ "mixer", "vol.mute=^" }, &out);
     }
 }

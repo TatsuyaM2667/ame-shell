@@ -113,7 +113,7 @@ ame-shell と一緒に入る、端末からも使える道具です(詳しくは
 | `ame-ai [-p 会社] [-m モデル] [-i 画像]` | AI と話す(標準入力の質問 → 返事) |
 | `ame-agent [-f 形式]` | コーディング CLI の出力を共通の JSON の行に |
 | `ame-config check [ファイル]` | 設定ファイルの間違いを行番号つきで出す |
-| `ame-weather [--json] [場所]` | 今の天気 |
+| `ame-kuraokami [--json] [場所]` | 今の天気 |
 | `ame-airpods head` / `battery` / `find` | AirPods の頭の動き・電池 |
 | `ame-handtrack` | カメラの手の認識(JSON の行) |
 | `ame-keyring` / `ame-keyring list` | 鍵束(Secret Service)。セッションが自動で起動します |

@@ -1,10 +1,11 @@
-// ame-vol: 音量を読む / 変える / 見張る(wpctl・pactl の代わり)。
+// ame-uzume: 音量を読む / 変える / 見張る(wpctl・pactl の代わり)。
+// 名前は天岩戸の前で舞い、音を鳴らした芸能の神、天宇受売命(あめのうずめ)から。
 //
-//   ame-vol                  今の音量を 1 行(「45」、消音なら「45 muted」)
-//   ame-vol set 40 | +5 | -5 音量を変える(0〜100。100 は超えない: 耳とスピーカーを守る)
-//   ame-vol mute [on|off]    消音を切り替える(on / off で決め打ち)
-//   ame-vol restore          最後に set / mute した音量に戻す(ログインのとき)
-//   ame-vol watch            今の音量を 1 行、その後は変わるたびに 1 行(終わらない)
+//   ame-uzume                  今の音量を 1 行(「45」、消音なら「45 muted」)
+//   ame-uzume set 40 | +5 | -5 音量を変える(0〜100。100 は超えない: 耳とスピーカーを守る)
+//   ame-uzume mute [on|off]    消音を切り替える(on / off で決め打ち)
+//   ame-uzume restore          最後に set / mute した音量に戻す(ログインのとき)
+//   ame-uzume watch            今の音量を 1 行、その後は変わるたびに 1 行(終わらない)
 //
 // 相手は既定の出力(@DEFAULT_SINK@)。PulseAudio の口(PipeWire なら pipewire-pulse)に libpulse で話す。
 // libpulse は実行時に読む(ヘッダも -dev パッケージも要らない。無ければ 1 で終わる)。
@@ -102,7 +103,7 @@ load :: proc() -> bool {
 connect :: proc() -> bool {
 	if !load() do return false
 	ml = pa.mainloop_new()
-	ctx = pa.context_new(pa.mainloop_get_api(ml), "ame-vol")
+	ctx = pa.context_new(pa.mainloop_get_api(ml), "ame-uzume")
 	if ctx == nil || pa.context_connect(ctx, nil, 0, nil) < 0 do return false
 	for {
 		switch pa.context_get_state(ctx) {
@@ -198,7 +199,7 @@ print_level :: proc(l: Level) {
 }
 
 usage :: proc() -> ! {
-	fmt.eprintln("使い方: ame-vol [set <0-100 | +N | -N> | mute [on|off] | restore | watch]")
+	fmt.eprintln("使い方: ame-uzume [set <0-100 | +N | -N> | mute [on|off] | restore | watch]")
 	os.exit(2)
 }
 
@@ -223,12 +224,12 @@ main :: proc() {
 	if cmd == "set" && len(args) != 2 do usage()
 	if cmd == "mute" && len(args) > 2 do usage()
 	if !connect() {
-		fmt.eprintln("ame-vol: 音の口(PulseAudio / pipewire-pulse)につながりません")
+		fmt.eprintln("ame-uzume: 音の口(PulseAudio / pipewire-pulse)につながりません")
 		os.exit(1)
 	}
 	cur := read()
 	if !cur.known {
-		fmt.eprintln("ame-vol: 既定の出力が見つかりません")
+		fmt.eprintln("ame-uzume: 既定の出力が見つかりません")
 		os.exit(1)
 	}
 	switch cmd {
