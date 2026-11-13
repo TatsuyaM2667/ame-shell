@@ -14,8 +14,8 @@
 //   {"type":"error","message":…}                      失敗(終了コード 1)
 //   {"type":"done"}
 // --mcp で選んだ stdio の MCP サーバを起動し、ツールをモデルに渡す。モデルが呼んだら実行して結果を返し、
-// 続きを答えさせる(12 往復まで)。API キーはコマンドラインに出さず curl の標準入力(-K -)で渡す。
-// 止めるときはプロセスグループごと(curl・MCP サーバも)止める。
+// 続きを答えさせる(12 往復まで)。API キーはコマンドラインに出さず ame-yatagarasu の標準入力(-K -。curl と同じ書き方)で渡す。
+// 止めるときはプロセスグループごと(ame-yatagarasu・MCP サーバも)止める。
 const std = @import("std");
 const lib = @import("ame_lib");
 const ai = lib.ai;
@@ -231,7 +231,7 @@ const Mcp = struct {
 };
 
 // ---------------------------------------------------------------------------
-// 1 回の問い合わせ(curl で送り、Server-Sent Events を読む)
+// 1 回の問い合わせ(ame-yatagarasu で送り、Server-Sent Events を読む)
 // ---------------------------------------------------------------------------
 
 const Reply = struct { text: []const u8, calls: []ai.Call, failed: ?[]const u8 };
@@ -255,11 +255,11 @@ fn request(a: std.mem.Allocator, p: usize, base: []const u8, mdl: []const u8, sy
     ai.buildCurlConfig(&cfg, p, url, k, path) catch return .{ .text = "", .calls = &.{}, .failed = "設定を作れませんでした" };
     @memset(&kb, 0);
 
-    var ch = std.process.Child.init(&.{ "curl", "-sS", "-N", "--connect-timeout", "15", "--max-time", "900", "-w", "\n" ++ HTTP_MARK ++ "%{http_code}\n", "-K", "-" }, a);
+    var ch = std.process.Child.init(&.{ "ame-yatagarasu", "-sS", "-N", "--connect-timeout", "15", "--max-time", "900", "-w", "\n" ++ HTTP_MARK ++ "%{http_code}\n", "-K", "-" }, a);
     ch.stdin_behavior = .Pipe;
     ch.stdout_behavior = .Pipe;
     ch.stderr_behavior = .Pipe;
-    ch.spawn() catch return .{ .text = "", .calls = &.{}, .failed = "curl を起動できませんでした(curl を入れてください)" };
+    ch.spawn() catch return .{ .text = "", .calls = &.{}, .failed = "ame-yatagarasu を起動できませんでした" };
     ch.stdin.?.writeAll(cfg.items) catch {};
     @memset(cfg.items, 0);
     ch.stdin.?.close();
@@ -435,7 +435,7 @@ pub fn main() !void {
         var kb: [512]u8 = undefined;
         var cfg = std.ArrayList(u8).init(a);
         try ai.buildCurlConfig(&cfg, p, try std.fmt.allocPrint(a, "{s}/models", .{base}), ai.key(p, &kb), null);
-        var ch = std.process.Child.init(&.{ "curl", "-sS", "--connect-timeout", "10", "--max-time", "30", "-K", "-" }, a);
+        var ch = std.process.Child.init(&.{ "ame-yatagarasu", "-sS", "--connect-timeout", "10", "--max-time", "30", "-K", "-" }, a);
         ch.stdin_behavior = .Pipe;
         ch.stdout_behavior = .Pipe;
         try ch.spawn();

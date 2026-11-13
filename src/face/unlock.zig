@@ -402,7 +402,7 @@ fn dataPath(buf: []u8, name: []const u8) ?[]const u8 {
     return std.fmt.bufPrint(buf, "{s}/.local/share/ame-shell/{s}", .{ home, name }) catch null;
 }
 
-/// モデルを読む。無い・壊れていれば取ってくる(curl)。中身は SHA-256 で確かめる
+/// モデルを読む。無い・壊れていれば取ってくる(ame-yatagarasu)。中身は SHA-256 で確かめる
 fn loadModel(a: std.mem.Allocator, m: core.Model) ?[]u8 {
     var nb: [128]u8 = undefined;
     const rel = std.fmt.bufPrint(&nb, "models/{s}", .{m.file}) catch return null;
@@ -414,7 +414,7 @@ fn loadModel(a: std.mem.Allocator, m: core.Model) ?[]u8 {
     var tb: [520]u8 = undefined;
     const tmp = std.fmt.bufPrintZ(&tb, "{s}.part", .{path}) catch return null;
     var pid: c_int = 0;
-    const fd = sys.spawnReader(&.{ "curl", "-sSfL", "--max-time", "300", "-o", tmp.ptr, m.url.ptr }, &pid) orelse return null;
+    const fd = sys.spawnReader(&.{ "ame-yatagarasu", "-sSfL", "--max-time", "300", "-o", tmp.ptr, m.url.ptr }, &pid) orelse return null;
     var sink: [256]u8 = undefined;
     while (true) {
         if (st.quit.load(.acquire)) {

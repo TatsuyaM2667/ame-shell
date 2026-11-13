@@ -1,5 +1,5 @@
 // メディア(MPRIS): 音楽プレイヤーと D-Bus で直接やりとりする(src/media/mpris.zig)。信号が来たときだけ状態を更新する
-// (ポーリングしない)。アルバムアートは file:// ならそのまま、http(s) なら curl で
+// (ポーリングしない)。アルバムアートは file:// ならそのまま、http(s) なら ame-yatagarasu で
 // キャッシュへ取得(完了を pipe の EOF で検知)。読み込んだ画像から Odin で主色を抽出し、
 // テーマのアクセント色をその色へ滑らかに遷移させる。
 const std = @import("std");
@@ -170,7 +170,7 @@ pub const Media = struct {
             const uz = std.fmt.bufPrintZ(&url_z, "{s}", .{url}) catch return;
             // .part に取り、最後まで取れたときだけ本来の名前へ(途中で失敗・中断したものをキャッシュとして読まない)。
             // パスと URL は引数で渡す(sh の文字列に埋め込まない)
-            self.curl_fd = sys.spawnReader(&.{ "/bin/sh", "-c", "curl -sfL --max-time 8 --max-filesize 8000000 -o \"$1.part\" \"$2\" && mv -f \"$1.part\" \"$1\"", "sh", p.ptr, uz.ptr }, &self.curl_pid) orelse return;
+            self.curl_fd = sys.spawnReader(&.{ "/bin/sh", "-c", "ame-yatagarasu -sfL --max-time 8 --max-filesize 8000000 -o \"$1.part\" \"$2\" && mv -f \"$1.part\" \"$1\"", "sh", p.ptr, uz.ptr }, &self.curl_pid) orelse return;
             self.app.loop.add(self.curl_fd, c.EPOLLIN | c.EPOLLHUP, self, onCurl) catch {
                 _ = c.close(self.curl_fd);
                 self.curl_fd = -1;
@@ -184,7 +184,7 @@ pub const Media = struct {
         const self: *Media = @ptrCast(@alignCast(ctx));
         var b: [64]u8 = undefined;
         const n = c.read(fd, &b, b.len);
-        if (n > 0) return; // curl は -o なので通常何も出さない
+        if (n > 0) return; // ame-yatagarasu は -o なので通常何も出さない
         self.app.loop.remove(fd);
         _ = c.close(fd);
         self.curl_fd = -1;

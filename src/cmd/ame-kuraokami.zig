@@ -5,7 +5,7 @@
 //   ame-kuraokami --json [-l 言葉] [場所]   {"temp","condition","symbol","icon","place"} の 1 行
 //
 // 場所を省くと IP アドレスから推定。言葉は既定 ja(wttr.in の lang)。icon は Nerd Font の天気のアイコン(夜は月)。
-// 終了コード: 0 取れた / 1 場所が分からない・返事の形が違う / 2 つながらない(curl が要る)
+// 終了コード: 0 取れた / 1 場所が分からない・返事の形が違う / 2 つながらない(ame-yatagarasu が要る)
 const std = @import("std");
 const weather = @import("ame_lib").weather;
 
@@ -48,8 +48,8 @@ pub fn main() !void {
     }
     var ub: [256]u8 = undefined;
     const u = weather.url(place, lang, &ub) orelse usage();
-    const r = std.process.Child.run(.{ .allocator = a, .argv = &.{ "curl", "-s", "--max-time", "8", u }, .max_output_bytes = 4096 }) catch {
-        std.io.getStdErr().writeAll("ame-kuraokami: curl を起動できません\n") catch {};
+    const r = std.process.Child.run(.{ .allocator = a, .argv = &.{ "ame-yatagarasu", "-s", "--max-time", "8", u }, .max_output_bytes = 4096 }) catch {
+        std.io.getStdErr().writeAll("ame-kuraokami: ame-yatagarasu を起動できません\n") catch {};
         std.process.exit(2);
     };
     if (r.term != .Exited or r.term.Exited != 0) {

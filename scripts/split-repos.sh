@@ -20,17 +20,18 @@ if [ "${1:-}" = "--dry-run" ]; then DRY=1; shift; fi
 
 # 名前|使う部品(src/lib のファイル名、空白区切り)|外部コマンド|ほかに要るもの(dbus = libdbus / ame-hand = 手の認識)|説明
 COMPONENTS='ame-lyrics|lrc|curl||曲の同期歌詞(LRC)を探す小さなコマンド(LRCLIB・NetEase・Kugou、キャッシュつき)
-ame-ai|ai mcp|curl||いろいろな会社の AI と標準入出力で話す小さなコマンド(MCP のツール呼び出しつき)
+ame-ai|ai mcp|ame-yatagarasu||いろいろな会社の AI と標準入出力で話す小さなコマンド(MCP のツール呼び出しつき)
 ame-agent|agentfmt|||コーディング CLI(Claude Code・Gemini・Codex・OpenCode・Kimi)の出力を共通の JSON の行に直すフィルタ
 ame-config|config|||ame-shell の設定ファイル(config.ame)の文法と値を確かめる小さなコマンド
-ame-kuraokami|weather|curl||今の天気を wttr.in から取ってくる小さなコマンド(文字 / JSON)
+ame-kuraokami|weather|ame-yatagarasu||今の天気を wttr.in から取ってくる小さなコマンド(文字 / JSON)
 ame-airpods|aap|bluetoothctl||AirPods の頭の動き・電池を Bluetooth(AAP)で読む小さなコマンド(Linux)
-ame-handtrack||curl|ame-hand|カメラに映った手の形と位置・関節 21 点を JSON の行で流し続ける小さなコマンド(Linux)
+ame-handtrack||ame-yatagarasu|ame-hand|カメラに映った手の形と位置・関節 21 点を JSON の行で流し続ける小さなコマンド(Linux)
 ame-keyring|secretstore||dbus|鍵束(org.freedesktop.secrets)。アプリが API キー・パスワードをしまう Secret Service(gnome-keyring の代わり)
 amaterasu|||dbus|画面の明るさを読む・変える・覚えて戻す小さなコマンド(brightnessctl の代わり。root なしで logind 経由)
 ame-tajikara|||dbus|電源プロファイル(省電力・バランス・高性能)を読む・変える小さなコマンド(powerprofilesctl の代わり)
 ame-uzume||libpulse||音量を読む・変える・消音・見張る小さなコマンド(Odin。wpctl・pactl subscribe の代わり)
-ame-hamon|fft|libpulse-simple||今鳴っている音のスペクトラムを 1 行ずつ流す小さなコマンド(Odin。cava の代わり)'
+ame-hamon|fft|libpulse-simple||今鳴っている音のスペクトラムを 1 行ずつ流す小さなコマンド(Odin。cava の代わり)
+ame-yatagarasu|||ssl|URL の中身を取ってくる小さなコマンド(curl の代わり。curl と同じオプションを読む。暗号は OpenSSL)'
 
 REV=$(git -C "$ROOT" rev-parse --short HEAD)
 if [ -n "$(git -C "$ROOT" status --porcelain -- src/cmd src/lib odin anim)" ]; then
@@ -50,6 +51,14 @@ gen_build() { # $1 = 名前 $2 = ほかに要るもの
     exe.linkSystemLibrary("dbus-1");'
 		x_test='
     t_main.linkSystemLibrary("dbus-1");'
+		;;
+	ssl)
+		x_exe='
+    exe.linkSystemLibrary("ssl");
+    exe.linkSystemLibrary("crypto");'
+		x_test='
+    t_main.linkSystemLibrary("ssl");
+    t_main.linkSystemLibrary("crypto");'
 		;;
 	ame-hand)
 		x_dep='
@@ -139,6 +148,7 @@ gen_readme() { # $1 名前 $2 説明 $3 外部コマンド $4 ほかに要るも
 	case "$4" in
 	odin) echo "sh build.sh   # ./$1(Odin dev-2026-08 以降。libpulse などは実行時に読むので、ヘッダも -dev パッケージも要らない)" ;;
 	dbus) echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin/$1(Zig 0.13、libc と libdbus)" ;;
+	ssl) echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin/$1(Zig 0.13、libc と OpenSSL の libssl)" ;;
 	ame-hand) echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin/$1(Zig 0.13、libc。手の認識の ame-hand は初回に取ってくる)" ;;
 	*) echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin/$1(Zig 0.13、libc だけ)" ;;
 	esac

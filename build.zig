@@ -189,7 +189,7 @@ pub fn build(b: *std.Build) void {
     }
     b.installArtifact(ctl);
 
-    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai", "ame-agent", "ame-config", "ame-kuraokami", "ame-airpods", "ame-handtrack", "ame-keyring", "amaterasu", "ame-tajikara" };
+    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai", "ame-agent", "ame-config", "ame-kuraokami", "ame-airpods", "ame-handtrack", "ame-keyring", "amaterasu", "ame-tajikara", "ame-yatagarasu" };
     // --- 画面を持たない小さな道具(標準入出力でやりとりする。src/cmd/。libc だけ)---
     for (cmds) |name| {
         const t = b.addExecutable(.{
@@ -204,6 +204,11 @@ pub fn build(b: *std.Build) void {
         if (std.mem.eql(u8, name, "ame-handtrack")) t.root_module.addImport("ame-hand", hand_dep.module("ame-hand"));
         // D-Bus(libdbus。ame-shell 本体と同じもの)を使う道具
         if (usesDbus(name)) useDbus(b, t, sr, pre, bsd);
+        // ame-yatagarasu は暗号(TLS)だけ OpenSSL に任せる
+        if (std.mem.eql(u8, name, "ame-yatagarasu")) {
+            t.linkSystemLibrary("ssl");
+            t.linkSystemLibrary("crypto");
+        }
         t.linkLibC();
         b.installArtifact(t);
     }
@@ -367,6 +372,11 @@ pub fn build(b: *std.Build) void {
         ct.root_module.addImport("ame_lib", lib_mod);
         if (std.mem.eql(u8, name, "ame-handtrack")) ct.root_module.addImport("ame-hand", hand_dep.module("ame-hand"));
         if (usesDbus(name)) useDbus(b, ct, sr, pre, bsd);
+        // ame-yatagarasu は暗号(TLS)だけ OpenSSL に任せる
+        if (std.mem.eql(u8, name, "ame-yatagarasu")) {
+            ct.linkSystemLibrary("ssl");
+            ct.linkSystemLibrary("crypto");
+        }
         ct.linkLibC();
         test_step.dependOn(&b.addRunArtifact(ct).step);
     }

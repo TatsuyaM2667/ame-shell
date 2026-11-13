@@ -1,6 +1,6 @@
 // 枠 UI(caelestia 風)が使う追加のデータ源。全て「必要な間だけ」動かす:
 //  * GPU/CPU 温度・GPU 使用率・ストレージ … ダッシュボードが開いている間の 1 秒ティックで読む
-//  * 天気 … wttr.in を curl で非同期取得(30 分キャッシュ)。完了は pipe の EOF で知る
+//  * 天気 … wttr.in を ame-kuraokami(ame-yatagarasu)で非同期取得(30 分キャッシュ)。完了は pipe の EOF で知る
 //  * 音声スペクトラム … メディアタブ・ロック画面で曲が流れている間だけ、録音して FFT(cava は使わない)
 //  * 電源プロファイル … ame-tajikara(src/cmd)(ユーティリティを開いたとき)
 const std = @import("std");

@@ -14,7 +14,7 @@
 //   6. 曲名だけで LRCLIB を検索(長さが 3 秒以内で合うものだけ)
 // 検索の前に、動画サイトの書き方(「チャンネル名 - Topic」「【MV】アーティスト「曲名」」など)を整える(lrc.normalize)。
 // どこにも無かったことは「無し」としてキャッシュするが、通信できない・混雑のときは覚えない。
-// 通信は curl(シェルを通さず引数で渡すので、曲名に何が入っていても安全)。
+// 通信は ame-yatagarasu(シェルを通さず引数で渡すので、曲名に何が入っていても安全)。
 const std = @import("std");
 const lrc = @import("ame_lib").lrc;
 
@@ -46,10 +46,10 @@ const Search = struct {
 
     const Resp = struct { body: []const u8, code: u32 };
 
-    /// curl で取ってくる。-w で末尾に付けた HTTP の状態コードを切り離す。0 = 通信できない
+    /// ame-yatagarasu で取ってくる。-w で末尾に付けた HTTP の状態コードを切り離す。0 = 通信できない
     fn get(self: *Search, args: []const []const u8) Resp {
         var argv = std.ArrayList([]const u8).init(self.a);
-        argv.appendSlice(&.{ "curl", "-s", "--max-time", "8", "-A", UA, "-w", "\n%{http_code}" }) catch return .{ .body = "", .code = 0 };
+        argv.appendSlice(&.{ "ame-yatagarasu", "-s", "--max-time", "8", "-A", UA, "-w", "\n%{http_code}" }) catch return .{ .body = "", .code = 0 };
         argv.appendSlice(args) catch return .{ .body = "", .code = 0 };
         const r = std.process.Child.run(.{ .allocator = self.a, .argv = argv.items, .max_output_bytes = 8 << 20 }) catch return self.fail(0);
         const out = r.stdout;
@@ -118,7 +118,7 @@ const Search = struct {
                 return std.fs.cwd().readFileAlloc(self.a, path, 64 << 20) catch null;
         } else |_| {}
         if (std.fs.path.dirname(path)) |d| std.fs.cwd().makePath(d) catch {};
-        const r = std.process.Child.run(.{ .allocator = self.a, .argv = &.{ "curl", "-s", "--max-time", "20", "-o", path, "-w", "%{http_code}", self.arg("{s}/tracks", .{base}) } }) catch return null;
+        const r = std.process.Child.run(.{ .allocator = self.a, .argv = &.{ "ame-yatagarasu", "-s", "--max-time", "20", "-o", path, "-w", "%{http_code}", self.arg("{s}/tracks", .{base}) } }) catch return null;
         if (!std.mem.eql(u8, std.mem.trim(u8, r.stdout, " \n"), "200")) return null;
         return std.fs.cwd().readFileAlloc(self.a, path, 64 << 20) catch null;
     }

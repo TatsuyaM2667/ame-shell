@@ -12,7 +12,7 @@
 //     先頭の手がカーソルを動かす手(先に見つかった方。消えたらもう一方)。2 つまで。
 //
 // 手の認識(推論・追跡・形)は ame-hand(github.com/TatsuyaM2667/ame-hand)。モデル(MediaPipe の
-// hand_landmarker.task、Apache-2.0)は $XDG_DATA_HOME/ame-shell/models に無ければ curl で取ってくる(版を決めた URL。SHA-256 を確かめる)。
+// hand_landmarker.task、Apache-2.0)は $XDG_DATA_HOME/ame-shell/models に無ければ ame-yatagarasu で取ってくる(版を決めた URL。SHA-256 を確かめる)。
 // 手を追っている間は 1 秒に 30 コマまで、見つかっていない間は 4 コマまで。SIGTERM / SIGINT でカメラを閉じて終わる。
 // ame-shell のハンド操作はこれを動かして、出てくる行を操作にしている(カメラ・推論で詰まっても画面は止まらない)。
 const std = @import("std");
@@ -73,7 +73,7 @@ fn loadModel(a: std.mem.Allocator) ?[]u8 {
     std.fs.cwd().makePath(dir) catch {};
     var tb: [520]u8 = undefined;
     const tmp = std.fmt.bufPrint(&tb, "{s}.part", .{path}) catch return null;
-    var ch = std.process.Child.init(&.{ "curl", "-sSfL", "--max-time", "180", "-o", tmp, MODEL_URL }, a);
+    var ch = std.process.Child.init(&.{ "ame-yatagarasu", "-sSfL", "--max-time", "180", "-o", tmp, MODEL_URL }, a);
     ch.stdin_behavior = .Ignore;
     ch.stdout_behavior = .Ignore;
     const term = ch.spawnAndWait() catch return null;
