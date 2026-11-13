@@ -31,7 +31,10 @@ amaterasu|||dbus|画面の明るさを読む・変える・覚えて戻す小さ
 ame-tajikara|||dbus|電源プロファイル(省電力・バランス・高性能)を読む・変える小さなコマンド(powerprofilesctl の代わり)
 ame-uzume||libpulse||音量を読む・変える・消音・見張る小さなコマンド(Odin。wpctl・pactl subscribe の代わり)
 ame-hamon|fft|libpulse-simple||今鳴っている音のスペクトラムを 1 行ずつ流す小さなコマンド(Odin。cava の代わり)
-ame-yatagarasu|||ssl|URL の中身を取ってくる小さなコマンド(curl の代わり。curl と同じオプションを読む。暗号は OpenSSL)'
+ame-yatagarasu|||ssl|URL の中身を取ってくる小さなコマンド(curl の代わり。curl と同じオプションを読む。暗号は OpenSSL)
+ame-clip|ext-data-control-v1||wayland|Wayland のクリップボードに入れる・出す小さなコマンド ame-copy / ame-paste(wl-copy・wl-paste の代わり)
+ame-emaki|ext-foreign-toplevel-list-v1 ext-image-capture-source-v1 ext-image-copy-capture-v1|ffmpeg|wayland|画面を動画に録る小さなコマンド(wf-recorder の代わり。名前は絵巻から)
+ame-iwato|ext-session-lock-v1|libpam|wayland-xkb|画面をロックする小さなコマンド(swaylock の代わり。名前は天岩戸から)'
 
 REV=$(git -C "$ROOT" rev-parse --short HEAD)
 if [ -n "$(git -C "$ROOT" status --porcelain -- src/cmd src/lib odin anim)" ]; then
@@ -99,6 +102,58 @@ pub fn build(b: *std.Build) void {
 EOF
 }
 
+gen_build_wayland() { # $1 = 名前 $2 = wayland / wayland-xkb $3 = プロトコルの XML("…", の並び)
+	x_link='
+    exe.linkSystemLibrary("wayland-client");'
+	[ "$2" = wayland-xkb ] && x_link="$x_link
+    exe.linkSystemLibrary(\"xkbcommon\");"
+	exe=$1
+	x_extra=""
+	# ame-clip は ame-copy として入れ、同じものを ame-paste の名前でも入れる(呼ばれた名前で動きを変える)
+	if [ "$1" = ame-clip ]; then
+		exe=ame-copy
+		x_extra='
+            b.getInstallStep().dependOn(&b.addInstallBinFile(exe.getEmittedBin(), "ame-paste").step);'
+	fi
+	cat <<EOF
+// ame-shell(https://github.com/$OWNER/ame-shell)の src/cmd/$1.zig から生成。直すときは ame-shell の方を直す
+const std = @import("std");
+
+const protocols = [_][]const u8{$3 };
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+    // プロトコルの XML から C のヘッダと glue を作り、1 つのフォルダに集める
+    const gen = b.addWriteFiles();
+    var proto_c = std.ArrayList(std.Build.LazyPath).init(b.allocator);
+    for (protocols) |xml| {
+        const base = std.fs.path.stem(xml);
+        const hdr = b.addSystemCommand(&.{ "wayland-scanner", "client-header" });
+        hdr.addFileArg(b.path(xml));
+        _ = gen.addCopyFile(hdr.addOutputFileArg(b.fmt("{s}-client-protocol.h", .{base})), b.fmt("{s}-client-protocol.h", .{base}));
+        const code = b.addSystemCommand(&.{ "wayland-scanner", "private-code" });
+        code.addFileArg(b.path(xml));
+        proto_c.append(code.addOutputFileArg(b.fmt("{s}-protocol.c", .{base}))) catch @panic("oom");
+    }
+    for ([_]bool{ false, true }) |is_test| {
+        const exe = if (is_test)
+            b.addTest(.{ .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize })
+        else
+            b.addExecutable(.{ .name = "$exe", .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize });
+        exe.linkLibC();
+        exe.addIncludePath(gen.getDirectory());
+        for (proto_c.items) |f| exe.addCSourceFile(.{ .file = f, .flags = &.{"-std=c11"} });$x_link
+        if (is_test) {
+            b.step("test", "テスト").dependOn(&b.addRunArtifact(exe).step);
+        } else {
+            b.installArtifact(exe);$x_extra
+        }
+    }
+}
+EOF
+}
+
 gen_zon() { # $1 = 名前 $2 = ほかに要るもの
 	deps=".{}"
 	# 手の認識(ame-hand)は ame-shell と同じ版を使う
@@ -147,6 +202,8 @@ gen_readme() { # $1 名前 $2 説明 $3 外部コマンド $4 ほかに要るも
 	echo '```sh'
 	case "$4" in
 	odin) echo "sh build.sh   # ./$1(Odin dev-2026-08 以降。libpulse などは実行時に読むので、ヘッダも -dev パッケージも要らない)" ;;
+	wayland) echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin(Zig 0.13、libc・wayland-client・wayland-scanner)" ;;
+	wayland-xkb) echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin/$1(Zig 0.13、libc・wayland-client・xkbcommon・wayland-scanner)" ;;
 	dbus) echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin/$1(Zig 0.13、libc と libdbus)" ;;
 	ssl) echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin/$1(Zig 0.13、libc と OpenSSL の libssl)" ;;
 	ame-hand) echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin/$1(Zig 0.13、libc。手の認識の ame-hand は初回に取ってくる)" ;;
@@ -200,6 +257,21 @@ echo "$COMPONENTS" | while IFS='|' read -r name mods needs extra desc; do
 		printf '%s\n' "$name" > "$dir/.gitignore"
 		check="sh build.sh && odin test . -define:ODIN_TEST_LOG_LEVEL=warning"
 		clean="$name"
+	elif [ "$extra" = wayland ] || [ "$extra" = wayland-xkb ]; then
+		# Wayland の道具: 使うプロトコルの XML を写し、ビルドのときに wayland-scanner で C にする(部品の欄 = プロトコル)
+		src="$ROOT/src/cmd/$name.zig"
+		[ "$name" = ame-clip ] || [ -f "$src" ] || { echo "$name: $src がありません" >&2; exit 1; }
+		mkdir -p "$dir/src" "$dir/protocol"
+		cp "$src" "$dir/src/main.zig"
+		plist=""
+		for m in $mods; do cp "$ROOT/protocol/$m.xml" "$dir/protocol/$m.xml"; plist="$plist \"protocol/$m.xml\","; done
+		gen_build_wayland "$name" "$extra" "$plist" > "$dir/build.zig"
+		gen_zon "$name" "" > "$dir/build.zig.zon"
+		sed 's/"build.zig", "build.zig.zon", "src",/"build.zig", "build.zig.zon", "src", "protocol",/' "$dir/build.zig.zon" > "$dir/zon.tmp" && mv "$dir/zon.tmp" "$dir/build.zig.zon"
+		gen_readme "$name" "$desc" "$needs" "$extra" "$src" > "$dir/README.md"
+		printf '.zig-cache/\nzig-out/\n' > "$dir/.gitignore"
+		check='"$ZIG" build && "$ZIG" build test'
+		clean=".zig-cache zig-out"
 	else
 		mkdir -p "$dir/src/lib"
 		cp "$ROOT/src/cmd/$name.zig" "$dir/src/main.zig"
