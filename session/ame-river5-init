@@ -57,6 +57,7 @@ elif [ "${AME_SESSION_NESTED:-0}" != "1" ]; then
 
     # ---- 明るさを前回の値に(カーネルは起動のたびにファームウェアの値に戻す。ame-light が覚えている)----
     command -v ame-light >/dev/null 2>&1 && ame-light restore 2>>"$LOG"
+    command -v ame-power >/dev/null 2>&1 && ame-power restore 2>>"$LOG"
     # 音量も(ame-vol が覚えている。音の口 pipewire-pulse が起きるまで少し待つ)
     if command -v ame-vol >/dev/null 2>&1; then
         (for i in 1 2 3 4 5 6 7 8 9 10; do ame-vol restore 2>/dev/null && break; sleep 1; done) &
