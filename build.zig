@@ -164,6 +164,15 @@ pub fn build(b: *std.Build) void {
     tools.dependOn(&b.addInstallArtifact(vkbd, .{}).step);
     tools.dependOn(&b.addInstallArtifact(vmpris, .{}).step);
 
+    // --- クリップボード(ame-copy / ame-paste。1 つの実行ファイルを 2 つの名前で入れる。src/cmd/ame-clip.zig)---
+    const clip = b.addExecutable(.{ .name = "ame-copy", .root_source_file = b.path("src/cmd/ame-clip.zig"), .target = target, .optimize = optimize, .strip = strip });
+    clip.linkLibC();
+    clip.addIncludePath(gen.getDirectory());
+    for (proto_c.items) |c_file| clip.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
+    clip.linkSystemLibrary("wayland-client");
+    b.installArtifact(clip);
+    b.getInstallStep().dependOn(&b.addInstallBinFile(clip.getEmittedBin(), "ame-paste").step);
+
     // --- 制御CLI(libc のみ。軽量に保つ) ---
     const ctl = b.addExecutable(.{
         .name = "ame-ctl",
@@ -336,6 +345,13 @@ pub fn build(b: *std.Build) void {
     const lt = b.addTest(.{ .root_source_file = b.path("src/lib/lib.zig"), .target = target, .optimize = optimize });
     lt.linkLibC();
     test_step.dependOn(&b.addRunArtifact(lt).step);
+    // クリップボードの道具のテスト
+    const clip_t = b.addTest(.{ .root_source_file = b.path("src/cmd/ame-clip.zig"), .target = target, .optimize = optimize });
+    clip_t.linkLibC();
+    clip_t.addIncludePath(gen.getDirectory());
+    for (proto_c.items) |c_file| clip_t.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
+    clip_t.linkSystemLibrary("wayland-client");
+    test_step.dependOn(&b.addRunArtifact(clip_t).step);
     // Odin の道具のテスト(odin test)
     for (odin_cmds) |name| {
         if (!native) break;
