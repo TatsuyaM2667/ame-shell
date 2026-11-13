@@ -406,7 +406,7 @@ ame-ctl watch | jq -r 'select(.event=="workspace").workspace'   # 出来事を�
 `site/` に、写真・動画・ブラウザで動くデモつきの詳しいドキュメント(docs・技術解説・ソースから自動生成する関数リファレンス・用語の Wiki・開発ブログ)があります。本文は Zig の WebAssembly(`site/src/main.zig`)が HTML にし、デモは ame-shell と同じ `anim/anim.odin` を WebAssembly にしたものを動かします。
 
 ```sh
-zig build site                 # zig-out/site に作る
+zig build site                 # zig-out/site に作る(学ぶページは公開前なので入らない。手元で見るときは -Dlearn=true)
 sh site/deploy.sh              # Cloudflare Pages に公開(curl だけ。CLOUDFLARE_API_TOKEN と CLOUDFLARE_ACCOUNT_ID が要る。--dry-run で送るものだけ表示)
 ```
 

@@ -39,7 +39,13 @@ fn t(slug: []const u8, title: []const u8, src: []const u8) Page {
     return .{ .slug = slug, .title = title, .src = src, .sec = .tech };
 }
 
-const static_pages = [_]Page{
+/// 学ぶ(学習用。レベル順)。まだ公開しないので、`zig build site -Dlearn=true` のときだけ入れる(既定は入れない)
+const learn_pages = if (@import("site_options").learn) [_]Page{
+    lp("learn", "学ぶ: はじめに", @embedFile("content/learn/index.md")),
+    lp("learn/spring", "ばね(spring_step)", @embedFile("content/learn/spring.md")),
+} else [_]Page{};
+
+const base_pages = [_]Page{
     // ---- ドキュメント ----
     d("", "ホーム", @embedFile("content/home.md")),
     d("animation", "アニメーション", @embedFile("content/animation.md")),
@@ -48,9 +54,6 @@ const static_pages = [_]Page{
     d("compare", "ほかの WM と比較", @embedFile("content/compare.md")),
     d("install", "インストール", @embedFile("content/install.md")),
     d("reference", "設定とコマンド", @embedFile("content/reference.md")),
-    // ---- 学ぶ(学習用。レベル順) ----
-    lp("learn", "学ぶ: はじめに", @embedFile("content/learn/index.md")),
-    lp("learn/spring", "ばね(spring_step)", @embedFile("content/learn/spring.md")),
     // ---- 技術解説 ----
     t("tech", "全体像", @embedFile("content/tech/index.md")),
     t("tech-lang", "言語とツールチェイン", @embedFile("content/tech/lang.md")),
@@ -81,6 +84,8 @@ fn convList(comptime sec: Sec, comptime items: anytype) [items.len]Page {
     inline for (items, 0..) |it, i| out[i] = .{ .slug = it[0], .title = it[1], .meta = it[2], .src = it[3], .sec = sec };
     return out;
 }
+
+const static_pages = base_pages ++ learn_pages;
 
 const pages = blk: {
     var arr: [static_pages.len + refpages.pages.len]Page = undefined;
@@ -139,6 +144,7 @@ export fn render_nav(cur: u32) u32 {
         .{ .s = .blog, .href = "#/blog", .label = "ブログ" },
     };
     for (items) |it| {
+        if (it.s == .learn and learn_pages.len == 0) continue; // 学ぶページを入れていない版
         raw("<a href=\"");
         raw(it.href);
         raw("\"");

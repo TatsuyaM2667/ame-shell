@@ -321,6 +321,10 @@ pub fn build(b: *std.Build) void {
         }
     }
     site_wasm.root_module.addAnonymousImport("refpages", .{ .root_source_file = ref_out });
+    // 学ぶページ(site/src/content/learn)は公開前なので、-Dlearn=true のときだけ入れる
+    const site_opts = b.addOptions();
+    site_opts.addOption(bool, "learn", b.option(bool, "learn", "サイトに学ぶページを入れる(公開前。既定は入れない)") orelse false);
+    site_wasm.root_module.addOptions("site_options", site_opts);
     site_step.dependOn(&b.addInstallFile(site_wasm.getEmittedBin(), "site/site.wasm").step);
     const odin_site = b.addSystemCommand(&.{ "odin", "build" });
     odin_site.addDirectoryArg(b.path("anim"));
