@@ -155,9 +155,14 @@ pub fn build(b: *std.Build) void {
     for (proto_c.items) |c_file| vkbd.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
     vkbd.linkSystemLibrary("wayland-client");
     vkbd.linkSystemLibrary("xkbcommon");
+    // 偽の音楽プレイヤー(MPRIS)。再生中の画面を試す
+    const vmpris = b.addExecutable(.{ .name = "vmpris", .root_source_file = b.path("tools/vmpris.zig"), .target = target, .optimize = optimize });
+    useDbus(b, vmpris, sr, pre, bsd);
+    vmpris.linkLibC();
     const tools = b.step("tools", "試験用ツール");
     tools.dependOn(&b.addInstallArtifact(vptr, .{}).step);
     tools.dependOn(&b.addInstallArtifact(vkbd, .{}).step);
+    tools.dependOn(&b.addInstallArtifact(vmpris, .{}).step);
 
     // --- 制御CLI(libc のみ。軽量に保つ) ---
     const ctl = b.addExecutable(.{
