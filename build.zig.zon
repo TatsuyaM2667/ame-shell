@@ -2,14 +2,14 @@
     .name = "ame-shell",
     .version = "0.1.0",
     .minimum_zig_version = "0.13.0",
-    // 手の認識(ハンド操作)と顔認証は別のリポジトリ(初めてビルドするときに GitHub から取ってくる)
+    // 手の認識(ハンド操作。ame-senju)と顔認証(ame-kagami)は別のリポジトリ(初めてビルドするときに GitHub から取ってくる)
     .dependencies = .{
         .ame_hand = .{
-            .url = "https://github.com/TatsuyaM2667/ame-hand/archive/cc31453eee6c24b7a99dec670f06334b4f47d111.tar.gz",
+            .url = "https://github.com/TatsuyaM2667/ame-senju/archive/cc31453eee6c24b7a99dec670f06334b4f47d111.tar.gz",
             .hash = "12205c717f391532a8cb22885bac03817aa98afa49efa4acbe69e7cd9a1eb62213a4",
         },
         .ame_face = .{
-            .url = "https://github.com/TatsuyaM2667/ame-face/archive/bcef91268096a48b0c64707248db08d745679c19.tar.gz",
+            .url = "https://github.com/TatsuyaM2667/ame-kagami/archive/bcef91268096a48b0c64707248db08d745679c19.tar.gz",
             .hash = "1220ca6670f75f1778fc331a53d57f5455e10530556e49b0a576fda8b61f61d3619b",
         },
     },

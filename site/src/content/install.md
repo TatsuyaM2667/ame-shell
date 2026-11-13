@@ -64,7 +64,7 @@ FreeBSD のインストーラは次のことまで行います。
 
 > ame-shell の FreeBSD 版は、Linux の直接のシステムコールを 1 つも含まないことを、逆アセンブルして確認しています(以前 SIGSYS で落ちた原因を断つため)。
 
-> 手の認識([ame-hand](https://github.com/TatsuyaM2667/ame-hand))と顔認証([ame-face](https://github.com/TatsuyaM2667/ame-face))は別のリポジトリです。初めてビルドするときに、Zig が GitHub から取ってきます(どの OS でもネットワークが要ります。2 回目からは `~/.cache/zig` を使います)。
+> 手の認識([ame-senju](https://github.com/TatsuyaM2667/ame-senju)(千手観音から))と顔認証([ame-kagami](https://github.com/TatsuyaM2667/ame-kagami)(八咫鏡から))は別のリポジトリです。初めてビルドするときに、Zig が GitHub から取ってきます(どの OS でもネットワークが要ります。2 回目からは `~/.cache/zig` を使います)。
 
 ## 機能ごとの OS の違い {#os-features}
 
