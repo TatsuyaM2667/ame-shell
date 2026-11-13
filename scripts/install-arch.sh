@@ -44,7 +44,7 @@ RUN="greetd foot polkit upower power-profiles-daemon pipewire pipewire-audio pip
  networkmanager bluez bluez-utils util-linux thunar tumbler gvfs xdg-utils
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  noto-fonts-cjk ttf-jetbrains-mono-nerd ttf-nerd-fonts-symbols hicolor-icon-theme adwaita-icon-theme
- fastfetch wf-recorder wlr-randr
+ fastfetch wlr-randr
  ghostty zsh zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza bat
  libva-mesa-driver"
 # 動かすのに欠かせないコマンド(入れた後に確かめる)

@@ -143,7 +143,7 @@ APK_RUN="greetd greetd-dinit foot dbus mesa-dri polkit upower power-profiles-dae
  zsh zsh-syntax-highlighting fzf zoxide
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  fonts-noto-sans-cjk-otf fonts-nerd-jetbrains-mono fonts-nerd-symbols-only adwaita-icon-theme hicolor-icon-theme"
-APK_OPT="fastfetch wf-recorder wlr-randr gvfs eza bat"
+APK_OPT="fastfetch wlr-randr gvfs eza bat"
 NEED_CMDS="git curl clang wayland-scanner pkg-config"
 # 動かすのに欠かせないコマンド(パッケージを入れた後に確かめる)
 RUN_CMDS="foot zsh greetd dbus-run-session pactl swaylock rfkill nmcli bluetoothctl"

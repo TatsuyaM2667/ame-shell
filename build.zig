@@ -173,6 +173,14 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(clip);
     b.getInstallStep().dependOn(&b.addInstallBinFile(clip.getEmittedBin(), "ame-paste").step);
 
+    // --- 録画(ame-emaki。画面を撮って ffmpeg に渡す。src/cmd/ame-emaki.zig)---
+    const emaki = b.addExecutable(.{ .name = "ame-emaki", .root_source_file = b.path("src/cmd/ame-emaki.zig"), .target = target, .optimize = optimize, .strip = strip });
+    emaki.linkLibC();
+    emaki.addIncludePath(gen.getDirectory());
+    for (proto_c.items) |c_file| emaki.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
+    emaki.linkSystemLibrary("wayland-client");
+    b.installArtifact(emaki);
+
     // --- 制御CLI(libc のみ。軽量に保つ) ---
     const ctl = b.addExecutable(.{
         .name = "ame-ctl",
@@ -357,6 +365,12 @@ pub fn build(b: *std.Build) void {
     for (proto_c.items) |c_file| clip_t.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
     clip_t.linkSystemLibrary("wayland-client");
     test_step.dependOn(&b.addRunArtifact(clip_t).step);
+    const emaki_t = b.addTest(.{ .root_source_file = b.path("src/cmd/ame-emaki.zig"), .target = target, .optimize = optimize });
+    emaki_t.linkLibC();
+    emaki_t.addIncludePath(gen.getDirectory());
+    for (proto_c.items) |c_file| emaki_t.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
+    emaki_t.linkSystemLibrary("wayland-client");
+    test_step.dependOn(&b.addRunArtifact(emaki_t).step);
     // Odin の道具のテスト(odin test)
     for (odin_cmds) |name| {
         if (!native) break;

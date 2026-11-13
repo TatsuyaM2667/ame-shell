@@ -231,7 +231,7 @@ say "インストール先: ${DESTDIR}${PREFIX}($( [ "$USER_MODE" = 1 ] && echo 
 install_file "$OUT/bin/ame-shell" "$PREFIX/bin/ame-shell" 755
 install_file "$OUT/bin/ame-ctl" "$PREFIX/bin/ame-ctl" 755
 # 画面を持たない小さな道具(src/cmd/。単独でも使える)
-for t in ame-lyrics ame-ai ame-agent ame-config ame-kuraokami ame-airpods ame-handtrack ame-keyring amaterasu ame-tajikara ame-uzume ame-hamon ame-copy ame-paste ame-yatagarasu; do install_file "$OUT/bin/$t" "$PREFIX/bin/$t" 755; done
+for t in ame-lyrics ame-ai ame-agent ame-config ame-kuraokami ame-airpods ame-handtrack ame-keyring amaterasu ame-tajikara ame-uzume ame-hamon ame-copy ame-paste ame-yatagarasu ame-emaki; do install_file "$OUT/bin/$t" "$PREFIX/bin/$t" 755; done
 # 名前を変えた道具(2026-11): 古い名前でもしばらく呼べるよう、新しい名前へのリンクを置く
 for pair in ame-light:amaterasu ame-power:ame-tajikara ame-weather:ame-kuraokami ame-vol:ame-uzume ame-spectrum:ame-hamon; do
     old=${pair%%:*}; new=${pair#*:}

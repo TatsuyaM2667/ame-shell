@@ -508,14 +508,21 @@ fn toggleRecord(f: *Frame) void {
         return;
     }
     if (f.sidev.recording) {
-        sys.spawnDetached("pkill -INT -x wf-recorder");
+        // ame-emaki は SIGINT で ffmpeg にファイルを仕上げさせてから終わる
+        sys.spawnDetached("pkill -INT -x ame-emaki");
         f.sidev.recording = false;
         f.app.notifs.post("ame-shell", "録画を保存しました", f.sidev.rec_path[0..f.sidev.rec_len], 0);
         return;
     }
-    if (!inPath("wf-recorder")) {
+    // ame-emaki は ext-image-copy-capture で撮る(River 0.4 / 0.5。River 0.3 には無い)
+    if (f.app.icc_mgr == null) {
         theme.flashError(f.app);
-        const hint = if (@import("builtin").os.tag == .freebsd) "wf-recorder がありません。入れてください: doas pkg install wf-recorder" else "wf-recorder がありません。パッケージを入れてください";
+        f.app.notifs.post("ame-shell", "録画できません", "このコンポジタは画面の撮影(ext-image-copy-capture)に対応していません(River 0.5 のセッションで使えます)", 0);
+        return;
+    }
+    if (!inPath("ame-emaki") or !inPath("ffmpeg")) {
+        theme.flashError(f.app);
+        const hint = if (!inPath("ffmpeg")) "ffmpeg がありません。パッケージを入れてください" else "ame-emaki がありません(ame-shell を入れ直してください)";
         f.app.notifs.post("ame-shell", "録画できません", hint, 0);
         return;
     }
@@ -530,13 +537,9 @@ fn toggleRecord(f: *Frame) void {
     _ = c.mkdir(dirz.ptr, 0o755);
     const path = std.fmt.bufPrint(&f.sidev.rec_path, "{s}/rec_{s}.mp4", .{ dirz, stamp[0..n] }) catch return;
     f.sidev.rec_len = path.len;
-    // 音も録る: 既定の出力(スピーカー)で鳴っている音。PipeWire ではスピーカーの名前をそのまま、
-    // PulseAudio(FreeBSD)では <名前>.monitor を録る。pactl が無ければ既定の入力(-a)
-    var cmd: [900]u8 = undefined;
-    const cmdz = std.fmt.bufPrintZ(&cmd, "F=\"$1\"; s=$(pactl get-default-sink 2>/dev/null); if [ -z \"$s\" ]; then set -- -a; elif pactl info 2>/dev/null | grep -q PipeWire; then set -- \"--audio=$s\"; else set -- --audio-backend=pulse \"--audio=$s.monitor\"; fi; exec wf-recorder \"$@\" -f \"$F\" >/dev/null 2>&1", .{}) catch return;
-    // 保存先は文に埋め込まず引数で渡す(sh -c の $1 → F)
+    // 音も録る(既定の出力で鳴っている音。ame-emaki が @DEFAULT_MONITOR@ から)。保存先は文に埋め込まず引数で渡す
     var pz: [520]u8 = undefined;
-    sys.spawnDetachedArgs(cmdz.ptr, &.{(std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return).ptr});
+    sys.spawnDetachedArgs("exec ame-emaki -f \"$1\" >/dev/null 2>&1", &.{(std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return).ptr});
     f.sidev.recording = true;
     f.app.notifs.post("ame-shell", "録画を開始しました(もう一度押すと停止)", path, 0);
 }

@@ -107,7 +107,7 @@ REQUIRED="
 "
 # あれば使う: 無ければ飛ばす(その機能だけ使えない)。"a|b" は「a が無ければ b」
 OPTIONAL="
- wf-recorder mpv ffmpeg fastfetch wlr-randr thunar tumbler xdg-utils upower polkit greetd
+ mpv ffmpeg fastfetch wlr-randr thunar tumbler xdg-utils upower polkit greetd
  ghostty zsh zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza bat
  libva mesa-gallium-va
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
