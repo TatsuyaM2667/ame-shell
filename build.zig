@@ -181,6 +181,15 @@ pub fn build(b: *std.Build) void {
     emaki.linkSystemLibrary("wayland-client");
     b.installArtifact(emaki);
 
+    // --- ロック(ame-iwato。単体のロック画面。src/cmd/ame-iwato.zig)---
+    const iwato = b.addExecutable(.{ .name = "ame-iwato", .root_source_file = b.path("src/cmd/ame-iwato.zig"), .target = target, .optimize = optimize, .strip = strip });
+    iwato.linkLibC();
+    iwato.addIncludePath(gen.getDirectory());
+    for (proto_c.items) |c_file| iwato.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
+    iwato.linkSystemLibrary("wayland-client");
+    iwato.linkSystemLibrary("xkbcommon");
+    b.installArtifact(iwato);
+
     // --- 制御CLI(libc のみ。軽量に保つ) ---
     const ctl = b.addExecutable(.{
         .name = "ame-ctl",
@@ -371,6 +380,13 @@ pub fn build(b: *std.Build) void {
     for (proto_c.items) |c_file| emaki_t.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
     emaki_t.linkSystemLibrary("wayland-client");
     test_step.dependOn(&b.addRunArtifact(emaki_t).step);
+    const iwato_t = b.addTest(.{ .root_source_file = b.path("src/cmd/ame-iwato.zig"), .target = target, .optimize = optimize });
+    iwato_t.linkLibC();
+    iwato_t.addIncludePath(gen.getDirectory());
+    for (proto_c.items) |c_file| iwato_t.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
+    iwato_t.linkSystemLibrary("wayland-client");
+    iwato_t.linkSystemLibrary("xkbcommon");
+    test_step.dependOn(&b.addRunArtifact(iwato_t).step);
     // Odin の道具のテスト(odin test)
     for (odin_cmds) |name| {
         if (!native) break;

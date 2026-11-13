@@ -159,7 +159,7 @@ if [ "$USER_MODE" = 0 ]; then
     say "SDDM の SessionDir: $SESS_DIRS → $SESS_DIR に配置"
 fi
 
-# ---- PAM の置き場所(Linux のみ。FreeBSD のロックは setuid の swaylock に任せるので不要) ----
+# ---- PAM の置き場所(Linux のみ。FreeBSD のロックは setuid の ame-auth が照合するので不要) ----
 # Linux-PAM は /etc/pam.d/<svc> → /usr/lib/pam.d/<svc> の順に探す(vendordir 対応版)。
 # /etc/pam.d が無い環境で、libpam が /usr/lib/pam.d を知らない古い版だと /etc/pam.d を作った瞬間に
 # 他のサービスが読めなくなるので、その場合は /usr/lib/pam.d に置く。
@@ -231,7 +231,7 @@ say "インストール先: ${DESTDIR}${PREFIX}($( [ "$USER_MODE" = 1 ] && echo 
 install_file "$OUT/bin/ame-shell" "$PREFIX/bin/ame-shell" 755
 install_file "$OUT/bin/ame-ctl" "$PREFIX/bin/ame-ctl" 755
 # 画面を持たない小さな道具(src/cmd/。単独でも使える)
-for t in ame-lyrics ame-ai ame-agent ame-config ame-kuraokami ame-airpods ame-handtrack ame-keyring amaterasu ame-tajikara ame-uzume ame-hamon ame-copy ame-paste ame-yatagarasu ame-emaki; do install_file "$OUT/bin/$t" "$PREFIX/bin/$t" 755; done
+for t in ame-lyrics ame-ai ame-agent ame-config ame-kuraokami ame-airpods ame-handtrack ame-keyring amaterasu ame-tajikara ame-uzume ame-hamon ame-copy ame-paste ame-yatagarasu ame-emaki ame-iwato; do install_file "$OUT/bin/$t" "$PREFIX/bin/$t" 755; done
 # 名前を変えた道具(2026-11): 古い名前でもしばらく呼べるよう、新しい名前へのリンクを置く
 for pair in ame-light:amaterasu ame-power:ame-tajikara ame-weather:ame-kuraokami ame-vol:ame-uzume ame-spectrum:ame-hamon; do
     old=${pair%%:*}; new=${pair#*:}
@@ -613,7 +613,6 @@ if [ "$OS" = FreeBSD ]; then
     for svc in dbus seatd sddm; do
         if [ "$(sysrc -n "${svc}_enable" 2>/dev/null)" = YES ]; then say "  [ok] ${svc}_enable=YES"; else ng "${svc} が有効になっていません(例: sysrc ${svc}_enable=YES)" "${svc} is not enabled (e.g. sysrc ${svc}_enable=YES)"; fi
     done
-    chk swaylock swaylock "ロック" "lock screen"
 elif command -v dinitctl >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
     DM=sddm
     grep -q ame-greeter /etc/greetd/config.toml 2>/dev/null && DM=greetd

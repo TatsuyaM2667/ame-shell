@@ -195,18 +195,8 @@ pub const Lock = struct {
             }
             return "ok (already locked)";
         }
-        // FreeBSD の pam_unix は root でないとパスワードを照合できない(Linux の unix_chkpwd に当たる補助が無い)。
-        // FreeBSD の swaylock パッケージは setuid で入るので、ロックはそれに任せる
-        // ame-auth(root の setuid の照合の補助)が入っていれば、Linux と同じ ame-shell のロック画面を使う
-        if (@import("builtin").os.tag == .freebsd and findAuthHelper() == null) {
-            if (!@import("../platform/sys.zig").hasCommand("swaylock")) {
-                const why = "FreeBSD ではロックに swaylock が必要です(pkg install swaylock)";
-                self.app.osd.info(why);
-                return "error: swaylock not found";
-            }
-            @import("../platform/sys.zig").spawnDetached("swaylock -f -c 0b1020");
-            return "ok (swaylock)";
-        }
+        // FreeBSD の pam_unix は root でないとパスワードを照合できないので、照合は setuid の ame-auth に頼む
+        // (無ければ preflight がそう知らせて、ロックしない。swaylock には頼らない)
         if (self.preflight()) |why| {
             std.log.warn("lock: {s}", .{why});
             self.app.osd.info(why);
