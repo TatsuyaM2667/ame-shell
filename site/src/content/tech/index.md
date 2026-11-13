@@ -22,11 +22,11 @@ ame-shell のコードは、次の 6 つの原則で一貫しています。各�
 
 | 原則 | 中身 | 現れるところ |
 |---|---|---|
-| **待つ、調べない** | 状態の変化は「起こされる」ことで知る。定期的に起きて調べる(ポーリング)ことはしない | 1 つの epoll に全部の fd を入れる / タイマーは「次に変わる時刻」だけ / MPRIS・NetworkManager・BlueZ の D-Bus の信号・`pactl subscribe`・inotify |
+| **待つ、調べない** | 状態の変化は「起こされる」ことで知る。定期的に起きて調べる(ポーリング)ことはしない | 1 つの epoll に全部の fd を入れる / タイマーは「次に変わる時刻」だけ / MPRIS・NetworkManager・BlueZ の D-Bus の信号・`ame-uzume watch`・inotify |
 | **動いている間だけ描く** | 描画は Wayland のフレームコールバックに合わせ、ばねが止まったら次を頼まない | `surface.zig` の `schedule` と `render` / WM の 8ms タイマーもアニメーション中だけ |
 | **1 つにまとめる** | 1 プロセス・1 EGL コンテキスト・1 種類の四角形・1 つのばね | グリフアトラスとぼけた壁紙を全部品で共有 / 描画は 1 回の命令 |
-| **重い仕事は描画の外へ** | 画像のデコード・外部コマンド・認証は、スレッドか子プロセスで行い、終わったら pipe で知らせる | アイコン・アバター・pactl・PAM・curl・nmcli |
-| **無ければ、その機能だけ止める** | 依存するライブラリやコマンドが無くても、シェル全体は動き続ける | libmpv・libpam・libpulse-simple は dlopen / NetworkManager・BlueZ・wpctl は見つからなければ「不明」 |
+| **重い仕事は描画の外へ** | 画像のデコード・外部コマンド・認証は、スレッドか子プロセスで行い、終わったら pipe で知らせる | アイコン・アバター・ame-uzume・PAM・ame-yatagarasu・ame-hamon |
+| **無ければ、その機能だけ止める** | 依存するライブラリやコマンドが無くても、シェル全体は動き続ける | libmpv・libpam・libpulse は dlopen / NetworkManager・BlueZ・ame-uzume は見つからなければ「不明」 |
 | **OS の違いは端に閉じ込める** | Linux と FreeBSD の違いは `src/platform/` と `build.zig` だけで吸収する | `bsd.zig`(sysctl)/ `loop.zig` の timerfd / ioctl の型 |
 
 ## ファイルの地図 {#map}
@@ -66,7 +66,7 @@ ame-shell のコードは、次の 6 つの原則で一貫しています。各�
                        │ ipc.zig        Unix ソケット ◀── ame-ctl                                       │
                        │ platform/      loop.zig(epoll + timerfd) / sys.zig / bsd.zig / supertap.zig   │
                        └────────────────────────────────────────────────────────────────────────────────┘
-       子プロセス(pipe で結果だけ受け取る): pactl subscribe / curl /
+       子プロセス(pipe で結果だけ受け取る): ame-uzume watch / ame-hamon / ame-yatagarasu /
        ffmpeg / PAM の認証 / ワーカースレッド: アイコン・アバター・サムネイル・pactl・録音・PNG・Wi-Fi / Bluetooth の D-Bus
 ```
 
@@ -75,7 +75,7 @@ ame-shell のコードは、次の 6 つの原則で一貫しています。各�
 ある出来事(例: 音量キー)が画面に出るまでを追うと、全体のつながりが分かります。
 
 1. River がキーを WM(ame-shell 自身)に知らせる → `binds.zig` の割り当て `.{ .ame = "volume up" }` が、ame-ctl と同じ処理(`ipc.zig` の `runCommand`)を**プロセスを起動せずに**直接呼ぶ。
-2. `sys.setVolumeDelta(5)` が `wpctl` で音量を変え、値を読み直す。ほかのアプリが音量を変えたときは、常駐させている `pactl subscribe` の行が pipe に届いて epoll が起き、同じように読み直す。
+2. `sys.setVolumeDelta(5)` が小さな道具 `ame-uzume set +5` で音量を変え、値を読み直す。ほかのアプリが音量を変えたときは、常駐させている `ame-uzume watch` が新しい音量の 1 行(「45」/「45 muted」)を pipe に書き、epoll が起きてそれをそのまま使う。
 3. OSD のばねの目標を変え、`surface.schedule()` で**そのサーフェスだけ**フレームコールバックを頼む。
 4. コンポジタが次の画面更新で `done` を送る → `render(dt)` が呼ばれる。ばねを `dt` だけ進め、四角形の配列を積み、1 回の `glDrawArraysInstanced` で描く。
 5. ばねがまだ動いていれば、`eglSwapBuffers` のコミットに次のフレームの要求を相乗りさせる。止まったら何もしない → epoll_wait で完全に眠る。

@@ -54,8 +54,9 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
 ### そのほか
 - 通知サーバ内蔵(`org.freedesktop.Notifications`。他のデーモンが動いていれば譲る)。送り主の画像(Discord なら相手のアイコン)を丸く出し、右下にアプリのアイコン。**押すとそのアプリの窓があるワークスペースへ移る**(ロック画面では解除したあとに)
   - 電池の残量が少ないとき、充電器の抜き差し(満充電まであと何分・何時ごろ)、USB 機器・USB メモリ・SD カードの抜き差し(名前・容量・ラベル)も通知
-- **録画**(ユーティリティの録画ボタン): wf-recorder で `~/Videos` に保存。**PC で鳴っている音も一緒に**録る(PipeWire は既定の出力、PulseAudio は `<出力>.monitor`)
+- **録画**(ユーティリティの録画ボタン): 自前の `ame-emaki`(絵巻)で `~/Videos` に保存。**PC で鳴っている音も一緒に**録る。画面は ext-image-copy-capture で変わったときだけ撮り、動画にするのは ffmpeg(GPU の VAAPI、使えなければ CPU)。River 0.5 のセッションで使える
 - **スクリーンショット**: grim / slurp / wl-copy を使わず ame-shell が自分で撮る(ext-image-copy-capture、PNG は自前のエンコーダ、クリップボードは ext-data-control)
+- **明るさ・音量・電源プロファイルを覚える**: 最後に変えた明るさ(`amaterasu`)・音量と消音(`ame-uzume`)・電源プロファイル(`ame-tajikara`)を、ログインのたびに戻す(カーネルは再起動のたびに明るさをファームウェアの値に戻し、音量は出力の機器ごとに別になるため)
 - **スリープのあとに AirPods をつなぎ直す**: スリープの前につながっていたイヤホン・スピーカーを、戻るとすぐつなぎ直して音の出力先にも戻す(`airpods { reconnect-after-sleep off }` で止める)
 - **AirPods をつないだときのカード**: iPhone / iPad のように画面の下からカードが上がり、左右とケースの電池の残りを見せる(`airpods { popup off }` で通知に戻す)
 - **AirPods の頭の動き**(ユーティリティの「AirPods 操作」・`ame-ctl airpods toggle`・設定 `airpods { enabled on }`。Linux のみ): 頭を左右に振って戻すとワークスペース、上を向いて戻すとランチャー、下を向いて戻すとダッシュボード。AirPods 本来の操作もそのまま使える。AirPods が頭の向きを送るには Bluetooth の DeviceID を Apple(`bluetooth:004C:0000:0000`)にする必要がある
@@ -105,8 +106,8 @@ Chimera のリポジトリには River 0.3 が無いので、`install.sh` が Ri
    git clone https://github.com/TatsuyaM2667/ame-shell && cd ame-shell
    ```
 2. `sh install.sh` を実行する。次のことを順に行います
-   - **パッケージ**(`doas apk add`): ビルドに要るもの(clang・llvm-devel・linux-headers・pkgconf・wayland / mesa / libdrm / xkbcommon / freetype / harfbuzz / fontconfig / dbus / linux-pam の -devel)、
-     River 0.5 のビルドに要るもの(wlroots0.20-devel など)、動かすのに要るもの(greetd・foot・mesa-dri・polkit・pipewire・wireplumber・libpulse-progs・swaylock・brightnessctl・util-linux-rfkill・networkmanager・bluez・thunar・tumbler・xdg-desktop-portal(-gtk・-wlr)・fonts-noto-sans-cjk-otf・fonts-nerd-jetbrains-mono・fonts-nerd-symbols-only・adwaita / hicolor のアイコンテーマ)。
+   - **パッケージ**(`doas apk add`): ビルドに要るもの(clang・llvm-devel・linux-headers・pkgconf・wayland / mesa / libdrm / xkbcommon / freetype / harfbuzz / fontconfig / dbus / linux-pam・openssl3 の -devel)、
+     River 0.5 のビルドに要るもの(wlroots0.20-devel など)、動かすのに要るもの(greetd・foot・mesa-dri・polkit・pipewire・wireplumber・libpulse-progs・ffmpeg・util-linux-rfkill・networkmanager・bluez・thunar・tumbler・xdg-desktop-portal(-gtk・-wlr)・fonts-noto-sans-cjk-otf・fonts-nerd-jetbrains-mono・fonts-nerd-symbols-only・adwaita / hicolor のアイコンテーマ)。
      どれかが入らないとそこで止まります(足りないまま進めて、スクショや波形が動かないことが無いように)
    - Zig 0.13 と Odin、River 0.5 のビルド、ame-shell のビルドとインストール
    - **インストール後の設定**(1 つずつ `[y/N]` で確認。`--yes` で全部、`--no-setup` で何もしない):
@@ -186,7 +187,7 @@ Zig 0.13 と Odin のソースからのビルド(FreeBSD 向けの配布物が�
 FreeBSD での違い:
 - FreeBSD の `river` パッケージは 0.4 以降なので、ame-shell がウィンドウマネージャを兼ねるセッション(ウィンドウアニメーションつき)だけになります
 - 電池・CPU・メモリ・温度は sysctl、音量は PipeWire が無ければ `mixer(8)`、明るさは `backlight(8)`、機種名は SMBIOS(kenv)から
-- ロック画面(Super+L)は Linux と同じ ame-shell のもの。FreeBSD の pam_unix は root でないとパスワードを照合できないので、照合だけを小さな setuid の補助 `ame-auth`(`/usr/local/libexec/ame-shell/ame-auth`、PAM のサービスは `/usr/local/etc/pam.d/ame-shell`)に任せます。インストーラ(root で `sh install.sh`)が入れます。`ame-auth` が無いときは setuid の `swaylock` を使います
+- ロック画面(Super+L)は Linux と同じ ame-shell のもの。FreeBSD の pam_unix は root でないとパスワードを照合できないので、照合だけを小さな setuid の補助 `ame-auth`(`/usr/local/libexec/ame-shell/ame-auth`、PAM のサービスは `/usr/local/etc/pam.d/ame-shell`)に任せます。インストーラ(root で `sh install.sh`)が入れます。`ame-auth` が無いときはロックせず、入れるよう知らせます(swaylock には頼りません)
 - 音は PulseAudio(セッションの開始時に動いていなければ起動)。充電の残り時間は `acpiconf -i 0`、USB メモリ・SD カードの通知は devd から
 - Wi-Fi のパネルは wpa_supplicant(`wpa_cli`)、Bluetooth は netgraph + hcsecd。Bluetooth の機器の追加は root の `bluetooth-config` なので端末で行います(BlueZ が無いため、Linux のようなパネルからのペアリングはできません)
 - ログイン画面は SDDM(greetd が FreeBSD の quarterly に無いため。テーマはロック画面と同じ見た目)
@@ -194,9 +195,10 @@ FreeBSD での違い:
 ### 手動でビルドする
 
 必要: Zig 0.13、Odin、wayland-scanner、wayland / EGL / GLESv2 / xkbcommon / freetype / harfbuzz / fontconfig / dbus の開発ファイル(FreeBSD は加えて libepoll-shim・libinotify)。
-実行時に使うもの: `wpctl` / `pactl`(PipeWire)・NetworkManager と BlueZ(コマンドは使わず D-Bus で直接)・`rfkill`・`curl`・`xdg-desktop-portal` と `-gtk`(ユーザーの写真を選ぶ画面)・`libmpv`(動画壁紙、任意)・`ffmpeg`(動画のサムネイル、任意)・`wf-recorder`(録画、`~/Videos` に保存、任意)。
+ame の小さな道具(同梱)のために: OpenSSL の開発ファイル(`ame-yatagarasu` の通信の暗号)、libpulse(実行時に読む。`ame-uzume`・`ame-hamon`)。
+実行時に使うもの: PipeWire(pipewire-pulse)と `pactl`(音の出力先の一覧と切り替え)・NetworkManager と BlueZ(コマンドは使わず D-Bus で直接)・logind / elogind(明るさ)・power-profiles-daemon・`rfkill`・`xdg-desktop-portal` と `-gtk`(ユーザーの写真を選ぶ画面)・`libmpv`(動画壁紙、任意)・`ffmpeg`(動画のサムネイルと録画、任意)。
 フォント: 日本語(Noto Sans CJK)と Nerd Font のアイコン(JetBrainsMono Nerd Font か Symbols Nerd Font)。無いと起動時にログ(`session.log`)へ入れるパッケージ名を出します。
-音を拾えない(PipeWire / PulseAudio が無い)ときはメディアの波形の場所に理由を表示します。cava・playerctl・grim・slurp・wl-clipboard・nmcli・bluetoothctl は使いません(すべて ame-shell の中で行います)。もう要らないパッケージや KDE の古い設定は `sh scripts/cleanup-old.sh` で消せます。
+音を拾えない(PipeWire / PulseAudio が無い)ときはメディアの波形の場所に理由を表示します。cava・playerctl・grim・slurp・wl-clipboard・wf-recorder・swaylock・brightnessctl・powerprofilesctl・wpctl・curl・nmcli・bluetoothctl は使いません(ame-shell の中か、ame の小さな道具が行います)。もう要らないパッケージや KDE の古い設定は `sh scripts/cleanup-old.sh` で消せます。
 
 ```sh
 zig build -Doptimize=ReleaseFast     # zig-out/bin/{ame-shell,ame-ctl,ame-auth}, zig-out/share/ame-shell/
@@ -348,9 +350,37 @@ ame-ctl watch                            (出来事を 1 行 1 つの JSON で�
 
 ## 小さな道具(端末からも使える)
 
-画面の要らない仕事は、1 つのことをする小さなコマンドに分けてあります。ame-shell もこれを動かして出力を読むだけなので、端末やスクリプトから同じように使えます(標準入出力・テキスト / 1 行 1 つの JSON)。
+画面の要らない仕事は、1 つのことをする小さなコマンドに分けてあります(Unix の考え方)。ame-shell もこれを動かして出力を読むだけなので、端末やスクリプトから同じように使えます(標準入出力・テキスト / 1 行 1 つの JSON)。
+名前の多くは、日本の神話と古い言葉から取りました(ame は「雨」と「天(あめ)」の両方)。言語は Zig、音の 2 つは Odin。
+
+| 道具 | すること | 代わりにしたもの | 名前 |
+|---|---|---|---|
+| `amaterasu` | 画面の明るさを読む・変える・覚えて戻す(root なしで logind 経由) | brightnessctl | 天照大神 |
+| `ame-tajikara` | 電源プロファイルを読む・変える・覚えて戻す | powerprofilesctl | 天手力男神 |
+| `ame-uzume` | 音量を読む・変える・消音・見張る・覚えて戻す(Odin) | wpctl・`pactl subscribe` | 天宇受売命 |
+| `ame-hamon` | 今鳴っている音のスペクトラムを 1 行ずつ流す(Odin) | cava | 波紋 |
+| `ame-yatagarasu` | URL の中身を取ってくる(curl と同じオプション。暗号は OpenSSL) | curl | 八咫烏 |
+| `ame-emaki` | 画面を動画に録る(変換は ffmpeg) | wf-recorder | 絵巻 |
+| `ame-iwato` | 画面をロックする(単体。ame-shell が落ちてロックが残ったときにも) | swaylock | 天岩戸 |
+| `ame-copy` / `ame-paste` | クリップボードに入れる・出す | wl-copy・wl-paste | |
+| `ame-kuraokami` | 今の天気 | | 闇龗神(雨の龍神) |
+| `ame-lyrics` | 曲の同期歌詞(LRC)を探す | | |
+| `ame-ai` / `ame-agent` | AI と話す / コーディング CLI の出力を共通の JSON の行に | | |
+| `ame-keyring` | 鍵束(`org.freedesktop.secrets`) | gnome-keyring | |
+| `ame-airpods` / `ame-handtrack` | AirPods の頭の動き / カメラに映った手 | | |
+| `ame-config` | 設定ファイルを確かめる | | |
+| `ame-ctl` | ame-shell を操作する・出来事を流し続ける | | |
 
 ```sh
+amaterasu set +5                                          # 明るさを 5% 上げる(amaterasu だけで今の値)
+ame-uzume set 40; ame-uzume mute                          # 音量 40%・消音を切り替え(ame-uzume watch で変わるたびに 1 行)
+ame-tajikara set balanced                                 # 電源プロファイル(power-saver / balanced / performance)
+ame-hamon -b 32 | head -3                                 # 棒 32 本のスペクトラム(cava の raw ascii と同じ形)
+ame-yatagarasu -sSfL -o page.html https://example.com     # 取ってくる(-w '%{http_code}'・-K - なども curl と同じ)
+ame-emaki -f ~/Videos/a.mp4                               # 録画(Ctrl+C で保存して終わる。--no-audio・--cpu)
+ame-iwato -f                                              # 画面をロック(-f でロックできたらすぐ戻る)
+echo hi | ame-copy; ame-paste                              # クリップボード(-t image/png、ame-paste -l で種類の一覧)
+ame-kuraokami Sapporo                                     # 今の天気(--json で JSON)
 ame-lyrics 'YOASOBI' 'アイドル' > idol.lrc               # 歌詞を探す(0 見つかった / 1 無い / 2 一時的な失敗)
 echo 'Zig の comptime を一言で' | ame-ai -p anthropic       # AI に聞く(会社とモデルは省くとチャットで最後に選んだもの)
 echo 'これは何?' | ame-ai -i photo.png                      # 画像を付けて聞く(-i は何枚でも、8 枚まで)
@@ -358,12 +388,16 @@ ame-ai models -p openai                                     # モデルの一覧
 claude -p '直して' --output-format stream-json --verbose | ame-agent -C "$PWD"   # コーディング CLI の出力を共通の出来事に
 ame-agent sessions ~/projects/foo                          # Claude Code の会話の一覧
 ame-config check                                          # 設定ファイルを確かめる(間違いは「ファイル:行:」で出る)
-ame-weather Sapporo                                       # 今の天気(--json で JSON)
 ame-airpods head | jq -r 'select(.event=="gesture").gesture'     # AirPods の頭の動き(right / left / up / down)
 ame-handtrack | jq -c '.hands[0].gesture'                 # カメラに映った手の形(カメラを使う)
 ame-keyring list                                          # 鍵束にしまってあるものの名前と属性(秘密は出さない)
 ame-ctl watch | jq -r 'select(.event=="workspace").workspace'   # 出来事を流し続ける(自分のバーやスクリプトから)
 ```
+
+古い名前(ame-light・ame-power・ame-weather・ame-vol・ame-spectrum)は、しばらく新しい名前へのリンクとして入ります。
+道具はそれぞれ単独でビルドできるリポジトリにもなっています(`scripts/split-repos.sh` が ame-shell から生成。正本は ame-shell):
+[amaterasu](https://github.com/TatsuyaM2667/amaterasu)・[ame-tajikara](https://github.com/TatsuyaM2667/ame-tajikara)・[ame-uzume](https://github.com/TatsuyaM2667/ame-uzume)・[ame-hamon](https://github.com/TatsuyaM2667/ame-hamon)・[ame-yatagarasu](https://github.com/TatsuyaM2667/ame-yatagarasu)・[ame-emaki](https://github.com/TatsuyaM2667/ame-emaki)・[ame-iwato](https://github.com/TatsuyaM2667/ame-iwato)・[ame-clip](https://github.com/TatsuyaM2667/ame-clip)・[ame-kuraokami](https://github.com/TatsuyaM2667/ame-kuraokami)・[ame-lyrics](https://github.com/TatsuyaM2667/ame-lyrics)・[ame-ai](https://github.com/TatsuyaM2667/ame-ai)・[ame-agent](https://github.com/TatsuyaM2667/ame-agent)・[ame-keyring](https://github.com/TatsuyaM2667/ame-keyring)・[ame-airpods](https://github.com/TatsuyaM2667/ame-airpods)・[ame-handtrack](https://github.com/TatsuyaM2667/ame-handtrack)・[ame-config](https://github.com/TatsuyaM2667/ame-config)。
+手の認識の [ame-senju](https://github.com/TatsuyaM2667/ame-senju)(千手観音)と顔認証の [ame-kagami](https://github.com/TatsuyaM2667/ame-kagami)(八咫鏡)も別のリポジトリです。
 
 構成とソースの置き場は `docs/architecture.md` にあります。
 

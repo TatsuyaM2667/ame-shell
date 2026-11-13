@@ -125,7 +125,7 @@ Chimera には `/etc/pam.d` が無く、`/usr/lib/pam.d` だけがあります�
 
 **パッケージの名前を推測で書かない**: Arch と FreeBSD のパッケージ名は、公式のパッケージのデータベース(Arch の `core.db` / `extra.db`、FreeBSD の `packagesite.yaml`)を取ってきて、1 つずつ照合しています。FreeBSD 用には `scripts/check-freebsd-pkgs.sh` があります。
 
-**無いものは飛ばす**: 必須のもの以外(wf-recorder・日本語入力など)は、リポジトリに無ければ飛ばして続けます。FreeBSD の quarterly には無いことがある `ja-fcitx5-mozc` などは、候補を順に試します。
+**無いものは飛ばす**: 必須のもの以外(fastfetch・日本語入力など)は、リポジトリに無ければ飛ばして続けます。FreeBSD の quarterly には無いことがある `ja-fcitx5-mozc` などは、候補を順に試します。
 
 ## ame-update {#update}
 

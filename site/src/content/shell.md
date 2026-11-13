@@ -30,7 +30,7 @@
 
 - **レコード**: 中央のラベルは**アルバムアートが回ったもの**です。目が疲れないよう 1 周 24 秒でゆっくり回します。
 - **トーンアーム**: 再生中は針が黒い盤面の**溝**に乗り、曲の進みに合わせて外周から内側へ動きます。止めると持ち上がり、レコードの外へ戻ります。
-- **スペクトラム**: 再生中の音を録音して ame-shell の中で FFT し、レコードを包む液体の膜として描きます(cava は使いません)。
+- **スペクトラム**: 再生中の音を小さな道具 `ame-hamon`(Odin)が録音して FFT し、ame-shell がレコードを包む液体の膜として描きます(cava は使いません)。
 - **同期歌詞**: いくつかの取り寄せ先から自動で探します(プレーヤー自身の歌詞ファイル → キャッシュ → music-tui の歌詞サーバ → [LRCLIB](https://lrclib.net/) → NetEase → 酷狗(Kugou)→ 曲名だけで LRCLIB)。YouTube の「【MV】アーティスト「曲名」」や「〜 - Topic」のような書き方は、検索の前にアーティストと曲名へ整えます。今の行だけを大きく表示し、行が変わるたびに**下から弾んで**出ます。歌詞欄の上をクリックすると前の行へ、下をクリックすると次の行へ飛びます(シーク)。ホイールで前後の行を見られ、5 秒触らなければ今の行へ戻ります。
 - **曲の情報**: MPRIS(D-Bus を直接)から曲名・アーティスト・**アルバム名**・長さ・再生位置・アルバムアートを受け取ります。
 - **配色**: 再生中はアルバムアートの色がアクセントになります(`theme { media-accent on }`)。
@@ -102,7 +102,7 @@
 - **右から生えるパネル**で、いろいろな会社の AI と API で会話します。通知センターと同じ場所に出ます(通知センターとは入れ替わり)。Super+C・ランチャーの「AI チャット」・`ame-ctl ai toggle`。
 - **使える会社**: OpenAI・Anthropic(Claude)・Google Gemini・Mistral・DeepSeek・OpenCode Zen・OpenRouter・Kimi(Moonshot)・xAI(Grok)・Groq・Qwen(Alibaba Cloud)・Z.ai(GLM)・Perplexity・Together AI・Cerebras・Ollama(この PC)・カスタム(OpenAI 互換のサーバ。設定 `ai { custom-url "http://…/v1" }`)。Claude は Anthropic の形式、それ以外は OpenAI 互換の形式で話します。
 - **会社とモデル**: パネルの上の名前を押す(Ctrl+P)と会社の一覧。会社を選ぶと、その会社の `/models` からモデルの一覧を取ってきます。入力で絞り込み、一覧に無い名前も入れて Enter で使えます。選んだものは覚えます。
-- **API キー**: 会社を選んで「API キーを入れる」から貼り付け(Ctrl+V)て保存します。保存先は `~/.config/ame-shell/ai-keys`(自分だけが読める 0600)。環境変数(`OPENAI_API_KEY`・`ANTHROPIC_API_KEY`・`GEMINI_API_KEY`・`OPENROUTER_API_KEY`・`MOONSHOT_API_KEY` など)でも渡せます。キーは curl のコマンドラインに出さず、標準入力から渡します。
+- **API キー**: 会社を選んで「API キーを入れる」から貼り付け(Ctrl+V)て保存します。保存先は `~/.config/ame-shell/ai-keys`(自分だけが読める 0600)。環境変数(`OPENAI_API_KEY`・`ANTHROPIC_API_KEY`・`GEMINI_API_KEY`・`OPENROUTER_API_KEY`・`MOONSHOT_API_KEY` など)でも渡せます。キーは通信の道具(ame-yatagarasu)のコマンドラインに出さず、標準入力から渡します。
 - **会話**: Enter で送信・Shift+Enter で改行・送信中は ■ で止める(Ctrl+C)。返事は届いた分から表示し、見出し・箇条書き・コード・引用を見やすくします。DeepSeek R1 などの「考えている途中」も薄く出します。返事の下の「コピー」でクリップボードへ。＋(Ctrl+L)で新しい会話。会話は `~/.local/state/ame-shell/ai-chat` に残り、ame-shell を読み込み直しても続きから話せます。
 - **日本語入力**: fcitx5 などで変換しながら入力できます(text-input-v3。変換中の文字は下線、候補の窓は入力位置に出ます)。
 - **画像を送る**: 画像をコピーしてパネルで Ctrl+V、または入力欄の左の画像ボタンでファイルを選びます(1 回に 4 枚まで、送る前は下に小さく並び、× で外せます)。大きい画像は長い辺 1568 px の PNG に縮めてから送ります。Claude・OpenAI 互換の画像入力に対応したモデルで使えます。コーディング CLI には画像のパスを頼みごとに添えます。`ame-ctl ai attach <画像>` でも付けられます。
@@ -132,7 +132,7 @@
 
 ## ユーティリティ・セッション {#utilities}
 
-- **ユーティリティ**(Super+U): Wi-Fi・Bluetooth・通知停止・スリープ防止・**録画**(wf-recorder、`~/Videos` に保存して通知。PC で鳴っている音も一緒に録る)・スクリーンショット・電源プロファイル(省電力 / バランス / 高性能)。
+- **ユーティリティ**(Super+U): Wi-Fi・Bluetooth・通知停止・スリープ防止・**録画**(小さな道具 `ame-emaki`、`~/Videos` に保存して通知。PC で鳴っている音も一緒に録る。River 0.5 のセッション)・スクリーンショット・電源プロファイル(省電力 / バランス / 高性能)。
 - **Wi-Fi・Bluetooth のパネル**: 一覧・接続・パスワード入力。外側をクリックすると閉じます。AirPods などは接続すると高音質(A2DP)の出力にし、通話用の低音質(HFP)への自動切り替えを止めます。
 - **セッション**(Super+Escape): ロック・ログアウト・スリープ・再起動・電源オフ。危険な操作は 2 回押しです。FreeBSD では ConsoleKit2 で行います。
 
@@ -202,7 +202,7 @@
   - **赤外線カメラ**(GREY の形式を出すもの)でだけ登録・照合します(`face { require_ir on }`。普通のカメラしか無いときだけ off)。顔が赤外線の照明で十分明るいことも確かめます(スマホの画面に写した顔は赤外線では真っ暗です)。
   - 顔の検出は MediaPipe の BlazeFace、顔の特徴は OpenCV Zoo の SFace(どちらも Apache-2.0)。SFace は ONNX なので、**ONNX を読んで手の認識と同じ自作のエンジンの形に直す**ところから Zig で書きました([ame-kagami](https://github.com/TatsuyaM2667/ame-kagami) の `onnx.zig`。NCHW → NHWC の並べ替え、BatchNorm を畳み込みの重みに畳む、Flatten の後の全結合の列の並べ替え)。素直な NCHW の計算と比べて、差は 0.00001 未満です。
   - 確かめている間だけカメラとモデル(約 40MB)を使い、終わると全部返します。登録したのは特徴の数だけで、顔の画像は残しません。顔認証はパスワードより弱い(赤外線で印刷した写真・双子)ので、要らなければ `face { enabled off }`。
-- **FreeBSD** でも同じロック画面です。FreeBSD の pam_unix は root でないとパスワードを照合できないので、照合だけを小さな setuid の補助 `ame-auth` に任せます(swaylock が setuid で入るのと同じ考え)。
+- **FreeBSD** でも同じロック画面です。FreeBSD の pam_unix は root でないとパスワードを照合できないので、照合だけを小さな setuid の補助 `ame-auth` に任せます(swaylock が setuid で入るのと同じ考え。swaylock そのものは使いません)。
 - **ログイン画面**も ame-shell 自身が描きます(greetd + `ame-greeter`)。ロック画面と同じ見た目で、真ん中の穴から壁紙が見え、ログインするとその穴を抜けてデスクトップへ入ります。greetd の無い FreeBSD では、同じ見た目の SDDM のテーマを使います。
 
 ## WebAssembly のウィジェット {#widgets}

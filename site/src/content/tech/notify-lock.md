@@ -116,7 +116,7 @@ fn startAuth(self: *Lock) void {
 
 `pam_acct_mgmt` も呼ぶので、パスワードは合っていてもアカウントが期限切れ・無効の場合は解除しません。
 
-**FreeBSD では、照合だけを setuid の補助 `ame-auth` に任せます**。FreeBSD の pam_unix は、パスワードの照合に root の権限を必要とし(Linux の `unix_chkpwd` に当たる補助プログラムが無い)、一般ユーザーのプロセスからは照合できません。以前は setuid で入る swaylock にロックごと任せていましたが、それでは ame-shell のロック画面(曲・通知・波紋)が FreeBSD だけ使えません。そこで照合だけを切り出しました。
+**FreeBSD では、照合だけを setuid の補助 `ame-auth` に任せます**。FreeBSD の pam_unix は、パスワードの照合に root の権限を必要とし(Linux の `unix_chkpwd` に当たる補助プログラムが無い)、一般ユーザーのプロセスからは照合できません。以前は setuid で入る swaylock にロックごと任せていましたが(今は swaylock を使いません)、それでは ame-shell のロック画面(曲・通知・波紋)が FreeBSD だけ使えません。そこで照合だけを切り出しました。
 
 ```zig
 // src/auth_helper.zig(ame-auth。root の setuid で /usr/local/libexec/ame-shell/ に入る)
@@ -127,7 +127,7 @@ fn startAuth(self: *Lock) void {
 // 終了コード: 0 = 正しい / 1 = 違う / 2 = 照合できない(設定・環境の問題)
 ```
 
-ロック画面の認証の子プロセスは、Linux では自分で PAM を呼び、FreeBSD では `ame-auth` を空の環境で `execve` してパスワードを pipe で渡します。親から見れば「1 バイトの結果が返ってくる」のは同じです。ロックの前の事前確認では、`ame-auth` が root の setuid で入っていることと、PAM のサービス `/usr/local/etc/pam.d/ame-shell` があることを確かめ、無ければロックしません(閉じ込めないため)。`ame-auth` が無い古いインストールでは、従来どおり swaylock に任せます。
+ロック画面の認証の子プロセスは、Linux では自分で PAM を呼び、FreeBSD では `ame-auth` を空の環境で `execve` してパスワードを pipe で渡します。親から見れば「1 バイトの結果が返ってくる」のは同じです。ロックの前の事前確認では、`ame-auth` が root の setuid で入っていることと、PAM のサービス `/usr/local/etc/pam.d/ame-shell` があることを確かめ、無ければロックしません(閉じ込めないため)。`ame-auth` が無いときはロックせず、入れるよう知らせます。\n\nこれとは別に、どのコンポジタでも動く単体のロック画面 `ame-iwato`(天岩戸。swaylock の代わり)もあります。ame-shell が落ちてロックが残ったときは、別の端末から `WAYLAND_DISPLAY` を合わせて `ame-iwato` を実行すると外せます(詳しくは「小さな道具」のページ)。
 
 ### 解除の水の波紋 {#ripple}
 

@@ -43,11 +43,11 @@ pub fn position(self: *Media) f32 {
 
 ### 音のスペクトラム(液体のビジュアライザー) {#spectrum}
 
-cava は使いません。メディアのタブ・ロック画面で曲が流れている間だけ、libpulse-simple(dlopen)で再生中の音(`@DEFAULT_MONITOR@`)を 1/60 秒ずつ録音し、Odin の FFT(`anim/fft.odin`)で 48 帯に分けます。描画は GPU のシェーダ(`liquid_fs`)で、帯の間をなめらかにつないだ液体の膜がレコードの周りで揺れます。
+cava は使いません。メディアのタブ・ロック画面・アイランドで曲が流れている間だけ、小さな道具 `ame-hamon`(Odin)を動かします。ame-hamon は libpulse-simple(実行時に読む)で再生中の音(`@DEFAULT_MONITOR@`)を 1/60 秒ずつ録音し、FFT(`anim/fft.odin`)で 48 帯に分け、棒の高さを 1 行ずつ書きます(無音の間は書かない)。ame-shell はその行を読むだけです。描画は GPU のシェーダ(`liquid_fs`)で、帯の間をなめらかにつないだ液体の膜がレコードの周りで揺れます。
 
 ### アルバムアート {#art}
 
-- `file://` ならそのまま読む。`http(s)://` なら curl でキャッシュに保存し、終わったら pipe の EOF で知る(`--max-filesize 8000000` で巨大な画像を拒否)。
+- `file://` ならそのまま読む。`http(s)://` なら ame-yatagarasu(curl の代わり)でキャッシュに保存し、終わったら pipe の EOF で知る(`--max-filesize 8000000` で巨大な画像を拒否)。
 - 読んだ画像から、配色と同じ方法でアクセントの色を作り、**再生中はアクセントをその色に**します([配色](#/tech-glass))。
 
 ## 同期歌詞: LRCLIB {#lyrics}
@@ -55,11 +55,11 @@ cava は使いません。メディアのタブ・ロック画面で曲が流れ
 ```zig
 // src/media/lyrics.zig
 //   1. キャッシュ(~/.cache/ame-shell/lyrics/<曲のハッシュ>)があればそれを使う
-//   2. 無ければ curl で /api/get(アーティスト名 + 曲名 + 長さ)→ 見つからなければ /api/search
+//   2. 無ければ ame-yatagarasu で /api/get(アーティスト名 + 曲名 + 長さ)→ 見つからなければ /api/search
 //      を非同期に叩き、完了を pipe の EOF で知る(シェルを通さず引数で渡すので曲名に何が入っていても安全)
 //   3. JSON(std.json)から syncedLyrics(無ければ plainLyrics)を取り出して LRC を解析
 // 曲が変わるたびに 1 回だけ問い合わせ、見つからなかったことも「無し」としてキャッシュする。
-fd = sys.spawnReader(&.{ "curl", "-s", "--max-time", "8", "-A", "ame-shell (https://github.com)", "-G", "https://lrclib.net/api/get",
+fd = sys.spawnReader(&.{ "ame-yatagarasu", "-s", "--max-time", "8", "-A", "ame-shell (https://github.com)", "-G", "https://lrclib.net/api/get",
                          "--data-urlencode", an.ptr, "--data-urlencode", tn.ptr, "--data-urlencode", dn.ptr }, &self.pid);
 ```
 
@@ -70,7 +70,7 @@ fd = sys.spawnReader(&.{ "curl", "-s", "--max-time", "8", "-A", "ame-shell (http
 | **曲名を検索の前に整える** | 動画サイトの曲名にありがちな `【MV】`、`(Official Video)`、`[Lyrics]` などの飾りを末尾から取り除く(`cleanTitle`) |
 | `--data-urlencode` で引数として渡す | 曲名に `&` や `'` が入っていても、URL やシェルとして解釈されない |
 | **「無かった」こともキャッシュ** | 歌詞の無い曲を再生するたびに問い合わせない |
-| curl は子プロセス | HTTP・TLS のライブラリをリンクしない。8 秒のタイムアウト。待つのは pipe だけ |
+| 通信は子プロセス(ame-yatagarasu) | ame-shell 本体は HTTP・TLS のライブラリをリンクしない。8 秒のタイムアウト。待つのは pipe だけ |
 
 LRCLIB に無い曲(日本語の曲・動画サイトの曲名)も多いので、今は次の順に探します。同期歌詞が見つかった時点で終わり、同期の無い歌詞しか無ければ、残りの取り寄せ先で同期歌詞を探してから使います。
 
@@ -157,7 +157,7 @@ pub fn trySidecar(self: *Lyrics, player: []const u8) void {
 - **JSON ではなくテキスト**: `pactl -f json` は、機器名に日本語が入ると壊れた JSON を出しました(作者の AirPods の名前で発生)。そこで人間向けのテキスト出力を読んでいます。
 - **別スレッド**: pactl は 1 回に数十 ms かかるので、描画のスレッドでは呼びません。
 - **ストリームも移す**: 既定の出力を変えるだけでは、すでに鳴っている音(再生中の曲)は元の機器のまま鳴り続けます。再生中のストリームも新しい機器へ移します。
-- 音量の変化は `pactl subscribe` を常駐させて知ります(PipeWire のネイティブ API を使わないのは、開発用のパッケージへの依存を避けるため)。値の変更と読み取りは `wpctl` で行い、`-l 1.0` で 100% を超えないようにしています(耳とスピーカーの保護)。
+- 音量は小さな道具 `ame-uzume`(Odin)が受け持ちます。変化は常駐させた `ame-uzume watch` が新しい値の 1 行を書くので、それをそのまま使います(libpulse は実行時に読むので、開発用のパッケージは要りません)。値の変更も `ame-uzume set` で、100% を超えないようにしています(耳とスピーカーの保護)。set した音量と消音は覚えて、ログインのときに戻します。
 
 ## 動画の壁紙: libmpv の描画 API {#video}
 
@@ -219,7 +219,7 @@ FreeBSD など、libmpv が無い・再生できない・5 秒たっても最初
 :::research 時計の同期と、外部プロセスとの境界
 再生位置の推定は、「最後に観測した位置 p₀ と時刻 t₀」からの外挿 `p(t) = p₀ + (t − t₀)·r`(r = 再生速度 = 1)で、シーク(不連続)は Seeked の信号で置き直す**区分的な線形の推定**です。歌詞の同期の誤差は、外挿の誤差と、D-Bus の信号の遅延の和で抑えられます。
 
-外部のプログラム(curl・pactl・ffmpeg)を子プロセスとして使い、結果をパイプの EOF で受ける設計は、ライブラリをリンクする場合に比べて**故障の隔離**(子が落ちても親は落ちない)と**依存の最小化**(HTTP・TLS・D-Bus・コーデックのライブラリをリンクしない)を得る代わりに、プロセスの生成のコスト(数 ms)を払います。どれも人間の操作の頻度(秒単位)でしか起きないので、このコストは無視できます。
+外部のプログラム(ame-yatagarasu・ame-uzume・ame-hamon・ffmpeg)を子プロセスとして使い、結果をパイプの EOF で受ける設計は、ライブラリをリンクする場合に比べて**故障の隔離**(子が落ちても親は落ちない)と**依存の最小化**(HTTP・TLS・D-Bus・コーデックのライブラリをリンクしない)を得る代わりに、プロセスの生成のコスト(数 ms)を払います。どれも人間の操作の頻度(秒単位)でしか起きないので、このコストは無視できます。
 :::
 
 ## 関連する用語 {#terms}

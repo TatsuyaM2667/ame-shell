@@ -5,7 +5,7 @@
 - **画面の要らない仕事は小さなコマンド**に分ける。1 つのことをし、文字(テキスト / 1 行 1 つの JSON)を標準入出力でやりとりする。
   ame-shell もそれを子プロセスとして動かして出力を読むだけなので、端末からも同じものが使え、単独で試せる。
 - **部品(src/lib/)は画面にも OS にも依存しない**。コマンドと画面の両方が `@import("ame_lib")` で使い、試験は `zig build test` で走る。
-- **数値の重い処理は Odin(anim/)**、**他人が書けるウィジェットは WASM(widgets/)**、OS の違いは `src/platform/` に閉じ込める。
+- **数値の重い処理は Odin(anim/。音の道具 odin/ も)**、**他人が書けるウィジェットは WASM(widgets/)**、OS の違いは `src/platform/` に閉じ込める。
 
 ## 小さな道具(zig-out/bin)
 | コマンド | すること | 入力 → 出力 |
@@ -20,15 +20,27 @@
 | `ame-airpods head` / `battery` / `find` | AirPods の頭の動き・電池・接続中のもの(AAP、Linux) | → 1 行 1 つの JSON(head は止めるまで流し続ける) |
 | `ame-handtrack [-d カメラ]` | カメラに映った手の形と位置・関節 21 点(ame-hand で推論) | → 1 行 1 つの JSON(status / frame。止めるまで流し続ける) |
 | `ame-keyring` / `ame-keyring list` | 鍵束(org.freedesktop.secrets)。Zed などが API キー・パスワードをしまう(gnome-keyring の代わり) | D-Bus の Secret Service / 名前と属性の一覧 |
+| `amaterasu` / `amaterasu set 40`(`+5`・`-5`)/ `restore` | 画面の明るさ(sysfs、書けなければ logind の SetBrightness。brightnessctl の代わり)。set した値を覚え、ログインで戻す | → 0〜100 の数 |
+| `ame-tajikara` / `set 名前` / `restore` | 電源プロファイル(power-profiles-daemon に D-Bus。powerprofilesctl の代わり)。覚えて戻す | → power-saver / balanced / performance |
+| `ame-uzume` / `set N`(`+N`・`-N`)/ `mute [on・off]` / `restore` / `watch` | 音量(Odin。libpulse を実行時に読む。wpctl・`pactl subscribe` の代わり)。覚えて戻す | → 「45」/「45 muted」。watch は変わるたびに 1 行 |
+| `ame-hamon [-b 本数]` | 今鳴っている音のスペクトラム(Odin。@DEFAULT_MONITOR@ を録って FFT。cava の代わり) | → 棒の高さ 0〜1000 を ';' でつないだ行(1 秒に約 60 行。無音の間は書かない) |
+| `ame-yatagarasu [curl と同じオプション] URL` | URL の中身を取ってくる(HTTP/1.1 は自前、暗号は OpenSSL。curl の代わり) | → 中身。終了コードも curl と同じ番号 |
+| `ame-emaki -f 保存先 [--no-audio] [--cpu]` | 画面を動画に録る(ext-image-copy-capture で撮り、ffmpeg が変換。wf-recorder の代わり) | SIGINT で保存して終わる |
+| `ame-iwato [-f]` | 画面をロックする(単体。ext-session-lock + PAM。swaylock の代わり) | 正しいパスワードで 0 |
+| `ame-copy [-t 種類]`(標準入力から)/ `ame-paste [-t 種類]`・`ame-paste -l` | クリップボード(ext-data-control。wl-copy・wl-paste の代わり) | 標準入力 → クリップボード → 標準出力 |
 | `ame-ctl …` | 動いている ame-shell を操作する(`ame-ctl help`) | 引数 → 結果の文字 |
 | `ame-ctl watch` | 出来事(ワークスペース・フォーカス・窓の開閉・通知・曲・ロック)を流し続ける | → 最初に今の状態(hello)、そのあと 1 行 1 つの JSON |
-| `ame-auth` | ロック画面のパスワード照合(FreeBSD、setuid) | — |
+| `ame-auth` | ロック画面のパスワード照合(FreeBSD、setuid。ame-shell の中のロックと ame-iwato が使う) | — |
 
 例: `echo 'Zig の comptime を一言で' | ame-ai -p anthropic`、
 `claude -p 直して --output-format stream-json --verbose | ame-agent -C "$PWD" | jq -r 'select(.type=="tool").title'`
 
-src/cmd の道具は、どれも単独でビルドできるリポジトリにも切り出してある
-([ame-lyrics](https://github.com/TatsuyaM2667/ame-lyrics)・[ame-ai](https://github.com/TatsuyaM2667/ame-ai)・[ame-agent](https://github.com/TatsuyaM2667/ame-agent)・[ame-config](https://github.com/TatsuyaM2667/ame-config)・[ame-kuraokami](https://github.com/TatsuyaM2667/ame-kuraokami)・[ame-airpods](https://github.com/TatsuyaM2667/ame-airpods)・[ame-handtrack](https://github.com/TatsuyaM2667/ame-handtrack)・[ame-keyring](https://github.com/TatsuyaM2667/ame-keyring))。
+名前の多くは日本の神話から(天照大神・天手力男神・天宇受売命・八咫烏・天岩戸・闇龗神・千手観音・八咫鏡)、ほかに波紋・絵巻。
+古い名前(ame-light・ame-power・ame-weather・ame-vol・ame-spectrum)は、しばらく新しい名前へのリンクとして入る。
+
+道具は、どれも単独でビルドできるリポジトリにも切り出してある
+([amaterasu](https://github.com/TatsuyaM2667/amaterasu)・[ame-tajikara](https://github.com/TatsuyaM2667/ame-tajikara)・[ame-uzume](https://github.com/TatsuyaM2667/ame-uzume)・[ame-hamon](https://github.com/TatsuyaM2667/ame-hamon)・[ame-yatagarasu](https://github.com/TatsuyaM2667/ame-yatagarasu)・[ame-emaki](https://github.com/TatsuyaM2667/ame-emaki)・[ame-iwato](https://github.com/TatsuyaM2667/ame-iwato)・[ame-clip](https://github.com/TatsuyaM2667/ame-clip)・[ame-lyrics](https://github.com/TatsuyaM2667/ame-lyrics)・[ame-ai](https://github.com/TatsuyaM2667/ame-ai)・[ame-agent](https://github.com/TatsuyaM2667/ame-agent)・[ame-config](https://github.com/TatsuyaM2667/ame-config)・[ame-kuraokami](https://github.com/TatsuyaM2667/ame-kuraokami)・[ame-airpods](https://github.com/TatsuyaM2667/ame-airpods)・[ame-handtrack](https://github.com/TatsuyaM2667/ame-handtrack)・[ame-keyring](https://github.com/TatsuyaM2667/ame-keyring))。
+Zig の道具は `zig build`、Odin の道具は `sh build.sh` と `odin test .`、Wayland の道具はプロトコルの XML を持ち、ビルドで wayland-scanner を通す。
 正本はこの ame-shell(全部入り)で、切り出したものは `sh scripts/split-repos.sh` が生成して同期する(道具を直したら実行し直す)。
 
 ## ソースの置き場
@@ -49,12 +61,14 @@ src/
   hand/ face/  手の操作(認識は ame-handtrack を動かす)・顔の認証(カメラ)
   platform/  OS ごとの違い(Linux / FreeBSD)・イベントループ
   lib/       画面にも OS にも依存しない部品(lrc・ai・mcp・agentfmt・appid・config・weather・aap・secretstore)
-  cmd/       小さな道具(ame-lyrics・ame-ai・ame-agent・ame-config・ame-kuraokami・ame-airpods・ame-handtrack・ame-keyring)
+  cmd/       Zig の小さな道具(ame-lyrics・ame-ai・ame-agent・ame-config・ame-kuraokami・ame-airpods・ame-handtrack・ame-keyring・
+             amaterasu・ame-tajikara・ame-yatagarasu・ame-emaki・ame-iwato・ame-clip(ame-copy / ame-paste)。sysbus.zig は D-Bus の共通の包み)
 anim/        Odin: ばね・あいまい検索・主色抽出・FFT・画像の縮小(C ABI。wasm32 にも同じものをビルド)
+odin/        Odin の小さな道具(ame-uzume・ame-hamon。zig build が odin build / odin test を呼ぶ)
 widgets/     WASM ウィジェット(Zig → wasm32)
 ```
 新しい機能を足すとき: 画面が要らない部分はまず `src/lib/` に純粋な関数として書いて試験を付け、
-外から使える意味があれば `src/cmd/` にコマンドを足す(`build.zig` の `cmds` と `session/install-session.sh` にも名前を足す)。
+外から使える意味があれば `src/cmd/`(Zig)か `odin/<名前>/`(Odin)にコマンドを足す(`build.zig` の `cmds` / `odin_cmds`、`session/install-session.sh`、`scripts/split-repos.sh` にも名前を足す)。
 
 ## プロセスの図
 ```
@@ -70,8 +84,11 @@ widgets/     WASM ウィジェット(Zig → wasm32)
                        │ platform/      loop(epoll+timerfd) / sys(sysfs, procfs, 外部コマンド)      │
                        └───────┬──────────────────────────────────────────────────────────────────────┘
                                │ 子プロセス(標準入出力・1 行 1 つの JSON)
-                               ├── ame-lyrics(歌詞)        ── curl
-                               ├── ame-ai(AI・MCP)         ── curl / MCP サーバ
+                               ├── ame-uzume watch(音量の変化)・ame-hamon(スペクトラム)  ── libpulse
+                               ├── amaterasu・ame-tajikara(明るさ・電源)                    ── システムの D-Bus
+                               ├── ame-lyrics(歌詞)・ame-kuraokami(天気)                  ── ame-yatagarasu
+                               ├── ame-ai(AI・MCP)                                         ── ame-yatagarasu / MCP サーバ
+                               ├── ame-emaki(録画)                                         ── ffmpeg
                                └── claude などのコーディング CLI(出力は lib/agentfmt で読む。ame-agent と同じ)
 ```
 
@@ -84,9 +101,9 @@ widgets/     WASM ウィジェット(Zig → wasm32)
 | clock timerfd | 次の「分」の境目ちょうど(秒表示時は秒) |
 | sys timerfd | 20 秒ごと(バッテリー・ネットワーク・明るさ) |
 | wallpaper timerfd | ライブ壁紙の FPS ごと(AC/バッテリーで切替、静止時は停止) |
-| `pactl subscribe` の pipe | 音量が変わったときだけ |
+| `ame-uzume watch` の pipe | 音量が変わったときだけ(新しい音量の 1 行が来る) |
 | MPRIS(セッションの D-Bus)の fd | 曲・再生状態・シークが変わったときだけ |
-| スペクトラムの録音スレッドの pipe | メディアのタブ・ロック画面で曲が流れている間だけ(1/60 秒ごと) |
+| `ame-hamon` の pipe | メディアのタブ・ロック画面・アイランドで曲が流れている間だけ(約 1/60 秒ごと。無音の間は来ない) |
 | D-Bus fd | 通知が来たとき |
 | inotify | 設定ファイル / ウィジェット .wasm の保存時 |
 | IPC ソケット | ame-ctl 実行時 |

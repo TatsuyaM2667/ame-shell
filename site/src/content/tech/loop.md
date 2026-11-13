@@ -45,11 +45,11 @@ pub const Loop = struct {
 |---|---|
 | Wayland の接続 | 入力・フレームの合図・configure・River の状態 |
 | timerfd(時計・システム・壁紙・OSD・通知の期限・キーリピート・グリフの先読み・WM のアニメーション) | 「次に何かが変わる時刻」だけ |
-| MPRIS の D-Bus / `pactl subscribe` の stdout / 録音スレッドの pipe | 曲・音量・スペクトラムが変わったとき |
+| MPRIS の D-Bus / `ame-uzume watch` の stdout / `ame-hamon` の stdout | 曲・音量・スペクトラムが変わったとき |
 | D-Bus の接続 | 通知が来たとき |
 | inotify | 設定ファイル・`.wasm`・`/dev/input` の変化 |
 | Unix ソケット | ame-ctl |
-| 子プロセス・ワーカースレッドからの pipe | curl・Wi-Fi / Bluetooth の D-Bus・PAM・アイコンのデコード・スクショの PNG などが終わったとき |
+| 子プロセス・ワーカースレッドからの pipe | ame-yatagarasu・Wi-Fi / Bluetooth の D-Bus・PAM・アイコンのデコード・スクショの PNG などが終わったとき |
 | libmpv / ffmpeg からの pipe | 動画の新しいコマ |
 
 ### ほかの方法との違い {#vs-loop}

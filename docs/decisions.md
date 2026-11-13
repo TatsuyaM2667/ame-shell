@@ -50,9 +50,9 @@ Chimera Linux x86_64 / musl / dinit / AMD Ryzen 7 7735HS (16 スレッド) / Rad
 ## 通知: libdbus の private 接続を epoll に載せる
 - すでに別の通知デーモン(このマシンでは swaync)が名前を持っていれば奪わない(DO_NOT_QUEUE)。ame-shell の SDDM セッションでは swaync が起動しないので ame-shell が担当する。
 
-## 音量: `pactl subscribe` を常駐させてイベント駆動、値は `wpctl`
-- 理由: libpipewire の開発パッケージが未導入(pkg-config に無い)。PipeWire のネイティブ API を使うより依存が少なく、変化があったときだけ読み直せる。
-- 却下: 定期ポーリング。
+## 音量: 小さな道具 `ame-uzume`(Odin)。変化は `ame-uzume watch` の 1 行で受け取る(2026-11 から)
+- 理由: libpulse(pipewire-pulse の口)を実行時に読めば、ヘッダも -dev パッケージも要らない。watch が新しい音量をそのまま書くので、変わるたびに wpctl を起こさずに済む。set した値を覚え、ログインで戻せる(音量は出力の機器ごとに別なので、イヤホンの無い起動でスピーカーの昔の値に戻っていた)。
+- 却下: `pactl subscribe` + `wpctl`(以前の方式。変化のたびにもう 1 つプロセスを起こし、値を覚えられない)、PipeWire のネイティブ API(libpipewire の開発パッケージが要る)、定期ポーリング。
 
 ## ロック画面
 - PAM は dlopen(ヘッダ不要、libpam が無い環境でもシェルは起動する)。認証は fork した子プロセスで行い、結果を pipe で受ける(失敗時ディレイで UI が固まらない)。
@@ -80,3 +80,13 @@ Chimera Linux x86_64 / musl / dinit / AMD Ryzen 7 7735HS (16 スレッド) / Rad
 - `ame-ctl` を x86_64-linux-gnu(glibc, Arch 相当)でビルド: 成功。
 - `ame-shell` 本体の glibc ビルドは、glibc 環境のシステムライブラリ(wayland/EGL/freetype 等)に対してリンクする必要があるため、Arch 実機でのビルドを想定(build.zig は glibc/musl の差に依存しない書き方)。
 - `Debug` 以外はバイナリを strip(ame-shell 626KB, ame-ctl 14KB)。
+
+## 外部の道具を ame の小さな道具に(2026-11)
+- 決定: brightnessctl・powerprofilesctl・wpctl / `pactl subscribe`・cava・curl・wf-recorder・swaylock・wl-copy / wl-paste を、1 つのことをする自前の道具に置き換えた(amaterasu・ame-tajikara・ame-uzume・ame-hamon・ame-yatagarasu・ame-emaki・ame-iwato・ame-copy / ame-paste)。それぞれ単独のリポジトリにもする(`scripts/split-repos.sh`)。
+- 理由: 道具をそろえて、入れるパッケージを減らし、同じ書き方(1 行の文字・終了コード)で端末からも使えるようにする。ame-shell は名前を変えて呼ぶだけで済む形を選んだ(呼ぶ側を作り直さない)。
+- 言語: 数値と音の処理は Odin(ame-uzume・ame-hamon。FFT は anim/fft.odin を共有)、D-Bus・Wayland・OpenSSL につなぐものは Zig(生成した Wayland のヘッダと libdbus の包みが既にある)。
+- 明るさ(amaterasu): /sys に書ければそこへ、書けなければ logind の Session.SetBrightness。却下: setuid の補助(root で動くものを増やさない)、udev の規則で video グループに書かせる(/etc を書き換える)。
+- 通信(ame-yatagarasu): HTTP/1.1 は自前、TLS と証明書の確認は OpenSSL。却下: Zig 0.13 の std.http(TLS 1.3 しか話せず、1.2 だけのサイトに届かない)、TLS を自分で書く(暗号は自作しない)。curl と同じオプション・終了コードを読むので、呼ぶ側は名前を変えるだけ。
+- 録画(ame-emaki): 画面は ext-image-copy-capture で変わったときだけ撮り、生の画素を ffmpeg に流す(VAAPI、無ければ libx264)。時刻は `-fps_mode passthrough`(vfr だと 25 コマ/秒に並べ直されて短くなる)、止まった画面は 1 秒ごとに同じコマ、終わりは SIGINT で ffmpeg に仕上げさせる(音の入力は自分では終わらない。`-shortest` は音に合わせて動画を切ってしまった)。却下: H.264 のエンコーダを自作(量が大きく、GPU を使えない)、libavcodec に直接つなぐ(ffmpeg のコマンドで足りる)。
+- ロック(ame-iwato): ame-shell の中のロック画面(顔認証・曲のカード)はそのまま残し、どのコンポジタでも動く単体のものを別に作った。ame-shell が落ちてロックが残ったときに外す道具にもなる。却下: 中のロック画面を切り出す(描画・顔認証・曲のカードが ame-shell の多くに依存)。FreeBSD で swaylock に任せていたところは、ame-auth を入れるよう知らせる形にした。
+- 名前: 日本の神話と古い言葉から(ame は「雨」と「天」)。古い名前はしばらくリンクとして入れる。

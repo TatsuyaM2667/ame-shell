@@ -17,12 +17,12 @@ ame-shell は、この違いを `src/platform/` という場所に閉じ込め�
 // OS 依存のデータ取得(sysfs / procfs / 外部コマンド)。
 //
 // init(dinit/systemd)には依存せず、カーネルのインターフェースと、どの
-// ディストリにもある小さなコマンド(wpctl, brightnessctl)だけを使う(Wi-Fi・Bluetooth は netdbus.zig で D-Bus)。
+// ame の小さな道具(ame-uzume・amaterasu)を呼ぶ(Wi-Fi・Bluetooth は netdbus.zig で D-Bus)。
 // コマンドが無い環境ではその機能だけ「不明」として扱い、シェルは動き続ける。
 ```
 
 - **init に依存しない**: systemd の D-Bus API(logind 以外)や dinit の機能は使いません。Chimera(dinit)・Arch(systemd)・FreeBSD(rc)で同じように動きます。
-- **無ければ「不明」**: 例えば brightnessctl が無い機械では、明るさの項目が出ないだけです。シェルは止まりません。
+- **無ければ「不明」**: 例えばバックライトの無い機械では、明るさの項目が出ないだけです。シェルは止まりません。
 
 ## 同じ情報を OS ごとに {#sources}
 
@@ -33,8 +33,8 @@ ame-shell は、この違いを `src/platform/` という場所に閉じ込め�
 | 電池 | `/sys/class/power_supply/*/capacity`・`status`・`online` | `hw.acpi.battery.life`・`state`・`hw.acpi.acline` |
 | CPU 温度 | hwmon | `dev.cpu.0.temperature`(0.1 K 単位。coretemp / amdtemp が必要) |
 | 機種名 | DMI(`/sys/class/dmi/id`) | `kenv smbios.system.product` |
-| 明るさ | brightnessctl | `backlight` コマンド |
-| 音量 | wpctl | wpctl(PipeWire があれば)、無ければ `mixer` |
+| 明るさ | `amaterasu`(/sys、書けなければ logind) | `backlight` コマンド |
+| 音量 | `ame-uzume`(libpulse) | `ame-uzume`(PulseAudio)、無ければ `mixer` |
 | ネットワーク | NetworkManager(D-Bus を直接)| `ifconfig` |
 | 電源操作 | `loginctl reboot / poweroff / suspend` | ConsoleKit2 の D-Bus(`dbus-send --system`) |
 | epoll・timerfd・inotify | カーネル | libepoll-shim・libinotify(kqueue の上に同じ API を作るライブラリ) |
@@ -120,7 +120,7 @@ FreeBSD も evdev(`/dev/input/event*`)を持っていますが、**ioctl の番�
 ## 研究者向けの補足 {#research}
 
 :::research 移植性の層と、ABI の差
-移植性の問題は、(1) **API の差**(epoll と kqueue、/proc と sysctl)、(2) **ABI の差**(構造体の並び、システムコールの番号、ioctl の符号化、関数の引数の型)、(3) **ポリシーの差**(pam_unix の権限モデル)、に分けられます。(1) は shim のライブラリ(libepoll-shim・libinotify)と `platform/` の関数で吸収し、(2) はコンパイル時の型の反射(`@typeInfo`)と OS ごとの定数の表で吸収し、(3) は機能を別の実装(setuid の swaylock)に委ねて吸収しています。
+移植性の問題は、(1) **API の差**(epoll と kqueue、/proc と sysctl)、(2) **ABI の差**(構造体の並び、システムコールの番号、ioctl の符号化、関数の引数の型)、(3) **ポリシーの差**(pam_unix の権限モデル)、に分けられます。(1) は shim のライブラリ(libepoll-shim・libinotify)と `platform/` の関数で吸収し、(2) はコンパイル時の型の反射(`@typeInfo`)と OS ごとの定数の表で吸収し、(3) は照合だけを小さな setuid の補助(ame-auth)に切り出して吸収しています。
 
 (2) の誤りは**コンパイルもリンクも通る**ため、最も見つけにくい種類です(SIGSYS の件)。これに対しては、成果物(バイナリ)に対する不変条件の静的な検査(逆アセンブルでの命令の計数)が有効でした。
 :::
