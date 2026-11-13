@@ -5,11 +5,16 @@
 #
 #   sh scripts/split-repos.sh [--dry-run] [道具の名前 ...]
 #     --dry-run  作ってビルド・テストするだけ(push しない。作ったものは表示する場所に残る)
-#   GitHub のリポジトリが無ければ gh で作る(公開)。要るもの: git, gh(ログイン済み), zig
+#   GitHub のリポジトリが無ければ gh で作る(公開)。要るもの: git, gh(ログイン済み), zig 0.13, odin
 set -eu
 
 OWNER=TatsuyaM2667
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# Zig は 0.13(ame-shell と同じ)。ame-shell の install.sh が入れる場所にあればそれを使う
+ZIG013=$HOME/.cache/ame-shell/toolchain/zig-linux-x86_64-0.13.0/zig
+if [ -z "${ZIG:-}" ]; then
+	if [ -x "$ZIG013" ]; then ZIG=$ZIG013; else ZIG=zig; fi
+fi
 DRY=0
 if [ "${1:-}" = "--dry-run" ]; then DRY=1; shift; fi
 
@@ -21,11 +26,15 @@ ame-config|config|||ame-shell の設定ファイル(config.ame)の文法と値�
 ame-weather|weather|curl||今の天気を wttr.in から取ってくる小さなコマンド(文字 / JSON)
 ame-airpods|aap|bluetoothctl||AirPods の頭の動き・電池を Bluetooth(AAP)で読む小さなコマンド(Linux)
 ame-handtrack||curl|ame-hand|カメラに映った手の形と位置・関節 21 点を JSON の行で流し続ける小さなコマンド(Linux)
-ame-keyring|secretstore||dbus|鍵束(org.freedesktop.secrets)。アプリが API キー・パスワードをしまう Secret Service(gnome-keyring の代わり)'
+ame-keyring|secretstore||dbus|鍵束(org.freedesktop.secrets)。アプリが API キー・パスワードをしまう Secret Service(gnome-keyring の代わり)
+ame-light|||dbus|画面の明るさを読む・変える・覚えて戻す小さなコマンド(brightnessctl の代わり。root なしで logind 経由)
+ame-power|||dbus|電源プロファイル(省電力・バランス・高性能)を読む・変える小さなコマンド(powerprofilesctl の代わり)
+ame-vol||libpulse||音量を読む・変える・消音・見張る小さなコマンド(Odin。wpctl・pactl subscribe の代わり)
+ame-spectrum|fft|libpulse-simple||今鳴っている音のスペクトラムを 1 行ずつ流す小さなコマンド(Odin。cava の代わり)'
 
 REV=$(git -C "$ROOT" rev-parse --short HEAD)
-if [ -n "$(git -C "$ROOT" status --porcelain -- src/cmd src/lib)" ]; then
-	echo "src/cmd か src/lib に commit していない変更があります。先に commit してください" >&2
+if [ -n "$(git -C "$ROOT" status --porcelain -- src/cmd src/lib odin anim)" ]; then
+	echo "src/cmd・src/lib・odin・anim に commit していない変更があります。先に commit してください" >&2
 	exit 1
 fi
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/ame-split.XXXXXX")
@@ -121,18 +130,19 @@ gen_readme() { # $1 名前 $2 説明 $3 外部コマンド $4 ほかに要るも
 	echo
 	echo '```text'
 	# 道具のファイルの先頭の説明(// の行)をそのまま
-	sed -n '/^\/\//!q; s|^// \{0,1\}||p' "$ROOT/src/cmd/$1.zig"
+	sed -n '/^\/\//!q; s|^// \{0,1\}||p' "$5"
 	echo '```'
 	echo
 	echo "## ビルド"
 	echo
 	echo '```sh'
 	case "$4" in
+	odin) echo "sh build.sh   # ./$1(Odin dev-2026-08 以降。libpulse などは実行時に読むので、ヘッダも -dev パッケージも要らない)" ;;
 	dbus) echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin/$1(Zig 0.13、libc と libdbus)" ;;
 	ame-hand) echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin/$1(Zig 0.13、libc。手の認識の ame-hand は初回に取ってくる)" ;;
 	*) echo "zig build -Doptimize=ReleaseSafe   # zig-out/bin/$1(Zig 0.13、libc だけ)" ;;
 	esac
-	echo "zig build test"
+	if [ "$4" = odin ]; then echo "odin test ."; else echo "zig build test"; fi
 	echo '```'
 	if [ -n "$3" ]; then
 		echo
@@ -141,7 +151,7 @@ gen_readme() { # $1 名前 $2 説明 $3 外部コマンド $4 ほかに要るも
 	echo
 	echo "## このリポジトリについて"
 	echo
-	echo "正本は ame-shell の \`src/cmd/$1.zig\` と \`src/lib/\` です。このリポジトリは \`scripts/split-repos.sh\` が生成して同期しています。"
+	echo "正本は ame-shell の \`${5#"$ROOT"/}\` です。このリポジトリは \`scripts/split-repos.sh\` が生成して同期しています。"
 	echo "直したいところがあれば ame-shell の方へお願いします。"
 	echo
 	echo "ライセンス: GPL-3.0(ame-shell と同じ)"
@@ -166,21 +176,41 @@ echo "$COMPONENTS" | while IFS='|' read -r name mods needs extra desc; do
 		mkdir -p "$dir"
 		git -C "$dir" init -q -b master
 	fi
-	mkdir -p "$dir/src/lib"
-	cp "$ROOT/src/cmd/$name.zig" "$dir/src/main.zig"
-	# shellcheck disable=SC2086
-	for m in $mods; do cp "$ROOT/src/lib/$m.zig" "$dir/src/lib/$m.zig"; done
-	# shellcheck disable=SC2086
-	gen_lib $mods > "$dir/src/lib/lib.zig"
-	gen_build "$name" "$extra" > "$dir/build.zig"
-	gen_zon "$name" "$extra" > "$dir/build.zig.zon"
-	gen_readme "$name" "$desc" "$needs" "$extra" > "$dir/README.md"
+	if [ -d "$ROOT/odin/$name" ]; then
+		# Odin の道具(odin/<名前>/)。使う部品(fft など)は anim/ から anim/ へ写し、import の場所を直す
+		cp "$ROOT/odin/$name"/*.odin "$dir/"
+		if [ -n "$mods" ]; then
+			mkdir -p "$dir/anim"
+			for m in $mods; do cp "$ROOT/anim/$m.odin" "$dir/anim/$m.odin"; done
+			sed 's|import anim "../../anim"|import anim "anim"|' "$dir/main.odin" > "$dir/main.odin.tmp" && mv "$dir/main.odin.tmp" "$dir/main.odin"
+		fi
+		printf '#!/bin/sh\n# %s をビルドする(POSIX sh。Odin dev-2026-08 以降)\nset -eu\ncd "$(dirname "$0")"\nexec odin build . -out:%s -o:speed "$@"\n' "$name" "$name" > "$dir/build.sh"
+		chmod +x "$dir/build.sh"
+		gen_readme "$name" "$desc" "$needs" odin "$ROOT/odin/$name/main.odin" > "$dir/README.md"
+		printf '%s\n' "$name" > "$dir/.gitignore"
+		check="sh build.sh && odin test . -define:ODIN_TEST_LOG_LEVEL=warning"
+		clean="$name"
+	else
+		mkdir -p "$dir/src/lib"
+		cp "$ROOT/src/cmd/$name.zig" "$dir/src/main.zig"
+		# D-Bus の道具は共通の包み(sysbus.zig)も
+		if grep -q '@import("sysbus.zig")' "$ROOT/src/cmd/$name.zig"; then cp "$ROOT/src/cmd/sysbus.zig" "$dir/src/sysbus.zig"; fi
+		# shellcheck disable=SC2086
+		for m in $mods; do cp "$ROOT/src/lib/$m.zig" "$dir/src/lib/$m.zig"; done
+		# shellcheck disable=SC2086
+		gen_lib $mods > "$dir/src/lib/lib.zig"
+		gen_build "$name" "$extra" > "$dir/build.zig"
+		gen_zon "$name" "$extra" > "$dir/build.zig.zon"
+		gen_readme "$name" "$desc" "$needs" "$extra" "$ROOT/src/cmd/$name.zig" > "$dir/README.md"
+		printf '.zig-cache/\nzig-out/\n' > "$dir/.gitignore"
+		check='"$ZIG" build && "$ZIG" build test'
+		clean=".zig-cache zig-out"
+	fi
 	cp "$ROOT/LICENSE" "$dir/LICENSE"
-	printf '.zig-cache/\nzig-out/\n' > "$dir/.gitignore"
 
 	# 単独でビルド・テストできることを確かめてから
-	(cd "$dir" && zig build && zig build test) || { echo "$name: ビルドかテストに失敗しました" >&2; exit 1; }
-	rm -rf "${dir:?}/.zig-cache" "${dir:?}/zig-out"
+	(cd "$dir" && eval "$check") || { echo "$name: ビルドかテストに失敗しました" >&2; exit 1; }
+	for x in $clean; do rm -rf "${dir:?}/$x"; done
 
 	git -C "$dir" add -A
 	if git -C "$dir" diff --cached --quiet; then
