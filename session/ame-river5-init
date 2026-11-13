@@ -55,6 +55,9 @@ elif [ "${AME_SESSION_NESTED:-0}" != "1" ]; then
         log "keyring: ame-keyring"
     fi
 
+    # ---- 明るさを前回の値に(カーネルは起動のたびにファームウェアの値に戻す。ame-light が覚えている)----
+    command -v ame-light >/dev/null 2>&1 && ame-light restore 2>>"$LOG"
+
     # ---- 日本語入力 ----
     command -v fcitx5 >/dev/null 2>&1 && fcitx5 -d >/dev/null 2>&1
 

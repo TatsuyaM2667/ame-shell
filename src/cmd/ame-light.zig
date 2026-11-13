@@ -3,6 +3,9 @@
 //   ame-light                 今の明るさ(0〜100 の数)を 1 行
 //   ame-light set 40          40% に(40% とも書ける)
 //   ame-light set +5 / -5     5% 明るく / 暗く(brightnessctl の 5%+ / 5%- の書き方も読む)
+//   ame-light restore         最後に set した明るさに戻す(起動時。カーネルは再起動のたびにファームウェアの値に戻すので)
+//
+// set した明るさ(%)は $XDG_STATE_HOME/ame-shell/light に覚える。
 //
 // /sys/class/backlight の最初の機器を使う。書き込めればそこへ直接、書き込めなければ(ふつうは root だけ)
 // logind(elogind)の Session.SetBrightness に頼む(ログイン中の人なら root なしで変えられる)。
@@ -13,7 +16,7 @@ const sysbus = @import("sysbus.zig");
 const c = sysbus.c;
 
 fn usage() noreturn {
-    std.io.getStdErr().writeAll("使い方: ame-light [set <0-100 | +N | -N>]\n") catch {};
+    std.io.getStdErr().writeAll("使い方: ame-light [set <0-100 | +N | -N> | restore]\n") catch {};
     std.process.exit(2);
 }
 
@@ -121,6 +124,26 @@ fn sessionByPid(bus: *sysbus.Bus, buf: *[128]u8) ?[*:0]const u8 {
     return @ptrCast(buf);
 }
 
+fn statePath(buf: []u8) ?[]const u8 {
+    var d: [400]u8 = undefined;
+    const dir = @import("ame_lib").ai.stateDir(&d) orelse return null;
+    return std.fmt.bufPrint(buf, "{s}/light", .{dir}) catch null;
+}
+
+fn loadSaved(buf: []u8) ?[]const u8 {
+    var pb: [512]u8 = undefined;
+    const s = std.fs.cwd().readFile(statePath(&pb) orelse return null, buf) catch return null;
+    return std.mem.trim(u8, s, " \n");
+}
+
+fn save(pct: u32) void {
+    var pb: [512]u8 = undefined;
+    const p = statePath(&pb) orelse return;
+    if (std.fs.path.dirname(p)) |dir| std.fs.cwd().makePath(dir) catch {};
+    var b: [8]u8 = undefined;
+    std.fs.cwd().writeFile(.{ .sub_path = p, .data = std.fmt.bufPrint(&b, "{d}", .{pct}) catch return }) catch {};
+}
+
 pub fn main() u8 {
     var ab: [4][]const u8 = undefined;
     var n: usize = 0;
@@ -139,10 +162,18 @@ pub fn main() u8 {
         out.print("{d}\n", .{(d.cur * 100 + d.max / 2) / d.max}) catch {};
         return 0;
     }
+    if (n == 1 and std.mem.eql(u8, ab[0], "restore")) {
+        var sb: [16]u8 = undefined;
+        const saved = loadSaved(&sb) orelse return 0; // 覚えていなければ何もしない
+        const v = target(saved, d.cur, d.max) orelse return 0;
+        if (v == d.cur) return 0;
+        return if (writeSysfs(&d, v) or writeLogind(&d, v)) 0 else 1;
+    }
     if (n != 2 or !std.mem.eql(u8, ab[0], "set")) usage();
     const v = target(ab[1], d.cur, d.max) orelse usage();
-    if (v == d.cur) return 0;
-    return if (writeSysfs(&d, v) or writeLogind(&d, v)) 0 else 1;
+    if (v != d.cur and !writeSysfs(&d, v) and !writeLogind(&d, v)) return 1;
+    save((v * 100 + d.max / 2) / d.max);
+    return 0;
 }
 
 test "明るさの書き方" {

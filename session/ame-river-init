@@ -101,6 +101,9 @@ if [ "${AME_SESSION_NESTED:-0}" != "1" ]; then
         ame-keyring >/dev/null 2>>"$LOG" &
         log "keyring: ame-keyring"
     fi
+
+    # ---- 明るさを前回の値に(カーネルは起動のたびにファームウェアの値に戻す。ame-light が覚えている)----
+    command -v ame-light >/dev/null 2>&1 && ame-light restore 2>>"$LOG"
 fi
 
 # ユーザーの自動起動(~/.config/ame-shell/autostart。例は share/ame-shell/examples/autostart)。
