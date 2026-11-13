@@ -185,34 +185,37 @@ pub fn setBrightness(level: f32) void {
     if (is_bsd) _ = run(&.{ "backlight", a.ptr }, &out) else _ = run(&.{ "ame-light", "set", a.ptr }, &out);
 }
 
-// ---------------- 音量(PipeWire: wpctl) ----------------
+// ---------------- 音量(ame-vol: odin/ame-vol。PulseAudio の口に libpulse で話す。set / mute した値を覚える) ----------------
 
 pub const Volume = struct { known: bool = false, level: f32 = 0, muted: bool = false };
 
 pub fn volume() Volume {
     var out: [128]u8 = undefined;
-    const s = run(&.{ "wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@" }, &out) orelse {
+    const s = run(&.{"ame-vol"}, &out) orelse {
         // FreeBSD で PipeWire が無いときは mixer(8)
         if (is_bsd) if (bsd.mixerVolume(run)) |m| return .{ .known = true, .level = m.level, .muted = m.muted };
         return .{};
     };
-    // 形式: "Volume: 0.45" または "Volume: 0.45 [MUTED]"
+    return parseVolume(s);
+}
+
+/// ame-vol の 1 行(「45」/「45 muted」)を読む(ame-vol watch の行も同じ形)
+pub fn parseVolume(s: []const u8) Volume {
     var it = std.mem.tokenizeAny(u8, s, " \n");
-    _ = it.next() orelse return .{};
-    const num = it.next() orelse return .{};
-    const v = std.fmt.parseFloat(f32, num) catch return .{};
-    return .{ .known = true, .level = v, .muted = std.mem.indexOf(u8, s, "MUTED") != null };
+    const pct = std.fmt.parseInt(u32, it.next() orelse return .{}, 10) catch return .{};
+    const m = it.next();
+    return .{ .known = true, .level = @as(f32, @floatFromInt(pct)) / 100, .muted = m != null and std.mem.eql(u8, m.?, "muted") };
 }
 
 pub fn setVolumeDelta(percent: i32) void {
     var arg: [16]u8 = undefined;
     const a = if (percent >= 0)
-        std.fmt.bufPrintZ(&arg, "{d}%+", .{percent}) catch return
+        std.fmt.bufPrintZ(&arg, "+{d}", .{percent}) catch return
     else
-        std.fmt.bufPrintZ(&arg, "{d}%-", .{-percent}) catch return;
+        std.fmt.bufPrintZ(&arg, "-{d}", .{-percent}) catch return;
     var out: [8]u8 = undefined;
-    // -l 1.0 で 100% を超えないようにする(耳とスピーカーの保護)。
-    if (run(&.{ "wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", a.ptr }, &out) == null and is_bsd) {
+    // ame-vol は 100% を超えない(耳とスピーカーの保護)
+    if (run(&.{ "ame-vol", "set", a.ptr }, &out) == null and is_bsd) {
         var mb: [32]u8 = undefined;
         const m = std.fmt.bufPrintZ(&mb, "vol.volume={s}{d:.2}", .{ if (percent >= 0) "+" else "-", @as(f32, @floatFromInt(@abs(percent))) / 100 }) catch return;
         _ = run(&.{ "mixer", m.ptr }, &out);
@@ -221,9 +224,9 @@ pub fn setVolumeDelta(percent: i32) void {
 
 pub fn setVolume(level: f32) void {
     var arg: [16]u8 = undefined;
-    const a = std.fmt.bufPrintZ(&arg, "{d:.2}", .{std.math.clamp(level, 0, 1)}) catch return;
+    const a = std.fmt.bufPrintZ(&arg, "{d}", .{@as(u32, @intFromFloat(@round(std.math.clamp(level, 0, 1) * 100)))}) catch return;
     var out: [8]u8 = undefined;
-    if (run(&.{ "wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", a.ptr }, &out) == null and is_bsd) {
+    if (run(&.{ "ame-vol", "set", a.ptr }, &out) == null and is_bsd) {
         var mb: [32]u8 = undefined;
         const m = std.fmt.bufPrintZ(&mb, "vol.volume={d:.2}", .{std.math.clamp(level, 0, 1)}) catch return;
         _ = run(&.{ "mixer", m.ptr }, &out);
@@ -232,7 +235,7 @@ pub fn setVolume(level: f32) void {
 
 pub fn toggleMute() void {
     var out: [8]u8 = undefined;
-    if (run(&.{ "wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle" }, &out) == null and is_bsd) {
+    if (run(&.{ "ame-vol", "mute" }, &out) == null and is_bsd) {
         _ = run(&.{ "mixer", "vol.mute=^" }, &out);
     }
 }

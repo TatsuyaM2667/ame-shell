@@ -729,9 +729,9 @@ pub const App = struct {
         self.redrawBars();
     }
 
-    /// `pactl subscribe` を常駐させ、シンクの変化行が来たときだけ音量を読み直す。
+    /// `ame-vol watch` を常駐させる。音量が変わるたびに「45」/「45 muted」の 1 行が来る(読み直しは要らない)
     fn startPactl(self: *App) void {
-        const fd = sys.spawnReader(&.{ "pactl", "subscribe" }, &self.pactl_pid) orelse return;
+        const fd = sys.spawnReader(&.{ "ame-vol", "watch" }, &self.pactl_pid) orelse return;
         self.pactl_fd = fd;
         self.loop.add(fd, c.EPOLLIN, self, onPactl) catch {};
     }
@@ -739,23 +739,28 @@ pub const App = struct {
     fn onPactl(ctx: *anyopaque, fd: c_int, events: u32) void {
         const self: *App = @ptrCast(@alignCast(ctx));
         var buf: [2048]u8 = undefined;
-        var changed = false;
+        var latest: ?sys.Volume = null;
         while (true) {
             const n = c.read(fd, &buf, buf.len);
             if (n <= 0) {
                 if (n == 0 or events & c.EPOLLHUP != 0) {
-                    // pactl が終了した(PipeWire 再起動など)。監視をやめる。
+                    // ame-vol が終了した(PipeWire 再起動など)。監視をやめる。
                     self.loop.remove(fd);
                     _ = c.close(fd);
                     self.pactl_fd = -1;
                 }
                 break;
             }
-            if (std.mem.indexOf(u8, buf[0..@intCast(n)], "sink") != null or std.mem.indexOf(u8, buf[0..@intCast(n)], "server") != null) changed = true;
+            // 1 行は数バイトで、まとめて書かれる(パイプは PIPE_BUF 以下を分けない)ので、最後の行だけ使う
+            var lines = std.mem.tokenizeScalar(u8, buf[0..@intCast(n)], '\n');
+            while (lines.next()) |l| {
+                const v = sys.parseVolume(l);
+                if (v.known) latest = v;
+            }
         }
-        if (changed) {
+        if (latest) |v| {
             const old = self.sys.volume;
-            self.sys.volume = sys.volume();
+            self.sys.volume = v;
             if (old.known and (old.level != self.sys.volume.level or old.muted != self.sys.volume.muted)) {
                 self.osd.show(.volume);
             }

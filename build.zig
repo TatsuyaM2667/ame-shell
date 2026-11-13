@@ -194,6 +194,15 @@ pub fn build(b: *std.Build) void {
         b.installArtifact(t);
     }
 
+    // --- Odin で書いた小さな道具(odin/<名前>/。標準入出力でやりとりする)---
+    // 別の OS 向けに作るとき(FreeBSD の試しビルドなど)は Odin のリンクに相手の sysroot が要るので作らない
+    const odin_cmds = [_][]const u8{"ame-vol"};
+    const native = target.query.isNativeOs() and target.query.isNativeCpu();
+    for (odin_cmds) |name| {
+        if (!native) break;
+        b.getInstallStep().dependOn(&b.addInstallBinFile(addOdinExe(b, name), name).step);
+    }
+
     // --- ロック画面のパスワード照合の補助(FreeBSD で root の setuid として入れる。src/auth_helper.zig) ---
     const auth = b.addExecutable(.{
         .name = "ame-auth",
@@ -322,6 +331,15 @@ pub fn build(b: *std.Build) void {
     const lt = b.addTest(.{ .root_source_file = b.path("src/lib/lib.zig"), .target = target, .optimize = optimize });
     lt.linkLibC();
     test_step.dependOn(&b.addRunArtifact(lt).step);
+    // Odin の道具のテスト(odin test)
+    for (odin_cmds) |name| {
+        if (!native) break;
+        const ot = b.addSystemCommand(&.{ "odin", "test" });
+        ot.addDirectoryArg(b.path(b.fmt("odin/{s}", .{name})));
+        ot.addArg("-define:ODIN_TEST_LOG_LEVEL=warning");
+        addOdinInputs(b, ot, name);
+        test_step.dependOn(&ot.step);
+    }
     // 小さな道具のテスト(引数の読み方など)
     for (cmds) |name| {
         const ct = b.addTest(.{ .root_source_file = b.path(b.fmt("src/cmd/{s}.zig", .{name})), .target = target, .optimize = optimize });
@@ -361,6 +379,26 @@ fn addOdinObject(b: *std.Build, out_name: []const u8, flags: []const []const u8)
     odin.addFileInput(b.path("anim/fft.odin"));
     odin.addFileInput(b.path("anim/image.odin"));
     return out;
+}
+
+/// odin/<name>/ を Odin で実行ファイルにする
+fn addOdinExe(b: *std.Build, name: []const u8) std.Build.LazyPath {
+    const odin = b.addSystemCommand(&.{ "sh", "-c", "exec odin build \"$2\" -out:\"$1\" -o:speed", "sh" });
+    const out = odin.addOutputFileArg(name);
+    odin.addDirectoryArg(b.path(b.fmt("odin/{s}", .{name})));
+    addOdinInputs(b, odin, name);
+    return out;
+}
+
+/// ディレクトリ引数は中身の変更を追跡しないので、.odin を 1 つずつ入力に加える
+fn addOdinInputs(b: *std.Build, run: *std.Build.Step.Run, name: []const u8) void {
+    const rel = b.fmt("odin/{s}", .{name});
+    var dir = b.build_root.handle.openDir(rel, .{ .iterate = true }) catch @panic("odin/ の道具のフォルダが開けない");
+    defer dir.close();
+    var it = dir.iterate();
+    while (it.next() catch null) |e| {
+        if (std.mem.endsWith(u8, e.name, ".odin")) run.addFileInput(b.path(b.fmt("{s}/{s}", .{ rel, e.name })));
+    }
 }
 
 /// D-Bus を使う小さな道具(鍵束・明るさ・電源プロファイル)
