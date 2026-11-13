@@ -206,81 +206,18 @@ pub const Weather = struct {
 };
 
 // ---------------------------------------------------------------------------
-// 音声スペクトラム(メディアの波形)。cava を使わず ame-shell の中で計算する:
-//  * 音: PulseAudio 互換の録音 API(libpulse-simple を実行時に読み込む。PipeWire の pipewire-pulse でも
-//    動く)で「今鳴っている音」(@DEFAULT_MONITOR@)を別スレッドで受け取る
-//  * 計算: 窓をかけて FFT(anim/fft.odin)、50Hz〜12kHz を対数で 48 の帯域に分け、dB にして自動で音量をそろえる
-//  * 受け取るたびにスレッドが pipe に 1 バイト書き、描画のループ(epoll)で計算する(ポーリングしない)
+// 音声スペクトラム(メディアの波形)。cava の代わりの小さな道具 ame-spectrum(odin/ame-spectrum)を動かし、
+// 1 行 = 棒の高さ(0〜1000)を ';' でつないだもの を読むだけ(録音・FFT・音量のそろえは向こうがする)。
+//  * 見えている間だけ動かす(start / stop)。無音の間は向こうが何も書かないので、描画も起きない
 // ---------------------------------------------------------------------------
 
 pub const BARS = 48;
-const FFT_N = 1024;
-const RATE = 44100;
-const CHUNK = RATE / 60; // 1 回に受け取るサンプル数(約 60 回/秒)
-
-const PaSampleSpec = extern struct { format: c_int, rate: u32, channels: u8 };
-const PaBufferAttr = extern struct { maxlength: u32, tlength: u32, prebuf: u32, minreq: u32, fragsize: u32 };
-const PaNew = *const fn (?[*:0]const u8, [*:0]const u8, c_int, ?[*:0]const u8, [*:0]const u8, *const PaSampleSpec, ?*anyopaque, ?*const PaBufferAttr, *c_int) callconv(.C) ?*anyopaque;
-const PaRead = *const fn (*anyopaque, *anyopaque, usize, *c_int) callconv(.C) c_int;
-const PaFree = *const fn (*anyopaque) callconv(.C) void;
-const Pa = struct { new: PaNew, read: PaRead, free: PaFree };
-var pa_api: ?Pa = null;
-var pa_tried = false;
-
-fn loadPa() ?Pa {
-    if (pa_tried) return pa_api;
-    pa_tried = true;
-    const h = c.dlopen("libpulse-simple.so.0", c.RTLD_NOW) orelse c.dlopen("libpulse-simple.so", c.RTLD_NOW) orelse return null;
-    const n = c.dlsym(h, "pa_simple_new") orelse return null;
-    const r = c.dlsym(h, "pa_simple_read") orelse return null;
-    const fr = c.dlsym(h, "pa_simple_free") orelse return null;
-    pa_api = .{ .new = @ptrCast(n), .read = @ptrCast(r), .free = @ptrCast(fr) };
-    return pa_api;
-}
-
-/// FFT の表(窓・回転子・帯域の区切り)。一度だけ作る
-const Tables = struct {
-    window: [FFT_N]f32,
-    tw: [FFT_N]f32, // cos, sin を N/2 組
-    edges: [BARS + 1]i32,
-};
-var tables: ?Tables = null;
-
-fn getTables() *const Tables {
-    if (tables == null) {
-        var t: Tables = undefined;
-        const nf: f32 = @floatFromInt(FFT_N);
-        for (0..FFT_N) |i| {
-            const fi: f32 = @floatFromInt(i);
-            t.window[i] = 0.5 - 0.5 * @cos(std.math.tau * fi / (nf - 1));
-        }
-        for (0..FFT_N / 2) |k| {
-            const a = -std.math.tau * @as(f32, @floatFromInt(k)) / nf;
-            t.tw[2 * k] = @cos(a);
-            t.tw[2 * k + 1] = @sin(a);
-        }
-        // 50Hz〜12kHz を対数で等分(低い方は 1 ビン以上の幅を保つ)
-        const lo_f: f32 = 50;
-        const hi_f: f32 = 12000;
-        var prev: i32 = 0;
-        for (0..BARS + 1) |b| {
-            const r = @as(f32, @floatFromInt(b)) / BARS;
-            const f = lo_f * std.math.pow(f32, hi_f / lo_f, r);
-            var bin: i32 = @intFromFloat(f * nf / RATE);
-            if (b > 0 and bin <= prev) bin = prev + 1;
-            t.edges[b] = @min(bin, FFT_N / 2 - 1);
-            prev = t.edges[b];
-        }
-        tables = t;
-    }
-    return &tables.?;
-}
 
 pub const Spectrum = struct {
     app: *App,
-    /// 受け取りスレッドからの知らせ(読む側の fd。動いていなければ -1)
+    /// ame-spectrum の出力を読む fd(動いていなければ -1)
     fd: c_int = -1,
-    wfd: c_int = -1,
+    pid: c_int = 0,
     values: [BARS]f32 = [_]f32{0} ** BARS,
     /// 試験用(ame-ctl debug-spectrum): 録音せずに、与えた値を出している扱いにする
     fake: bool = false,
@@ -293,15 +230,9 @@ pub const Spectrum = struct {
     sound_ms: u64 = 0,
     /// 失敗したときは、しばらく起動し直さない(毎フレーム起動を試みないように)
     retry_ms: u64 = 0,
-    last_calc_ms: u64 = 0,
-    // 受け取りスレッドと共有するもの
-    thread: ?std.Thread = null,
-    stop_flag: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    failed_flag: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    mutex: std.Thread.Mutex = .{},
-    ring: [FFT_N]f32 = [_]f32{0} ** FFT_N,
-    // 自動で音量をそろえるための、最近の大きい音の目安(dB)
-    peak_db: f32 = -30,
+    /// 行の途中までを持っておく
+    part: [BARS * 6]u8 = undefined,
+    part_len: usize = 0,
 
     pub const State = enum { idle, ok, missing, failed };
 
@@ -316,7 +247,7 @@ pub const Spectrum = struct {
     /// 波形の代わりに出す説明(出せているときは null)
     pub fn problem(self: *const Spectrum) ?[]const u8 {
         return switch (self.state) {
-            .missing => "音を取り込めないため波形を表示できません(libpulse が必要です)",
+            .missing => "音を取り込めないため波形を表示できません(ame-spectrum が必要です)",
             .failed => "音を取り込めませんでした(PipeWire / PulseAudio を確認)",
             .ok, .idle => if (self.running() and loop.nowMs() -| @max(self.started_ms, self.sound_ms) > SILENT_MS)
                 "音を拾えていません(PipeWire / PulseAudio を確認)"
@@ -330,26 +261,16 @@ pub const Spectrum = struct {
         const now = loop.nowMs();
         if ((self.state == .missing or self.state == .failed) and now < self.retry_ms) return;
         self.retry_ms = now + RETRY_MS;
-        if (loadPa() == null) {
-            if (self.state != .missing) std.log.warn("spectrum: libpulse-simple が見つかりません。メディアの波形は表示されません", .{});
+        if (!sys.hasCommand("ame-spectrum")) {
+            if (self.state != .missing) std.log.warn("spectrum: ame-spectrum が見つかりません。メディアの波形は表示されません", .{});
             self.state = .missing;
             return;
         }
-        var fds: [2]c_int = undefined;
-        if (c.pipe2(&fds, c.O_CLOEXEC | c.O_NONBLOCK) != 0) return;
-        self.fd = fds[0];
-        self.wfd = fds[1];
-        self.stop_flag.store(false, .release);
-        self.failed_flag.store(false, .release);
-        @memset(&self.ring, 0);
-        self.thread = std.Thread.spawn(.{}, capture, .{self}) catch {
-            _ = c.close(fds[0]);
-            _ = c.close(fds[1]);
-            self.fd = -1;
-            self.wfd = -1;
+        self.fd = sys.spawnReader(&.{ "ame-spectrum", "-b", std.fmt.comptimePrint("{d}", .{BARS}) }, &self.pid) orelse {
             self.state = .failed;
             return;
         };
+        self.part_len = 0;
         self.started_ms = now;
         self.sound_ms = 0;
         if (self.state != .ok) self.state = .idle;
@@ -358,106 +279,80 @@ pub const Spectrum = struct {
 
     pub fn stop(self: *Spectrum) void {
         if (self.fd < 0) return;
-        self.stop_flag.store(true, .release);
-        // 受け取りは 1/60 秒ごとに戻ってくるので、すぐ終わる
-        if (self.thread) |t| t.join();
-        self.thread = null;
+        // SIGCHLD は無視しているので、子は自動で片付く
+        if (self.pid > 0) _ = c.kill(self.pid, c.SIGTERM);
         self.app.loop.remove(self.fd);
         _ = c.close(self.fd);
-        _ = c.close(self.wfd);
         self.fd = -1;
-        self.wfd = -1;
+        self.pid = 0;
         @memset(&self.values, 0);
     }
 
-    /// 受け取りスレッド: 録音の口を開き、1/60 秒ぶんずつ読んでリングに足す
-    fn capture(self: *Spectrum) void {
-        const pa = loadPa() orelse return;
-        const ss = PaSampleSpec{ .format = 5, .rate = RATE, .channels = 1 }; // PA_SAMPLE_FLOAT32LE・モノラル
-        const attr = PaBufferAttr{ .maxlength = std.math.maxInt(u32), .tlength = std.math.maxInt(u32), .prebuf = std.math.maxInt(u32), .minreq = std.math.maxInt(u32), .fragsize = CHUNK * 4 };
-        var err: c_int = 0;
-        const s = pa.new(null, "ame-shell", 2, "@DEFAULT_MONITOR@", "spectrum", &ss, null, &attr, &err) orelse {
-            self.failed_flag.store(true, .release);
-            _ = c.write(self.wfd, "F", 1);
-            return;
-        };
-        defer pa.free(s);
-        var buf: [CHUNK]f32 = undefined;
-        while (!self.stop_flag.load(.acquire)) {
-            if (pa.read(s, &buf, @sizeOf(@TypeOf(buf)), &err) < 0) {
-                self.failed_flag.store(true, .release);
-                _ = c.write(self.wfd, "F", 1);
-                return;
-            }
-            self.mutex.lock();
-            // 古いサンプルを前へ詰めて、新しいものを後ろへ
-            std.mem.copyForwards(f32, self.ring[0 .. FFT_N - CHUNK], self.ring[CHUNK..]);
-            @memcpy(self.ring[FFT_N - CHUNK ..], &buf);
-            self.mutex.unlock();
-            _ = c.write(self.wfd, "d", 1);
-        }
-    }
-
-    fn onRead(ctx: *anyopaque, fd: c_int, _: u32) void {
+    fn onRead(ctx: *anyopaque, fd: c_int, events: u32) void {
         const self: *Spectrum = @ptrCast(@alignCast(ctx));
-        var drain: [64]u8 = undefined;
-        var failed = false;
+        var buf: [4096]u8 = undefined;
+        var got = false;
         while (true) {
-            const n = c.read(fd, &drain, drain.len);
-            if (n <= 0) break;
-            for (drain[0..@intCast(n)]) |b| failed = failed or b == 'F';
+            const n = c.read(fd, &buf, buf.len);
+            if (n <= 0) {
+                if (n == 0 or events & c.EPOLLHUP != 0) {
+                    std.log.warn("spectrum: ame-spectrum が止まりました(音を取り込めない)", .{});
+                    self.state = .failed;
+                    self.stop();
+                    if (self.on_frame) |f| f(self.ctx);
+                    return;
+                }
+                break;
+            }
+            for (buf[0..@intCast(n)]) |ch| {
+                if (ch != '\n') {
+                    if (self.part_len < self.part.len) self.part[self.part_len] = ch;
+                    self.part_len += 1;
+                    continue;
+                }
+                if (self.part_len <= self.part.len and parseBars(self.part[0..self.part_len], &self.values)) got = true;
+                self.part_len = 0;
+            }
         }
-        if (failed or self.failed_flag.load(.acquire)) {
-            std.log.warn("spectrum: 音を取り込めませんでした(@DEFAULT_MONITOR@)", .{});
-            self.state = .failed;
-            self.stop();
-            if (self.on_frame) |f| f(self.ctx);
-            return;
-        }
-        // 描くのは 1 秒に 60 回まで
-        const now = loop.nowMs();
-        if (now -| self.last_calc_ms < 14) return;
-        self.last_calc_ms = now;
-        self.compute();
-        if (self.on_frame) |f| f(self.ctx);
-    }
-
-    fn compute(self: *Spectrum) void {
-        const t = getTables();
-        var samples: [FFT_N]f32 = undefined;
-        self.mutex.lock();
-        samples = self.ring;
-        self.mutex.unlock();
-        var work: [2 * FFT_N]f32 = undefined;
-        var bands: [BARS]f32 = undefined;
-        @import("../gfx/anim.zig").ame_spectrum(&samples, FFT_N, &t.window, &t.tw, &work, &t.edges, BARS, &bands);
-        // dB にして、最近の大きい音を基準に 0..1 へ(静かな曲でも見えるように自動でそろえる)
-        var loudest: f32 = -120;
-        var db: [BARS]f32 = undefined;
-        for (bands, 0..) |p, i| {
-            // 高い音ほど小さく出るので少し持ち上げる(ピンクノイズの傾き)
-            const tilt = 3.0 * @as(f32, @floatFromInt(i)) / BARS;
-            db[i] = 10 * @log10(p + 1e-12) + tilt * 6;
-            loudest = @max(loudest, db[i]);
-        }
-        // 基準は上がるときは速く、下がるときはゆっくり
-        self.peak_db = if (loudest > self.peak_db) loudest else self.peak_db - 0.15;
-        self.peak_db = @max(self.peak_db, -40);
-        const range: f32 = 45;
-        var any = false;
-        for (0..BARS) |i| {
-            const v = std.math.clamp((db[i] - (self.peak_db - range)) / range, 0, 1);
-            const target = v * v; // 小さい音を沈めて、山を目立たせる
-            // 上がるときはすぐ、下がるときはなめらかに
-            self.values[i] = if (target > self.values[i]) target else self.values[i] * 0.82 + target * 0.18;
-            if (self.values[i] > 0.04) any = true;
-        }
-        if (any and loudest > -90) {
+        if (!got) return;
+        for (self.values) |v| if (v > 0.04) {
             self.sound_ms = loop.nowMs();
             self.state = .ok;
-        }
+            break;
+        };
+        if (self.on_frame) |f| f(self.ctx);
     }
 };
+
+/// 「12;0;1000;…;」を 0..1 にして out に入れる。本数が合わなければ false
+fn parseBars(line: []const u8, out: *[BARS]f32) bool {
+    var tmp: [BARS]f32 = undefined;
+    var it = std.mem.tokenizeScalar(u8, line, ';');
+    var i: usize = 0;
+    while (it.next()) |s| : (i += 1) {
+        if (i >= BARS) return false;
+        const v = std.fmt.parseInt(u32, s, 10) catch return false;
+        tmp[i] = @as(f32, @floatFromInt(@min(v, 1000))) / 1000;
+    }
+    if (i != BARS) return false;
+    out.* = tmp;
+    return true;
+}
+
+test "スペクトラムの行" {
+    var v: [BARS]f32 = undefined;
+    var line: [BARS * 5]u8 = undefined;
+    var len: usize = 0;
+    for (0..BARS) |i| {
+        const s = std.fmt.bufPrint(line[len..], "{d};", .{if (i == 0) @as(u32, 1000) else 0}) catch unreachable;
+        len += s.len;
+    }
+    try std.testing.expect(parseBars(line[0..len], &v));
+    try std.testing.expectEqual(@as(f32, 1), v[0]);
+    try std.testing.expectEqual(@as(f32, 0), v[1]);
+    try std.testing.expect(!parseBars("1;2;3;", &v));
+    try std.testing.expect(!parseBars("x;", &v));
+}
 
 // ---------------------------------------------------------------------------
 // 電源プロファイル(power-profiles-daemon)

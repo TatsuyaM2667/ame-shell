@@ -22,6 +22,7 @@ test {
     _ = @import("platform/sys.zig");
     if (@import("builtin").os.tag == .linux) _ = @import("platform/malloc.zig");
     _ = @import("frame/island.zig");
+    _ = @import("frame/data.zig");
     _ = @import("core/events.zig");
 }
 

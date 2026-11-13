@@ -231,7 +231,7 @@ say "インストール先: ${DESTDIR}${PREFIX}($( [ "$USER_MODE" = 1 ] && echo 
 install_file "$OUT/bin/ame-shell" "$PREFIX/bin/ame-shell" 755
 install_file "$OUT/bin/ame-ctl" "$PREFIX/bin/ame-ctl" 755
 # 画面を持たない小さな道具(src/cmd/。単独でも使える)
-for t in ame-lyrics ame-ai ame-agent ame-config ame-weather ame-airpods ame-handtrack ame-keyring ame-light ame-power ame-vol; do install_file "$OUT/bin/$t" "$PREFIX/bin/$t" 755; done
+for t in ame-lyrics ame-ai ame-agent ame-config ame-weather ame-airpods ame-handtrack ame-keyring ame-light ame-power ame-vol ame-spectrum; do install_file "$OUT/bin/$t" "$PREFIX/bin/$t" 755; done
 install_file "$HERE/ame-session" "$PREFIX/bin/ame-session" 755
 install_file "$HERE/ame-update" "$PREFIX/bin/ame-update" 755
 install_file "$HERE/ame-term-shell" "$PREFIX/bin/ame-term-shell" 755

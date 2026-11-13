@@ -196,7 +196,7 @@ pub fn build(b: *std.Build) void {
 
     // --- Odin で書いた小さな道具(odin/<名前>/。標準入出力でやりとりする)---
     // 別の OS 向けに作るとき(FreeBSD の試しビルドなど)は Odin のリンクに相手の sysroot が要るので作らない
-    const odin_cmds = [_][]const u8{"ame-vol"};
+    const odin_cmds = [_][]const u8{ "ame-vol", "ame-spectrum" };
     const native = target.query.isNativeOs() and target.query.isNativeCpu();
     for (odin_cmds) |name| {
         if (!native) break;
@@ -390,14 +390,15 @@ fn addOdinExe(b: *std.Build, name: []const u8) std.Build.LazyPath {
     return out;
 }
 
-/// ディレクトリ引数は中身の変更を追跡しないので、.odin を 1 つずつ入力に加える
+/// ディレクトリ引数は中身の変更を追跡しないので、.odin を 1 つずつ入力に加える(道具が import する anim/ も)
 fn addOdinInputs(b: *std.Build, run: *std.Build.Step.Run, name: []const u8) void {
-    const rel = b.fmt("odin/{s}", .{name});
-    var dir = b.build_root.handle.openDir(rel, .{ .iterate = true }) catch @panic("odin/ の道具のフォルダが開けない");
-    defer dir.close();
-    var it = dir.iterate();
-    while (it.next() catch null) |e| {
-        if (std.mem.endsWith(u8, e.name, ".odin")) run.addFileInput(b.path(b.fmt("{s}/{s}", .{ rel, e.name })));
+    for ([_][]const u8{ b.fmt("odin/{s}", .{name}), "anim" }) |rel| {
+        var dir = b.build_root.handle.openDir(rel, .{ .iterate = true }) catch @panic("Odin のフォルダが開けない");
+        defer dir.close();
+        var it = dir.iterate();
+        while (it.next() catch null) |e| {
+            if (std.mem.endsWith(u8, e.name, ".odin")) run.addFileInput(b.path(b.fmt("{s}/{s}", .{ rel, e.name })));
+        }
     }
 }
 

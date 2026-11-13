@@ -1,6 +1,6 @@
-// 音のスペクトラム(メディアの波形)。cava の代わりに ame-shell の中で計算する。
+// 音のスペクトラム(メディアの波形)。cava の代わり。小さな道具 ame-spectrum(odin/ame-spectrum)が使う。
 // anim.odin と同じ制約: proc "c"、スライス・アロケータ・libm を使わない(四則演算だけ)。
-// sin / cos の表・窓関数・帯域の区切りは Zig 側(src/spectrum.zig)が一度だけ作って渡す。
+// sin / cos の表・窓関数・帯域の区切りは呼ぶ側(ame-spectrum)が一度だけ作って渡す。
 package anim
 
 // 基数 2 の FFT(その場で計算)。re / im は長さ n(2 のべき)。
