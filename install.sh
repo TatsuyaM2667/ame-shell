@@ -129,7 +129,7 @@ say "1/7 依存パッケージ"
 # APK_BUILD / APK_RIVER / APK_RUN は必須: 入れられなければ止める。APK_OPT は無くても動く(その機能だけ使えない)
 #   ビルド: ame-shell と Odin のビルドに必要なもの
 APK_BUILD="git curl bash clang llvm-devel linux-headers pkgconf wayland-devel wayland-progs wayland-protocols
- mesa-devel libdrm-devel libxkbcommon-devel freetype-devel harfbuzz-devel fontconfig-devel dbus-devel linux-pam-devel
+ mesa-devel libdrm-devel libxkbcommon-devel freetype-devel harfbuzz-devel fontconfig-devel dbus-devel linux-pam-devel openssl3-devel
  gtk4-devel libadwaita-devel gtk4-layer-shell-devel blueprint-compiler gettext-devel ncurses glslang-devel"
 #   (2 行目は端末 ghostty のビルド用。Chimera には ghostty のパッケージが無い)
 #   River 0.5 のビルド(Chimera のリポジトリには river が無いので必ずソースから作る)
@@ -137,7 +137,9 @@ APK_RIVER="wlroots0.20-devel libevdev-devel pixman-devel libinput-devel xwayland
 #   動かすのに必要なもの。pipewire-pulse は pipewire パッケージに含まれる
 #   ログイン画面は greetd + ame-shell(ame-greeter)。SDDM は入れない(Chimera の sddm は既定のテーマ・コンポジタの
 #   ために KDE Plasma 一式を引き込む。SDDM を使うなら sddm-theme-none と sddm-default-weston も一緒に)
-#   (スクショは ame-shell が自前で撮る(ext-image-copy-capture)ので grim / slurp / wl-clipboard は要らない / 音量・Bluetooth の音: libpulse-progs(pactl)/ 無線: util-linux-rfkill)
+#   (スクショ・録画・クリップボード・ロック・明るさ・音量・通信は ame の小さな道具が受け持つので grim / slurp / wl-clipboard / wf-recorder /
+#    swaylock / brightnessctl / curl は要らない。openssl3-devel は ame-yatagarasu(通信)のリンク用 / ffmpeg: 録画(ame-emaki)の変換 /
+#    音の出力先の一覧と切り替え: libpulse-progs(pactl)/ 無線: util-linux-rfkill)
 APK_RUN="greetd greetd-dinit foot dbus mesa-dri polkit upower power-profiles-daemon pipewire wireplumber libpulse-progs mpv-libs ffmpeg
  util-linux-rfkill networkmanager bluez thunar tumbler xdg-utils
  zsh zsh-syntax-highlighting fzf zoxide
