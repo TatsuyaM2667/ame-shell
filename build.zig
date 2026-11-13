@@ -175,7 +175,7 @@ pub fn build(b: *std.Build) void {
     }
     b.installArtifact(ctl);
 
-    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai", "ame-agent", "ame-config", "ame-weather", "ame-airpods", "ame-handtrack", "ame-keyring" };
+    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai", "ame-agent", "ame-config", "ame-weather", "ame-airpods", "ame-handtrack", "ame-keyring", "ame-light", "ame-power" };
     // --- 画面を持たない小さな道具(標準入出力でやりとりする。src/cmd/。libc だけ)---
     for (cmds) |name| {
         const t = b.addExecutable(.{
@@ -188,8 +188,8 @@ pub fn build(b: *std.Build) void {
         t.root_module.addImport("ame_lib", lib_mod);
         // ame-handtrack だけは手の認識(ame-hand)を使う
         if (std.mem.eql(u8, name, "ame-handtrack")) t.root_module.addImport("ame-hand", hand_dep.module("ame-hand"));
-        // ame-keyring だけは D-Bus(libdbus。ame-shell 本体と同じもの)を使う
-        if (std.mem.eql(u8, name, "ame-keyring")) useDbus(b, t, sr, pre, bsd);
+        // D-Bus(libdbus。ame-shell 本体と同じもの)を使う道具
+        if (usesDbus(name)) useDbus(b, t, sr, pre, bsd);
         t.linkLibC();
         b.installArtifact(t);
     }
@@ -327,7 +327,7 @@ pub fn build(b: *std.Build) void {
         const ct = b.addTest(.{ .root_source_file = b.path(b.fmt("src/cmd/{s}.zig", .{name})), .target = target, .optimize = optimize });
         ct.root_module.addImport("ame_lib", lib_mod);
         if (std.mem.eql(u8, name, "ame-handtrack")) ct.root_module.addImport("ame-hand", hand_dep.module("ame-hand"));
-        if (std.mem.eql(u8, name, "ame-keyring")) useDbus(b, ct, sr, pre, bsd);
+        if (usesDbus(name)) useDbus(b, ct, sr, pre, bsd);
         ct.linkLibC();
         test_step.dependOn(&b.addRunArtifact(ct).step);
     }
@@ -361,6 +361,12 @@ fn addOdinObject(b: *std.Build, out_name: []const u8, flags: []const []const u8)
     odin.addFileInput(b.path("anim/fft.odin"));
     odin.addFileInput(b.path("anim/image.odin"));
     return out;
+}
+
+/// D-Bus を使う小さな道具(鍵束・明るさ・電源プロファイル)
+fn usesDbus(name: []const u8) bool {
+    for ([_][]const u8{ "ame-keyring", "ame-light", "ame-power" }) |n| if (std.mem.eql(u8, name, n)) return true;
+    return false;
 }
 
 /// libdbus を使う(ヘッダの場所は ame-shell 本体と同じ。FreeBSD は pkg-config を使わない)

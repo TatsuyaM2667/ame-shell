@@ -2,7 +2,7 @@
 //  * GPU/CPU 温度・GPU 使用率・ストレージ … ダッシュボードが開いている間の 1 秒ティックで読む
 //  * 天気 … wttr.in を curl で非同期取得(30 分キャッシュ)。完了は pipe の EOF で知る
 //  * 音声スペクトラム … メディアタブ・ロック画面で曲が流れている間だけ、録音して FFT(cava は使わない)
-//  * 電源プロファイル … powerprofilesctl(ユーティリティを開いたとき)
+//  * 電源プロファイル … ame-power(src/cmd)(ユーティリティを開いたとき)
 const std = @import("std");
 const c = @import("../c.zig");
 const sys = @import("../platform/sys.zig");
@@ -467,7 +467,7 @@ pub const Profile = enum { unknown, saver, balanced, performance };
 
 pub fn powerProfile() Profile {
     var out: [64]u8 = undefined;
-    const s = sys.run(&.{ "powerprofilesctl", "get" }, &out) orelse return .unknown;
+    const s = sys.run(&.{"ame-power"}, &out) orelse return .unknown;
     if (std.mem.eql(u8, s, "power-saver")) return .saver;
     if (std.mem.eql(u8, s, "balanced")) return .balanced;
     if (std.mem.eql(u8, s, "performance")) return .performance;
@@ -481,7 +481,7 @@ pub fn setPowerProfile(p: Profile) void {
         else => "balanced",
     };
     var out: [64]u8 = undefined;
-    _ = sys.run(&.{ "powerprofilesctl", "set", name }, &out);
+    _ = sys.run(&.{ "ame-power", "set", name }, &out);
 }
 
 // ---------------------------------------------------------------------------

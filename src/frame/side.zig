@@ -365,10 +365,7 @@ fn osdSet(f: *Frame, i: i32, ly: f32) void {
         app.sys.volume = sys.volume();
         app.redrawBars();
     } else {
-        var arg: [16]u8 = undefined;
-        const a = std.fmt.bufPrintZ(&arg, "{d}%", .{@as(u32, @intFromFloat(@max(v, 0.01) * 100))}) catch return;
-        var out: [8]u8 = undefined;
-        _ = sys.run(&.{ "brightnessctl", "-q", "set", a.ptr }, &out);
+        sys.setBrightness(v);
         app.sys.brightness = sys.brightness();
     }
 }

@@ -158,7 +158,7 @@ pub fn brightness() ?f32 {
     return null;
 }
 
-/// sysfs への書き込みは通常 root/video グループが必要なので brightnessctl に任せる。
+/// sysfs への書き込みは通常 root だけなので ame-light(src/cmd。書けなければ logind に頼む)に任せる。
 pub fn setBrightnessDelta(percent: i32) void {
     var arg: [16]u8 = undefined;
     const a = if (percent >= 0)
@@ -172,7 +172,17 @@ pub fn setBrightnessDelta(percent: i32) void {
         _ = run(&.{ "backlight", if (percent >= 0) "incr" else "decr", n.ptr }, &out);
         return;
     }
-    _ = run(&.{ "brightnessctl", "-q", "set", a.ptr }, &out);
+    _ = run(&.{ "ame-light", "set", a.ptr }, &out);
+}
+
+/// 明るさを 0〜1 で(ダッシュボード・サイドバーのスライダー)。真っ暗にはしない
+pub fn setBrightness(level: f32) void {
+    var arg: [16]u8 = undefined;
+    const pct: u32 = @intFromFloat(@round(std.math.clamp(level, 0.01, 1) * 100));
+    const a = std.fmt.bufPrintZ(&arg, "{d}", .{pct}) catch return;
+    var out: [64]u8 = undefined;
+    // FreeBSD の backlight(8) は数だけで、その割合にする
+    if (is_bsd) _ = run(&.{ "backlight", a.ptr }, &out) else _ = run(&.{ "ame-light", "set", a.ptr }, &out);
 }
 
 // ---------------- 音量(PipeWire: wpctl) ----------------

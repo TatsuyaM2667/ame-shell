@@ -15,7 +15,7 @@
 | wpctl / pactl(音量) | 任意 | あり |
 | 再生中の曲(MPRIS を D-Bus で直接。playerctl は使わない)/ curl(アート・歌詞の取得) | 任意 | あり |
 | libpulse-simple(スペクトラムの録音。dlopen。cava は使わない) | 任意 | あり |
-| brightnessctl(明るさ) | 任意 | あり |
+| 明るさ: ame-light(同梱。sysfs、書けなければ logind の SetBrightness。brightnessctl は使わない) / 電源プロファイル: ame-power(同梱。power-profiles-daemon に D-Bus で直接。powerprofilesctl は使わない) | 任意 | あり |
 | NetworkManager / BlueZ(D-Bus で直接。nmcli / bluetoothctl は使わない) | 任意 | あり |
 | foot / rivertile | セッション | あり |
 | sddm / elogind または seatd / turnstile / dbus | セッション | あり(PAM: system-login に pam_turnstile・pam_elogind) |

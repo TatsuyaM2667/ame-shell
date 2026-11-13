@@ -155,10 +155,7 @@ pub const Dashboard = struct {
                 app.sys.volume = sys.volume();
             },
             .set_brightness => {
-                var arg: [16]u8 = undefined;
-                const a = std.fmt.bufPrintZ(&arg, "{d}%", .{@as(u32, @intFromFloat(std.math.clamp(v, 0.01, 1) * 100))}) catch return;
-                var out: [8]u8 = undefined;
-                _ = sys.run(&.{ "brightnessctl", "-q", "set", a.ptr }, &out);
+                sys.setBrightness(v);
                 app.sys.brightness = sys.brightness();
             },
             // 切り替えは待たずに(アダプタの電源を入れるのに 1 秒近くかかることがある)表示だけ先に変える。
