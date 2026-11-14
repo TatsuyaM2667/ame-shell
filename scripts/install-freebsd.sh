@@ -107,8 +107,8 @@ REQUIRED="
 "
 # あれば使う: 無ければ飛ばす(その機能だけ使えない)。"a|b" は「a が無ければ b」
 OPTIONAL="
- mpv ffmpeg fastfetch wlr-randr thunar tumbler xdg-utils upower polkit greetd
- ghostty zsh zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza bat
+ mpv ffmpeg fastfetch wlr-randr xdg-utils upower polkit greetd sdl3
+ zsh zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza bat
  libva mesa-gallium-va
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  noto-sans-jp nerd-fonts-symbols|nerd-fonts jetbrains-mono
@@ -291,9 +291,12 @@ sh "$REPO/scripts/sddm-theme.sh" --user "$TARGET_USER"
 
 # foot・fastfetch の設定を ame-shell のものに(元のファイルは *.ame-bak に残る)
 su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_CONFIG_HOME= sh '$REPO/scripts/app-config.sh'"
-# フォルダを開くアプリ: 決まっていなければ thunar に
-if command -v thunar >/dev/null 2>&1 && command -v xdg-mime >/dev/null 2>&1; then
-    su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_CONFIG_HOME= sh -c '[ -n \"\$(xdg-mime query default inode/directory 2>/dev/null)\" ] || xdg-mime default thunar.desktop inode/directory'"
+# ame のアプリ(ame-filemanager・kuraokami・seoritsu)を本人の ~/.local に。作れなくても続ける
+su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_CACHE_HOME= ZIG='$ZIG' ODIN='$ODIN_DIR/odin' PATH='$TOOLS/zig-$ZIG_VER/bin:$ODIN_DIR:$PATH' sh '$REPO/scripts/install-apps.sh'" ||
+    info "(作れなかったアプリがあります。ほかはそのまま続けます)"
+# フォルダを開くアプリ: 決まっていなければ ame-filemanager(入っていれば)に
+if [ -f "$UHOME/.local/share/applications/ame-filemanager.desktop" ] && command -v xdg-mime >/dev/null 2>&1; then
+    su -m "$TARGET_USER" -c "env HOME='$UHOME' XDG_CONFIG_HOME= sh -c '[ -n \"\$(xdg-mime query default inode/directory 2>/dev/null)\" ] || xdg-mime default ame-filemanager.desktop inode/directory'"
 fi
 
 # 音質: PulseAudio のサンプリング周波数の変換を高い品質に(Linux の PipeWire の resample.quality = 10 と同じ考え)。

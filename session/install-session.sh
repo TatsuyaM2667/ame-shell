@@ -593,7 +593,9 @@ if [ "$USER_MODE" = 0 ]; then
     elif command -v sddm >/dev/null 2>&1; then say "  [ok] sddm"
     else ng "ログイン画面(greetd)がありません($PKG greetd)" "no login manager (greetd) found ($PKG greetd)"; fi
 fi
-if command -v ghostty >/dev/null 2>&1 || [ -x "$DESTDIR$PREFIX/bin/ghostty" ]; then say "  [ok] ghostty"; else chk foot foot "端末(ghostty が無いので foot)" "terminal (foot; ghostty not found)"; fi
+if command -v kuraokami >/dev/null 2>&1 || [ -x "$UHOME/.local/bin/kuraokami" ]; then say "  [ok] kuraokami(ame の端末)"
+elif command -v ghostty >/dev/null 2>&1 || [ -x "$DESTDIR$PREFIX/bin/ghostty" ]; then say "  [ok] ghostty"
+else chk foot foot "端末(kuraokami が無いので foot。sh scripts/install-apps.sh kuraokami で入れられます)" "terminal (foot; kuraokami not found)"; fi
 chk zsh zsh "端末のシェル" "terminal shell"
 chk dbus-run-session dbus "D-Bus" "D-Bus"
 

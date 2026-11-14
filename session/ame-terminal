@@ -1,7 +1,7 @@
 #!/bin/sh
 # ame-terminal: ame-shell が開く端末(Super+Return・ランチャーのアップデートなど)。POSIX sh。
 #   ame-terminal [--title 題名] [-e コマンド 引数...]
-# ghostty(ame-shell と同じ Zig 製)を使う。無ければ foot、それも無ければ xterm。
+# ame の端末 kuraokami(Odin)を使う。無ければ ghostty、foot、xterm の順。
 # ghostty は自分の設定(~/.config/ghostty/config)が無ければ ame-shell の設定(share/ame-shell/ghostty/config:
 # 半透明・JetBrainsMono Nerd Font・ame の配色・zsh)で開く。
 
@@ -13,6 +13,8 @@ PREFIX_DIR=$(dirname "$SELF_DIR")
 SHARE="$PREFIX_DIR/share/ame-shell"
 [ -d "$SHARE" ] || SHARE="$SELF_DIR/../data"
 export PATH="$SELF_DIR:$PATH"
+# ame のアプリ(kuraokami など)は ~/.local に入る(scripts/install-apps.sh)
+export PATH="$PATH:$HOME/.local/bin"
 
 title=""
 while [ $# -gt 0 ]; do
@@ -23,6 +25,12 @@ while [ $# -gt 0 ]; do
         *) break ;;
     esac
 done
+
+if command -v kuraokami >/dev/null 2>&1; then
+    # kuraokami は -e だけを受け付ける(題名は付けられない)
+    if [ $# -gt 0 ]; then exec kuraokami -e "$@"; fi
+    exec kuraokami
+fi
 
 if command -v ghostty >/dev/null 2>&1; then
     conf=""

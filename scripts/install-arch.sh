@@ -39,13 +39,14 @@ BUILD="git curl bash base-devel clang llvm pkgconf wayland wayland-protocols mes
 RIVER="river xorg-xwayland"
 # 動かすのに必要なもの・あると使うもの
 # (pipewire-audio: Bluetooth のイヤホン・スピーカー(bluez5 のプラグイン)/ libpulse: 音の道具(ame-uzume・ame-hamon)/
-#  ttf-nerd-fonts-symbols: バーのアイコン / hicolor・adwaita: アプリのアイコン)
+#  ttf-nerd-fonts-symbols: バーのアイコン / hicolor・adwaita: アプリのアイコン / sdl3: 端末 kuraokami /
+#  libarchive: ame-filemanager の圧縮ファイル。ファイルマネージャ・端末は ame のアプリなので thunar・ghostty は入れない)
 RUN="greetd foot polkit upower power-profiles-daemon pipewire pipewire-audio pipewire-pulse wireplumber libpulse mpv ffmpeg
- networkmanager bluez bluez-utils util-linux thunar tumbler gvfs xdg-utils
+ networkmanager bluez bluez-utils util-linux gvfs xdg-utils sdl3 libarchive
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  noto-fonts-cjk ttf-jetbrains-mono-nerd ttf-nerd-fonts-symbols hicolor-icon-theme adwaita-icon-theme
  fastfetch wlr-randr
- ghostty zsh zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza bat
+ zsh zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza bat
  libva-mesa-driver"
 # 動かすのに欠かせないコマンド(入れた後に確かめる)
 RUN_CMDS="foot zsh greetd dbus-run-session rfkill nmcli bluetoothctl"

@@ -5,7 +5,8 @@
 #   sh install.sh --user        自分だけ(~/.local)。root 不要(パッケージの導入は、できなければ飛ばす)
 #   sh install.sh --uninstall [--user]
 #
-# オプション: --no-deps(パッケージを入れない)/ --no-river(River が無くても作らない)/ --no-ghostty(ghostty を作らない)/ --yes(確認しない)
+# オプション: --no-deps(パッケージを入れない)/ --no-river(River が無くても作らない)/ --no-apps(ame のアプリを入れない)/ --yes(確認しない)
+#           --ghostty(端末 ghostty もソースからビルドする。既定は ame の端末 kuraokami だけで、GTK4 などを入れずに済む)
 #           --debug(デバッグ情報つき・安全検査ありでビルド。クラッシュのバックトレースに関数名が出る)
 #           --mozc(日本語入力 Mozc をソースからビルド。Chimera・FreeBSD はパッケージで入らないため。10〜20 分)
 #           --cleanup(使わなくなったパッケージ(cava・playerctl など)と KDE / Dolphin の古い設定を、確認してから消す)
@@ -15,7 +16,8 @@
 #   1. 依存パッケージ(Chimera Linux の apk・Arch の pacman は自動。その他のディストリは足りないものを表示)
 #   2. Zig 0.13.0(無ければ公式の配布物を ~/.cache に)と Odin(無ければソースからビルド)
 #   3. River が無ければ River 0.5 をソースからビルド(Zig 0.16 + wlroots 0.20)
-#   4. 端末 ghostty が無ければソースからビルド(Zig 0.17。Chimera はパッケージが無い)。失敗しても foot で続ける
+#   4. ame のアプリ(ファイルマネージャ ame-filemanager・端末 kuraokami・コードエディタ seoritsu)を GitHub から
+#      取ってきてビルドし、~/.local に入れる(scripts/install-apps.sh。--ghostty なら ghostty もビルド)
 #   5. ame-shell をビルドして、session/install-session.sh でインストール
 #      (グループ・SDDM などのサービス・NetworkManager の polkit ルールは確認してから設定)
 #   6. PipeWire / WirePlumber / pipewire-pulse のユーザーサービスを確認して有効に
@@ -27,7 +29,8 @@ USER_MODE=0
 UNINSTALL=0
 NO_DEPS=0
 NO_RIVER=0
-NO_GHOSTTY=0
+WITH_GHOSTTY=0
+NO_APPS=0
 MOZC=0
 CLEANUP=0
 ASSUME_YES=0
@@ -39,7 +42,9 @@ for a in "$@"; do
         --uninstall) UNINSTALL=1 ;;
         --no-deps) NO_DEPS=1 ;;
         --no-river) NO_RIVER=1 ;;
-        --no-ghostty) NO_GHOSTTY=1 ;;
+        --no-ghostty) ;;  # 以前のオプション(今は ghostty を作らないのが既定)
+        --ghostty) WITH_GHOSTTY=1 ;;
+        --no-apps) NO_APPS=1 ;;
         --mozc) MOZC=1; FWD="$FWD --mozc" ;;
         --cleanup) CLEANUP=1; FWD="$FWD --cleanup" ;;
         --yes|-y) ASSUME_YES=1; FWD="$FWD --yes" ;;
@@ -64,6 +69,7 @@ fi
 [ "$(uname -s)" = Linux ] || die "Linux と FreeBSD に対応しています($(uname -s) は未対応)"
 
 if [ "$UNINSTALL" = 1 ]; then
+    sh "$REPO/scripts/install-apps.sh" --uninstall  # ame のアプリ(この install.sh が入れたものだけ)
     if [ "$USER_MODE" = 1 ]; then exec sh "$REPO/session/install-session.sh" --uninstall --user; fi
     exec sh "$REPO/session/install-session.sh" --uninstall
 fi
@@ -129,9 +135,10 @@ say "1/7 依存パッケージ"
 # APK_BUILD / APK_RIVER / APK_RUN は必須: 入れられなければ止める。APK_OPT は無くても動く(その機能だけ使えない)
 #   ビルド: ame-shell と Odin のビルドに必要なもの
 APK_BUILD="git curl bash clang llvm-devel linux-headers pkgconf wayland-devel wayland-progs wayland-protocols
- mesa-devel libdrm-devel libxkbcommon-devel freetype-devel harfbuzz-devel fontconfig-devel dbus-devel linux-pam-devel openssl3-devel
- gtk4-devel libadwaita-devel gtk4-layer-shell-devel blueprint-compiler gettext-devel ncurses glslang-devel"
-#   (2 行目は端末 ghostty のビルド用。Chimera には ghostty のパッケージが無い)
+ mesa-devel libdrm-devel libxkbcommon-devel freetype-devel harfbuzz-devel fontconfig-devel dbus-devel linux-pam-devel openssl3-devel"
+#   端末 ghostty をビルドするときだけ(--ghostty。Chimera には ghostty のパッケージが無い)
+APK_GHOSTTY="gtk4-devel libadwaita-devel gtk4-layer-shell-devel blueprint-compiler gettext-devel ncurses glslang-devel"
+[ "$WITH_GHOSTTY" = 1 ] && APK_BUILD="$APK_BUILD $APK_GHOSTTY"
 #   River 0.5 のビルド(Chimera のリポジトリには river が無いので必ずソースから作る)
 APK_RIVER="wlroots0.20-devel libevdev-devel pixman-devel libinput-devel xwayland xwayland-devel"
 #   動かすのに必要なもの。pipewire-pulse は pipewire パッケージに含まれる
@@ -139,9 +146,10 @@ APK_RIVER="wlroots0.20-devel libevdev-devel pixman-devel libinput-devel xwayland
 #   ために KDE Plasma 一式を引き込む。SDDM を使うなら sddm-theme-none と sddm-default-weston も一緒に)
 #   (スクショ・録画・クリップボード・ロック・明るさ・音量・通信は ame の小さな道具が受け持つので grim / slurp / wl-clipboard / wf-recorder /
 #    swaylock / brightnessctl / curl は要らない。openssl3-devel は ame-yatagarasu(通信)のリンク用 / ffmpeg: 録画(ame-rec)の変換 /
-#    libpulse: 音の道具(ame-uzume・ame-hamon)が実行時に読む / 無線: util-linux-rfkill)
+#    libpulse: 音の道具(ame-uzume・ame-hamon)が実行時に読む / 無線: util-linux-rfkill /
+#    ファイルマネージャは ame-filemanager(thunar は要らない。圧縮ファイルに bsdtar = libarchive-progs)/ 端末 kuraokami は sdl3)
 APK_RUN="greetd greetd-dinit foot dbus mesa-dri polkit upower power-profiles-daemon pipewire wireplumber libpulse mpv-libs ffmpeg
- util-linux-rfkill networkmanager bluez thunar tumbler xdg-utils
+ util-linux-rfkill networkmanager bluez xdg-utils sdl3 libarchive-progs
  zsh zsh-syntax-highlighting fzf zoxide
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
  fonts-noto-sans-cjk-otf fonts-nerd-jetbrains-mono fonts-nerd-symbols-only adwaita-icon-theme hicolor-icon-theme"
@@ -255,16 +263,25 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-say "4/7 端末(ghostty)"
-# ame-shell と同じ Zig 製の端末。パッケージがあればそれ(Arch・FreeBSD)、無ければ公式のソースから
-# ビルドして ~/.cache に置く(install-session.sh が $PREFIX へコピーする)。失敗しても foot で続ける
+say "4/7 ame のアプリ(ame-filemanager・kuraokami・seoritsu)"
+# ファイルマネージャ・端末・コードエディタ。どれも Odin で書いた ame のアプリで、GitHub から取ってきてビルドし ~/.local に入れる
+# (scripts/install-apps.sh。自分で入れたものがあれば上書きしない)。作れなくても続ける(端末は foot、フォルダは既定のアプリ)
+if [ "$NO_APPS" = 1 ]; then
+    info "(--no-apps のため省略)"
+else
+    PATH="$TOOLPATH" ZIG="$ZIG" ODIN="$ODIN" sh "$REPO/scripts/install-apps.sh" ||
+        info "(作れなかったアプリがあります。ほかはそのまま続けます)"
+fi
+
+# 端末 ghostty(--ghostty のときだけ。既定は ame の端末 kuraokami で、GTK4 などを入れずに済む)
+# パッケージがあればそれ(Arch・FreeBSD)、無ければ公式のソースからビルドして ~/.cache に置く(install-session.sh が $PREFIX へコピーする)
 GHOSTTY_PREFIX="$CACHE/ghostty-prefix"
 if command -v ghostty >/dev/null 2>&1; then
     info "ghostty: $(command -v ghostty)"
 elif [ -x "$GHOSTTY_PREFIX/bin/ghostty" ] && [ "$(cat "$GHOSTTY_PREFIX/.ame-version" 2>/dev/null)" = "$GHOSTTY_VER" ]; then
     info "ghostty $GHOSTTY_VER: ビルド済み($GHOSTTY_PREFIX)"
-elif [ "$NO_GHOSTTY" = 1 ]; then
-    info "(--no-ghostty のため作りません。端末は foot を使います)"
+elif [ "$WITH_GHOSTTY" = 0 ]; then
+    :
 elif ! pkg-config --exists gtk4 libadwaita-1 2>/dev/null; then
     info "(GTK4 / libadwaita の開発ファイルが無いため ghostty は作りません。端末は foot を使います)"
 else
@@ -423,6 +440,13 @@ elif command -v thunar >/dev/null 2>&1 && command -v xdg-mime >/dev/null 2>&1; t
             xdg-mime default thunar.desktop inode/directory && info "フォルダを開くアプリ: thunar(Super+E)" ;;
         *) info "フォルダを開くアプリ: $cur(そのまま)" ;;
     esac
+fi
+# 文字のファイルを開くアプリ: seoritsu が入っていて、まだ決まっていなければ seoritsu に(ほかを選んでいればそのまま)
+if [ -f "${XDG_DATA_HOME:-$HOME/.local/share}/applications/seoritsu.desktop" ] && command -v xdg-mime >/dev/null 2>&1; then
+    cur=$(xdg-mime query default text/plain 2>/dev/null)
+    if [ -z "$cur" ]; then
+        xdg-mime default seoritsu.desktop text/plain text/markdown text/x-csrc text/x-chdr text/x-shellscript application/json && info "文字のファイルを開くアプリ: seoritsu"
+    else info "文字のファイルを開くアプリ: $cur(そのまま)"; fi
 fi
 
 # ---------------------------------------------------------------------------
