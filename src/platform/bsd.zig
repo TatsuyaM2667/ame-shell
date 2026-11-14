@@ -193,8 +193,10 @@ pub fn wpaCommand(iface: []const u8, cmd: []const u8, out: []u8) ?[]const u8 {
     const ipc_path = @import("../core/ipc_path.zig");
     var rb: [128]u8 = undefined;
     const remote = ipc_path.unixAddr(std.fmt.bufPrint(&rb, "/var/run/wpa_supplicant/{s}", .{iface}) catch return null) orelse return null;
-    var lb: [64]u8 = undefined;
-    const lpath = std.fmt.bufPrint(&lb, "/tmp/ame-wpa-{x}", .{@as(u64, @truncate(@as(u128, @bitCast(std.time.nanoTimestamp()))))}) catch return null;
+    var lb: [104]u8 = undefined;
+    // 返事を受けるソケットは本人だけが入れる XDG_RUNTIME_DIR に(/tmp だと、ほかの人が名前を当てて偽の返事を送れる)
+    const dir = std.posix.getenv("XDG_RUNTIME_DIR") orelse "/tmp";
+    const lpath = std.fmt.bufPrint(&lb, "{s}/ame-wpa-{x}", .{ dir, @as(u64, @truncate(@as(u128, @bitCast(std.time.nanoTimestamp())))) }) catch return null;
     const local = ipc_path.unixAddr(lpath) orelse return null;
     const fd = std.posix.socket(std.posix.AF.UNIX, std.posix.SOCK.DGRAM | std.posix.SOCK.CLOEXEC, 0) catch return null;
     defer std.posix.close(fd);

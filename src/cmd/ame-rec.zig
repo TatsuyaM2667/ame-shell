@@ -177,7 +177,9 @@ fn ffmpegArgs(a: std.mem.Allocator, o: Opts, pix: []const u8, w: u32, h: u32, gp
     }
     if (o.audio) try v.appendSlice(&.{ "-c:a", "aac", "-b:a", "192k" });
     // 画面が止まっている間はコマを送らないので、届いた時刻のまま書く(passthrough。vfr だと 25 コマ/秒に並べ直されて短くなる)
-    try v.appendSlice(&.{ "-fps_mode", "passthrough", "-movflags", "+faststart", o.path });
+    // - で始まる保存先は ffmpeg がオプションとして読むので、./ を付ける
+    const out = if (std.mem.startsWith(u8, o.path, "-")) try std.fmt.allocPrint(a, "./{s}", .{o.path}) else o.path;
+    try v.appendSlice(&.{ "-fps_mode", "passthrough", "-movflags", "+faststart", out });
     return v.items;
 }
 
@@ -332,4 +334,11 @@ test "画素の形式" {
     try std.testing.expectEqualStrings("bgr0", pixFmt(FMT_XRGB8888).?);
     try std.testing.expectEqualStrings("rgb0", pixFmt(FMT_XBGR8888).?);
     try std.testing.expect(pixFmt(12345) == null);
+}
+
+test "- で始まる保存先" {
+    var ar = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer ar.deinit();
+    const args = try ffmpegArgs(ar.allocator(), .{ .path = "-x.mp4", .audio = false }, "bgr0", 4, 4, false);
+    try std.testing.expectEqualStrings("./-x.mp4", args[args.len - 1]);
 }
