@@ -38,7 +38,7 @@ BUILD="git curl bash base-devel clang llvm pkgconf wayland wayland-protocols mes
 # River 0.5(ame-shell がウィンドウマネージャを兼ねるセッション)
 RIVER="river xorg-xwayland"
 # 動かすのに必要なもの・あると使うもの
-# (pipewire-audio: Bluetooth のイヤホン・スピーカー(bluez5 のプラグイン)/ libpulse: pactl /
+# (pipewire-audio: Bluetooth のイヤホン・スピーカー(bluez5 のプラグイン)/ libpulse: 音の道具(ame-uzume・ame-hamon)/
 #  ttf-nerd-fonts-symbols: バーのアイコン / hicolor・adwaita: アプリのアイコン)
 RUN="greetd foot polkit upower power-profiles-daemon pipewire pipewire-audio pipewire-pulse wireplumber libpulse mpv ffmpeg
  networkmanager bluez bluez-utils util-linux thunar tumbler gvfs xdg-utils
@@ -48,7 +48,7 @@ RUN="greetd foot polkit upower power-profiles-daemon pipewire pipewire-audio pip
  ghostty zsh zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza bat
  libva-mesa-driver"
 # 動かすのに欠かせないコマンド(入れた後に確かめる)
-RUN_CMDS="foot zsh greetd dbus-run-session pactl rfkill nmcli bluetoothctl"
+RUN_CMDS="foot zsh greetd dbus-run-session rfkill nmcli bluetoothctl"
 # 日本語入力(あれば)
 JA="fcitx5 fcitx5-mozc fcitx5-gtk fcitx5-qt fcitx5-configtool"
 

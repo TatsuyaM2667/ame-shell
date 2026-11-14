@@ -1,4 +1,4 @@
-// ame-uzume: 音量を読む / 変える / 見張る(wpctl・pactl の代わり)。
+// ame-uzume: 音量を読む / 変える / 見張る・出力先と入力先を選ぶ(wpctl・pactl の代わり)。
 // 名前は天岩戸の前で舞い、音を鳴らした芸能の神、天宇受売命(あめのうずめ)から。
 //
 //   ame-uzume                  今の音量を 1 行(「45」、消音なら「45 muted」)
@@ -6,6 +6,9 @@
 //   ame-uzume mute [on|off]    消音を切り替える(on / off で決め打ち)
 //   ame-uzume restore          最後に set / mute した音量に戻す(ログインのとき)
 //   ame-uzume watch            今の音量を 1 行、その後は変わるたびに 1 行(終わらない)
+//   ame-uzume list sinks       出力先の一覧(名前<TAB>説明<TAB>既定なら *)。sources で入力先
+//   ame-uzume use sink 名前    既定の出力先にし、流れている音も移す(source で入力先)
+//   ame-uzume list cards       音のカードの一覧 / ame-uzume profile カード プロファイル  カードのプロファイルを変える
 //
 // 相手は既定の出力(@DEFAULT_SINK@)。PulseAudio の口(PipeWire なら pipewire-pulse)に libpulse で話す。
 // libpulse は実行時に読む(ヘッダも -dev パッケージも要らない。無ければ 1 で終わる)。
@@ -199,7 +202,7 @@ print_level :: proc(l: Level) {
 }
 
 usage :: proc() -> ! {
-	fmt.eprintln("使い方: ame-uzume [set <0-100 | +N | -N> | mute [on|off] | restore | watch]")
+	fmt.eprintln("使い方: ame-uzume [set <0-100 | +N | -N> | mute [on|off] | restore | watch | list sinks|sources|cards | use sink|source 名前 | profile カード プロファイル]")
 	os.exit(2)
 }
 
@@ -216,13 +219,37 @@ main :: proc() {
 	args := os.args[1:]
 	cmd := len(args) > 0 ? args[0] : "get"
 	switch cmd {
-	case "get", "set", "mute", "restore", "watch":
+	case "get", "set", "mute", "restore", "watch", "list", "use", "profile":
 	case:
 		usage()
 	}
 	if (cmd == "get" || cmd == "restore" || cmd == "watch") && len(args) > 1 do usage()
 	if cmd == "set" && len(args) != 2 do usage()
 	if cmd == "mute" && len(args) > 2 do usage()
+	// 音のカード(devices.odin): list cards / profile カード プロファイル
+	if (cmd == "list" && len(args) == 2 && args[1] == "cards") || cmd == "profile" {
+		if cmd == "profile" && len(args) != 3 do usage()
+		if !connect() || !load_cards() {
+			fmt.eprintln("ame-uzume: 音の口(PulseAudio / pipewire-pulse)につながりません")
+			os.exit(1)
+		}
+		ok := cmd == "profile" ? card_profile(args[1], args[2]) : cards_list()
+		os.exit(ok ? 0 : 1)
+	}
+	// 出力先・入力先(devices.odin): list sinks|sources / use sink|source 名前
+	if cmd == "list" || cmd == "use" {
+		want := cmd == "list" ? 2 : 3
+		if len(args) != want do usage()
+		kind := args[1]
+		sources := kind == "sources" || kind == "source"
+		if !sources && kind != "sinks" && kind != "sink" do usage()
+		if !connect() || !load_devices() {
+			fmt.eprintln("ame-uzume: 音の口(PulseAudio / pipewire-pulse)につながりません")
+			os.exit(1)
+		}
+		ok := cmd == "list" ? devices_list(sources) : devices_use(sources, args[2])
+		os.exit(ok ? 0 : 1)
+	}
 	if !connect() {
 		fmt.eprintln("ame-uzume: 音の口(PulseAudio / pipewire-pulse)につながりません")
 		os.exit(1)

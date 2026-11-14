@@ -23,6 +23,7 @@ test {
     if (@import("builtin").os.tag == .linux) _ = @import("platform/malloc.zig");
     _ = @import("frame/island.zig");
     _ = @import("frame/data.zig");
+    _ = @import("media/audio.zig");
     _ = @import("core/events.zig");
 }
 

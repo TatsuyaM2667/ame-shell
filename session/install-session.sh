@@ -598,7 +598,13 @@ chk zsh zsh "端末のシェル" "terminal shell"
 chk dbus-run-session dbus "D-Bus" "D-Bus"
 
 
-[ "$OS" != FreeBSD ] && chk pactl libpulse-progs "音量・Bluetooth の音" "volume / Bluetooth audio"
+if [ "$OS" != FreeBSD ]; then
+    # 音の道具(ame-uzume・ame-hamon)は libpulse を実行時に読む
+    pulse=""
+    for p in /usr/lib/libpulse.so.0 /usr/lib64/libpulse.so.0 /usr/lib/*/libpulse.so.0; do [ -e "$p" ] && pulse=$p; done
+    if [ -n "$pulse" ]; then say "  [ok] libpulse"
+    else ng "libpulse がありません(音量・Bluetooth の音: $PKG libpulse)" "libpulse not found (volume / Bluetooth audio: $PKG libpulse)"; fi
+fi
 [ "$OS" != FreeBSD ] && chk rfkill util-linux-rfkill "Wi-Fi・Bluetooth のブロック解除" "unblock Wi-Fi / Bluetooth"
 if [ "$NEW_RIVER" = 1 ]; then
     ok "river $(river -version 2>&1)(ame-shell がウィンドウマネージャを兼ねます)" "river $(river -version 2>&1) (ame-shell acts as window manager)"

@@ -361,7 +361,7 @@ fn finish(st: *State, j: Job, out: []const u8) void {
                 setStatus(st, std.fmt.bufPrint(&msg, "失敗: {s}", .{pretty}) catch "失敗", true);
             } else {
                 // つながったが音の出力先にできなかった(pactl が無い・PipeWire に現れない)ときは、その理由を出す
-                if (std.mem.indexOf(u8, out, "audio: pactl") != null or std.mem.indexOf(u8, out, "audio: PipeWire") != null) {
+                if (std.mem.indexOf(u8, out, "audio: ame-uzume") != null or std.mem.indexOf(u8, out, "audio: PipeWire") != null) {
                     const at = std.mem.indexOf(u8, out, "audio: ").?;
                     setStatus(st, firstLine(out[at + 7 ..]), true);
                 } else setStatus(st, j.ok_msg[0..j.ok_len], false);

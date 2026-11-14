@@ -29,7 +29,7 @@ ame-handtrack||ame-yatagarasu|ame-hand|カメラに映った手の形と位置�
 ame-keyring|secretstore||dbus|鍵束(org.freedesktop.secrets)。アプリが API キー・パスワードをしまう Secret Service(gnome-keyring の代わり)
 amaterasu|||dbus|画面の明るさを読む・変える・覚えて戻す小さなコマンド(brightnessctl の代わり。root なしで logind 経由)
 ame-tajikara|||dbus|電源プロファイル(省電力・バランス・高性能)を読む・変える小さなコマンド(powerprofilesctl の代わり)
-ame-uzume||libpulse||音量を読む・変える・消音・見張る小さなコマンド(Odin。wpctl・pactl subscribe の代わり)
+ame-uzume||libpulse||音量を読む・変える・消音・見張る・出力先を選ぶ小さなコマンド(Odin。wpctl・pactl の代わり)
 ame-hamon|fft|libpulse-simple||今鳴っている音のスペクトラムを 1 行ずつ流す小さなコマンド(Odin。cava の代わり)
 ame-yatagarasu|||ssl|URL の中身を取ってくる小さなコマンド(curl の代わり。curl と同じオプションを読む。暗号は OpenSSL)
 ame-clip|ext-data-control-v1||wayland|Wayland のクリップボードに入れる・出す小さなコマンド ame-copy / ame-paste(wl-copy・wl-paste の代わり)

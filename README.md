@@ -196,7 +196,7 @@ FreeBSD での違い:
 
 必要: Zig 0.13、Odin、wayland-scanner、wayland / EGL / GLESv2 / xkbcommon / freetype / harfbuzz / fontconfig / dbus の開発ファイル(FreeBSD は加えて libepoll-shim・libinotify)。
 ame の小さな道具(同梱)のために: OpenSSL の開発ファイル(`ame-yatagarasu` の通信の暗号)、libpulse(実行時に読む。`ame-uzume`・`ame-hamon`)。
-実行時に使うもの: PipeWire(pipewire-pulse)と `pactl`(音の出力先の一覧と切り替え)・NetworkManager と BlueZ(コマンドは使わず D-Bus で直接)・logind / elogind(明るさ)・power-profiles-daemon・`rfkill`・`xdg-desktop-portal` と `-gtk`(ユーザーの写真を選ぶ画面)・`libmpv`(動画壁紙、任意)・`ffmpeg`(動画のサムネイルと録画、任意)。
+実行時に使うもの: PipeWire(pipewire-pulse)と libpulse(音の道具が実行時に読む)・NetworkManager と BlueZ(コマンドは使わず D-Bus で直接)・logind / elogind(明るさ)・power-profiles-daemon・`rfkill`・`xdg-desktop-portal` と `-gtk`(ユーザーの写真を選ぶ画面)・`libmpv`(動画壁紙、任意)・`ffmpeg`(動画のサムネイルと録画、任意)。
 フォント: 日本語(Noto Sans CJK)と Nerd Font のアイコン(JetBrainsMono Nerd Font か Symbols Nerd Font)。無いと起動時にログ(`session.log`)へ入れるパッケージ名を出します。
 音を拾えない(PipeWire / PulseAudio が無い)ときはメディアの波形の場所に理由を表示します。cava・playerctl・grim・slurp・wl-clipboard・wf-recorder・swaylock・brightnessctl・powerprofilesctl・wpctl・curl・nmcli・bluetoothctl は使いません(ame-shell の中か、ame の小さな道具が行います)。もう要らないパッケージや KDE の古い設定は `sh scripts/cleanup-old.sh` で消せます。
 
@@ -232,7 +232,7 @@ PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5
 `br-connection-refused` で繋がらない・すぐ切れる場合は、`doas sh session/bt-airpods-fix.sh` で BlueZ を従来の Bluetooth(BR/EDR)接続に切り替えてから、ペアリングし直してください(`--undo` で元に戻せます)。
 
 設定パネルからのペアリングは、ブロック解除(rfkill)→ 電源 → ペアリング可 → エージェント(`NoInputNoOutput`)つきのペアリング → 信頼 → 接続 → 音の出力先の切り替え、の順に行います(BlueZ を D-Bus で直接。bluetoothctl は使いません。`src/platform/netdbus.zig`)。認証に失敗したら一度ペアリングを消してやり直します。
-つながったのに音が出ないときは、パネルに理由が出ます(`pactl` が無い、PipeWire が動いていない、Bluetooth の音声のプラグインが無い: Arch は `pipewire-audio`)。
+つながったのに音が出ないときは、パネルに理由が出ます(`ame-uzume` が無い、PipeWire が動いていない、Bluetooth の音声のプラグインが無い: Arch は `pipewire-audio`)。
 
 音が電話のようにガサガサになるのは、アプリがマイクを開いた瞬間に通話用(HFP、モノラル 16kHz)に切り替わるためです。設定パネルから接続すると、この自動切り替えを止めます(`wpctl settings --save bluetooth.autoswitch-to-headset-profile false`)。通話でイヤホンのマイクを使うときは、音量のポップアウトで入力をイヤホンに切り替えてください。
 
@@ -357,7 +357,7 @@ ame-ctl watch                            (出来事を 1 行 1 つの JSON で�
 |---|---|---|---|
 | `amaterasu` | 画面の明るさを読む・変える・覚えて戻す(root なしで logind 経由) | brightnessctl | 天照大神 |
 | `ame-tajikara` | 電源プロファイルを読む・変える・覚えて戻す | powerprofilesctl | 天手力男神 |
-| `ame-uzume` | 音量を読む・変える・消音・見張る・覚えて戻す(Odin) | wpctl・`pactl subscribe` | 天宇受売命 |
+| `ame-uzume` | 音量を読む・変える・消音・見張る・覚えて戻す・出力先と入力先を選ぶ(Odin) | wpctl・pactl | 天宇受売命 |
 | `ame-hamon` | 今鳴っている音のスペクトラムを 1 行ずつ流す(Odin) | cava | 波紋 |
 | `ame-yatagarasu` | URL の中身を取ってくる(curl と同じオプション。暗号は OpenSSL) | curl | 八咫烏 |
 | `ame-rec` | 画面を動画に録る(変換は ffmpeg) | wf-recorder | |
@@ -374,6 +374,7 @@ ame-ctl watch                            (出来事を 1 行 1 つの JSON で�
 ```sh
 amaterasu set +5                                          # 明るさを 5% 上げる(amaterasu だけで今の値)
 ame-uzume set 40; ame-uzume mute                          # 音量 40%・消音を切り替え(ame-uzume watch で変わるたびに 1 行)
+ame-uzume list sinks; ame-uzume use sink bluez_output.XX   # 出力先の一覧(名前<TAB>説明<TAB>既定なら *)・切り替え(再生中の音も移る)
 ame-tajikara set balanced                                 # 電源プロファイル(power-saver / balanced / performance)
 ame-hamon -b 32 | head -3                                 # 棒 32 本のスペクトラム(cava の raw ascii と同じ形)
 ame-yatagarasu -sSfL -o page.html https://example.com     # 取ってくる(-w '%{http_code}'・-K - なども curl と同じ)

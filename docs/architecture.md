@@ -22,7 +22,7 @@
 | `ame-keyring` / `ame-keyring list` | 鍵束(org.freedesktop.secrets)。Zed などが API キー・パスワードをしまう(gnome-keyring の代わり) | D-Bus の Secret Service / 名前と属性の一覧 |
 | `amaterasu` / `amaterasu set 40`(`+5`・`-5`)/ `restore` | 画面の明るさ(sysfs、書けなければ logind の SetBrightness。brightnessctl の代わり)。set した値を覚え、ログインで戻す | → 0〜100 の数 |
 | `ame-tajikara` / `set 名前` / `restore` | 電源プロファイル(power-profiles-daemon に D-Bus。powerprofilesctl の代わり)。覚えて戻す | → power-saver / balanced / performance |
-| `ame-uzume` / `set N`(`+N`・`-N`)/ `mute [on・off]` / `restore` / `watch` | 音量(Odin。libpulse を実行時に読む。wpctl・`pactl subscribe` の代わり)。覚えて戻す | → 「45」/「45 muted」。watch は変わるたびに 1 行 |
+| `ame-uzume` / `set N`(`+N`・`-N`)/ `mute [on・off]` / `restore` / `watch` / `list sinks・sources・cards` / `use sink・source 名前` / `profile カード プロファイル` | 音量と出力先・入力先・カード(Odin。libpulse を実行時に読む。wpctl・pactl の代わり)。音量は覚えて戻す | → 「45」/「45 muted」。watch は変わるたびに 1 行 |
 | `ame-hamon [-b 本数]` | 今鳴っている音のスペクトラム(Odin。@DEFAULT_MONITOR@ を録って FFT。cava の代わり) | → 棒の高さ 0〜1000 を ';' でつないだ行(1 秒に約 60 行。無音の間は書かない) |
 | `ame-yatagarasu [curl と同じオプション] URL` | URL の中身を取ってくる(HTTP/1.1 は自前、暗号は OpenSSL。curl の代わり) | → 中身。終了コードも curl と同じ番号 |
 | `ame-rec -f 保存先 [--no-audio] [--cpu]` | 画面を動画に録る(ext-image-copy-capture で撮り、ffmpeg が変換。wf-recorder の代わり) | SIGINT で保存して終わる |

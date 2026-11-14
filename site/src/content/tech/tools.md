@@ -35,7 +35,7 @@ ame-shell の歌詞さがし・AI との会話・天気・鍵束・明るさ・�
 | `ame-keyring` / `ame-keyring list` | 鍵束(`org.freedesktop.secrets`)。Zed などが API キーをしまう(gnome-keyring の代わり) | D-Bus の Secret Service / 一覧 |
 | `amaterasu` / `set 40`(`+5`・`-5`)/ `restore` | 画面の明るさ。set した値を覚え、ログインで戻す(brightnessctl の代わり) | → 0〜100 の数 |
 | `ame-tajikara` / `set 名前` / `restore` | 電源プロファイル。覚えて戻す(powerprofilesctl の代わり) | → power-saver / balanced / performance |
-| `ame-uzume` / `set N`(`+N`・`-N`)/ `mute` / `restore` / `watch` | 音量と消音(Odin)。覚えて戻す(wpctl・`pactl subscribe` の代わり) | → 「45」/「45 muted」。watch は変わるたびに 1 行 |
+| `ame-uzume` / `set N`(`+N`・`-N`)/ `mute` / `restore` / `watch` / `list sinks` / `use sink 名前` | 音量と消音・出力先と入力先(Odin)。音量は覚えて戻す(wpctl・pactl の代わり) | → 「45」/「45 muted」。watch は変わるたびに 1 行 |
 | `ame-hamon [-b 本数]` | 今鳴っている音のスペクトラム(Odin。cava の代わり) | → 棒の高さ 0〜1000 を ';' でつないだ行 |
 | `ame-yatagarasu [curl と同じ] URL` | URL の中身を取ってくる(curl の代わり) | → 中身。終了コードも curl と同じ |
 | `ame-rec -f 保存先` | 画面を動画に録る(wf-recorder の代わり) | SIGINT で保存して終わる |

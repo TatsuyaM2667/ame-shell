@@ -82,7 +82,7 @@ Chimera Linux x86_64 / musl / dinit / AMD Ryzen 7 7735HS (16 スレッド) / Rad
 - `Debug` 以外はバイナリを strip(ame-shell 626KB, ame-ctl 14KB)。
 
 ## 外部の道具を ame の小さな道具に(2026-11)
-- 決定: brightnessctl・powerprofilesctl・wpctl / `pactl subscribe`・cava・curl・wf-recorder・swaylock・wl-copy / wl-paste を、1 つのことをする自前の道具に置き換えた(amaterasu・ame-tajikara・ame-uzume・ame-hamon・ame-yatagarasu・ame-rec・ame-iwato・ame-copy / ame-paste)。それぞれ単独のリポジトリにもする(`scripts/split-repos.sh`)。
+- 決定: brightnessctl・powerprofilesctl・wpctl / pactl・cava・curl・wf-recorder・swaylock・wl-copy / wl-paste を、1 つのことをする自前の道具に置き換えた(amaterasu・ame-tajikara・ame-uzume・ame-hamon・ame-yatagarasu・ame-rec・ame-iwato・ame-copy / ame-paste)。それぞれ単独のリポジトリにもする(`scripts/split-repos.sh`)。
 - 理由: 道具をそろえて、入れるパッケージを減らし、同じ書き方(1 行の文字・終了コード)で端末からも使えるようにする。ame-shell は名前を変えて呼ぶだけで済む形を選んだ(呼ぶ側を作り直さない)。
 - 言語: 数値と音の処理は Odin(ame-uzume・ame-hamon。FFT は anim/fft.odin を共有)、D-Bus・Wayland・OpenSSL につなぐものは Zig(生成した Wayland のヘッダと libdbus の包みが既にある)。
 - 明るさ(amaterasu): /sys に書ければそこへ、書けなければ logind の Session.SetBrightness。却下: setuid の補助(root で動くものを増やさない)、udev の規則で video グループに書かせる(/etc を書き換える)。

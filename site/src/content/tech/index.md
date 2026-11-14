@@ -67,7 +67,7 @@ ame-shell のコードは、次の 6 つの原則で一貫しています。各�
                        │ platform/      loop.zig(epoll + timerfd) / sys.zig / bsd.zig / supertap.zig   │
                        └────────────────────────────────────────────────────────────────────────────────┘
        子プロセス(pipe で結果だけ受け取る): ame-uzume watch / ame-hamon / ame-yatagarasu /
-       ffmpeg / PAM の認証 / ワーカースレッド: アイコン・アバター・サムネイル・pactl・録音・PNG・Wi-Fi / Bluetooth の D-Bus
+       ffmpeg / PAM の認証 / ワーカースレッド: アイコン・アバター・サムネイル・音の出力先(ame-uzume)・PNG・Wi-Fi / Bluetooth の D-Bus
 ```
 
 ## 1 フレームの流れ {#frame}

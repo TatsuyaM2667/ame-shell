@@ -139,8 +139,8 @@ APK_RIVER="wlroots0.20-devel libevdev-devel pixman-devel libinput-devel xwayland
 #   ために KDE Plasma 一式を引き込む。SDDM を使うなら sddm-theme-none と sddm-default-weston も一緒に)
 #   (スクショ・録画・クリップボード・ロック・明るさ・音量・通信は ame の小さな道具が受け持つので grim / slurp / wl-clipboard / wf-recorder /
 #    swaylock / brightnessctl / curl は要らない。openssl3-devel は ame-yatagarasu(通信)のリンク用 / ffmpeg: 録画(ame-rec)の変換 /
-#    音の出力先の一覧と切り替え: libpulse-progs(pactl)/ 無線: util-linux-rfkill)
-APK_RUN="greetd greetd-dinit foot dbus mesa-dri polkit upower power-profiles-daemon pipewire wireplumber libpulse-progs mpv-libs ffmpeg
+#    libpulse: 音の道具(ame-uzume・ame-hamon)が実行時に読む / 無線: util-linux-rfkill)
+APK_RUN="greetd greetd-dinit foot dbus mesa-dri polkit upower power-profiles-daemon pipewire wireplumber libpulse mpv-libs ffmpeg
  util-linux-rfkill networkmanager bluez thunar tumbler xdg-utils
  zsh zsh-syntax-highlighting fzf zoxide
  xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk
@@ -148,7 +148,7 @@ APK_RUN="greetd greetd-dinit foot dbus mesa-dri polkit upower power-profiles-dae
 APK_OPT="fastfetch wlr-randr gvfs eza bat"
 NEED_CMDS="git curl clang wayland-scanner pkg-config"
 # 動かすのに欠かせないコマンド(パッケージを入れた後に確かめる)
-RUN_CMDS="foot zsh greetd dbus-run-session pactl rfkill nmcli bluetoothctl"
+RUN_CMDS="foot zsh greetd dbus-run-session rfkill nmcli bluetoothctl"
 # Odin のビルドは llvm-config という名前を探せないため明示する
 export LLVM_CONFIG="${LLVM_CONFIG:-llvm-config}"
 if [ "$NO_DEPS" = 1 ]; then

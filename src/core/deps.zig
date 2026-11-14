@@ -17,10 +17,6 @@ pub fn installCmd() []const u8 {
 pub fn packageFor(cmd: []const u8) []const u8 {
     const eq = std.mem.eql;
     if (eq(u8, cmd, "wl-copy")) return "wl-clipboard";
-    if (eq(u8, cmd, "pactl")) {
-        if (builtin.os.tag == .freebsd) return "pulseaudio";
-        return if (sys.hasCommand("pacman")) "libpulse" else "libpulse-progs";
-    }
     if (eq(u8, cmd, "bluetoothctl")) return if (sys.hasCommand("pacman")) "bluez-utils" else "bluez";
     return cmd;
 }

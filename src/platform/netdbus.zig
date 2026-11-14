@@ -21,7 +21,7 @@
 //   ame-bt remove <MAC>                                  → "Device has been removed" / "Failed: …"(登録を消す)
 //   ame-bt connect|pair <MAC> <bt-connect.sh>            → "Connection successful" / "Failed: …"
 //   ame-net ssid                                         → つながっている Wi-Fi の SSID / ""(バーの表示用)
-//                                                          (音の出力先の切り替えは bt-connect.sh --audio で pactl)
+//                                                          (音の出力先の切り替えは bt-connect.sh --audio で ame-uzume)
 const std = @import("std");
 const builtin = @import("builtin");
 const c = @import("../c.zig");
@@ -1093,7 +1093,7 @@ fn ameBt(bus: *Bus, a: *Args, o: *Out) void {
         } else sleepMs(2000);
         if (!connectDev(bus, &d)) return btErr(bus, o, "connect");
     }
-    // イヤホン・スピーカーなら音の出力先にする(pactl。bt-connect.sh --audio)
+    // イヤホン・スピーカーなら音の出力先にする(ame-uzume。bt-connect.sh --audio)
     if (d.audio and script.len > 0) runScript(script, &.{ "--audio", mac }, o);
     o.add("Connection successful\n");
 }

@@ -1,7 +1,6 @@
-// 音の出力先・入力先の一覧と切り替え(pactl。PipeWire の pipewire-pulse 経由)。
+// 音の出力先・入力先の一覧と切り替え(ame-uzume list / use。PipeWire の pipewire-pulse に libpulse で話す)。
 //
-// pactl の JSON 出力は日本語の機器名(AirPods の名前など)で壊れるので、テキスト形式を読む。
-// 一覧の取得・切り替えは別スレッドで行い(pactl は数十 ms かかる)、終わったら pipe でメインループへ知らせる。
+// 一覧の取得・切り替えは別スレッドで行い(数十 ms かかることがある)、終わったら pipe でメインループへ知らせる。
 // 切り替えたときは、再生中・録音中のストリームも新しい機器へ移す。
 const std = @import("std");
 
@@ -49,7 +48,7 @@ pub const Audio = struct {
     new_sinks: List = .{},
     new_sources: List = .{},
     fresh: bool = false,
-    /// pactl(pipewire-pulse)が無い環境では一覧を出せない
+    /// ame-uzume(と音の口 pipewire-pulse)が無い環境では一覧を出せない
     unavailable: bool = false,
     busy: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     pipe_r: c_int,
@@ -70,7 +69,7 @@ pub const Audio = struct {
 
     /// 一覧を読み直す(表示する直前に呼ぶ)
     pub fn refresh(self: *Audio) void {
-        self.unavailable = !sys.hasCommand("pactl");
+        self.unavailable = !sys.hasCommand("ame-uzume");
         if (self.unavailable) return;
         self.start(false);
     }
@@ -103,13 +102,8 @@ pub const Audio = struct {
             var nz: [130]u8 = undefined;
             const name = std.fmt.bufPrintZ(&nz, "{s}", .{self.want_name[0..self.want_len]}) catch "";
             var out: [64]u8 = undefined;
-            if (self.want_kind == .sink) {
-                _ = sys.run(&.{ "pactl", "set-default-sink", name.ptr }, &out);
-                moveStreams("sink-inputs", "move-sink-input", name);
-            } else {
-                _ = sys.run(&.{ "pactl", "set-default-source", name.ptr }, &out);
-                moveStreams("source-outputs", "move-source-output", name);
-            }
+            // 既定にし、流れている音(録っている音)もそこへ移す
+            _ = sys.run(&.{ "ame-uzume", "use", if (self.want_kind == .sink) "sink" else "source", name.ptr }, &out);
         }
         var sk: List = .{};
         var sr: List = .{};
@@ -146,54 +140,42 @@ pub const Audio = struct {
     }
 };
 
-/// 再生中(録音中)のストリームを全部 name へ移す
-fn moveStreams(what: [:0]const u8, cmd: [:0]const u8, name: [:0]const u8) void {
-    var buf: [4096]u8 = undefined;
-    const s = sys.run(&.{ "pactl", "list", "short", what.ptr }, &buf) orelse return;
+/// `ame-uzume list sinks|sources` の行(名前<TAB>説明<TAB>既定なら *)を読む(モニターは向こうで除いてある)
+fn readList(what: [:0]const u8, l: *List) void {
+    var buf: [16384]u8 = undefined;
+    const s = sys.run(&.{ "ame-uzume", "list", what.ptr }, &buf) orelse return;
+    parseList(s, l);
+}
+
+fn parseList(s: []const u8, l: *List) void {
     var lines = std.mem.splitScalar(u8, s, '\n');
-    while (lines.next()) |l| {
-        var it = std.mem.tokenizeAny(u8, l, " \t");
-        const id = it.next() orelse continue;
-        var iz: [24]u8 = undefined;
-        const idz = std.fmt.bufPrintZ(&iz, "{s}", .{id}) catch continue;
-        var out: [64]u8 = undefined;
-        _ = sys.run(&.{ "pactl", cmd.ptr, idz.ptr, name.ptr }, &out);
+    while (lines.next()) |line| {
+        if (line.len == 0 or l.n >= MAX) continue;
+        var f = std.mem.splitScalar(u8, line, '\t');
+        const nm = f.next() orelse continue;
+        const desc = f.next() orelse "";
+        const mark = f.next() orelse "";
+        if (nm.len == 0) continue;
+        const d = &l.devs[l.n];
+        d.* = .{};
+        d.name_len = @min(nm.len, d.name.len);
+        @memcpy(d.name[0..d.name_len], nm[0..d.name_len]);
+        d.bluetooth = std.mem.startsWith(u8, nm, "bluez_");
+        setLabel(d, desc);
+        l.n += 1;
+        if (std.mem.eql(u8, mark, "*")) {
+            l.default_len = @min(nm.len, l.default.len);
+            @memcpy(l.default[0..l.default_len], nm[0..l.default_len]);
+        }
     }
 }
 
-/// `pactl list sinks|sources` のテキストから Name / Description を拾う(モニターは除く)
-fn readList(what: [:0]const u8, l: *List) void {
-    var buf: [65536]u8 = undefined;
-    const s = sys.run(&.{ "pactl", "list", what.ptr }, &buf) orelse return;
-    var cur: ?*Dev = null;
-    var lines = std.mem.splitScalar(u8, s, '\n');
-    while (lines.next()) |raw| {
-        const line = std.mem.trim(u8, raw, " \t\r");
-        if (std.mem.startsWith(u8, line, "Name: ")) {
-            const nm = line[6..];
-            if (std.mem.endsWith(u8, nm, ".monitor") or l.n >= MAX) {
-                cur = null;
-                continue;
-            }
-            const d = &l.devs[l.n];
-            d.* = .{};
-            d.name_len = @min(nm.len, d.name.len);
-            @memcpy(d.name[0..d.name_len], nm[0..d.name_len]);
-            d.bluetooth = std.mem.startsWith(u8, nm, "bluez_");
-            l.n += 1;
-            cur = d;
-        } else if (std.mem.startsWith(u8, line, "Description: ")) {
-            const d = cur orelse continue;
-            setLabel(d, line[13..]);
-        }
-    }
-    var dout: [160]u8 = undefined;
-    const cmd: [:0]const u8 = if (std.mem.eql(u8, what, "sinks")) "get-default-sink" else "get-default-source";
-    if (sys.run(&.{ "pactl", cmd.ptr }, &dout)) |dn| {
-        const t = std.mem.trim(u8, dn, " \n");
-        l.default_len = @min(t.len, l.default.len);
-        @memcpy(l.default[0..l.default_len], t[0..l.default_len]);
-    }
+test "出力先の一覧の行" {
+    var l: List = .{};
+    parseList("alsa_output.a\tFamily HD Audio Analog Stereo\t\nbluez_output.b\tAirPods\t*\n", &l);
+    try std.testing.expectEqual(@as(usize, 2), l.n);
+    try std.testing.expect(l.devs[1].bluetooth);
+    try std.testing.expectEqualStrings("bluez_output.b", l.default[0..l.default_len]);
 }
 
 /// 分かりにくい ALSA の名前("Family 17h/19h/1ah HD Audio Controller Analog Stereo")を言い換える
