@@ -95,6 +95,12 @@ fn num(s: []const u8) u64 {
     return @intFromFloat(@ceil(f));
 }
 
+/// 要求に入れてよい文字か(制御文字なし。space が false なら空白も不可)
+fn clean(s: []const u8, space: bool) bool {
+    for (s) |ch| if (ch < 0x20 or ch == 0x7f or (!space and ch == ' ')) return false;
+    return true;
+}
+
 /// 本文: @ファイル ならその中身
 fn dataArg(a: std.mem.Allocator, v: []const u8) []const u8 {
     if (v.len > 1 and v[0] == '@') {
@@ -217,6 +223,11 @@ fn parseArgs(a: std.mem.Allocator, args: []const []const u8) Opts {
         } else o.url = s;
     }
     if (o.url.len == 0) usage();
+    // 改行や制御文字が入ると、要求の中に別のヘッダや要求を差し込めてしまう
+    if (!clean(o.url, false)) die(3, "URL に使えない文字があります", .{});
+    if (!clean(o.ua, true)) die(2, "-A に使えない文字があります", .{});
+    for (o.headers.items) |h| if (!clean(h, true) or std.mem.indexOfScalar(u8, h, ':') == null) die(2, "ヘッダの形が違います(名前: 値): {s}", .{h});
+    if (o.method) |m| for (m) |ch| if (!std.ascii.isAlphabetic(ch)) die(2, "-X に使えない文字があります", .{});
     return o;
 }
 
@@ -480,16 +491,22 @@ pub fn main() u8 {
     };
     var method: []const u8 = o.method orelse if (send_body != null) "POST" else "GET";
     var hops: u32 = 0;
+    const first = parseUrl(url) orelse die(3, "URL が読めません: {s}", .{url});
+    // 自分で付けたヘッダ(API キーなど)は、最初と同じ相手(方式・名前・ポート)にだけ送る。転送で別の相手へ行ったら送らない(curl と同じ考え)
+    var same_origin = true;
     while (true) {
         const u = parseUrl(url) orelse die(3, "URL が読めません: {s}", .{url});
+        if (u.https != first.https or u.port != first.port or !std.ascii.eqlIgnoreCase(u.host, first.host)) same_origin = false;
         var c = connect(a, u, o.connect_timeout);
         // 要求
         var req = std.ArrayList(u8).init(a);
         const w = req.writer();
-        w.print("{s} {s} HTTP/1.1\r\nHost: {s}", .{ method, u.path, u.host }) catch {};
+        // IPv6 のアドレスは [ ] で囲む
+        const v6 = std.mem.indexOfScalar(u8, u.host, ':') != null;
+        w.print("{s} {s} HTTP/1.1\r\nHost: {s}{s}{s}", .{ method, u.path, if (v6) "[" else "", u.host, if (v6) "]" else "" }) catch {};
         if (u.port != (if (u.https) @as(u16, 443) else 80)) w.print(":{d}", .{u.port}) catch {};
         w.print("\r\nUser-Agent: {s}\r\nAccept: */*\r\nConnection: close\r\n", .{o.ua}) catch {};
-        for (o.headers.items) |h| w.print("{s}\r\n", .{h}) catch {};
+        if (same_origin) for (o.headers.items) |h| w.print("{s}\r\n", .{h}) catch {};
         if (send_body) |b| {
             var has_type = false;
             for (o.headers.items) |h| has_type = has_type or std.ascii.startsWithIgnoreCase(h, "content-type:");
@@ -531,6 +548,7 @@ pub fn main() u8 {
             hops += 1;
             if (hops > 10) die(47, "転送が多すぎます", .{});
             url = resolve(a, u, location.?);
+            if (!clean(url, false)) die(56, "転送先の URL に使えない文字があります", .{});
             // 303 と、POST 以外を変える 301 / 302 は GET に(curl と同じ)
             if (code == 303 or ((code == 301 or code == 302) and std.mem.eql(u8, method, "POST"))) {
                 method = "GET";
@@ -589,4 +607,11 @@ test "--data-urlencode" {
     defer ar.deinit();
     try std.testing.expectEqualStrings("q=Queen%20Bohemian%20Rhapsody", urlencodeArg(ar.allocator(), "q=Queen Bohemian Rhapsody"));
     try std.testing.expectEqualStrings("s=%E5%A4%9C", urlencodeArg(ar.allocator(), "s=夜"));
+}
+
+test "要求に入れてよい文字" {
+    try std.testing.expect(clean("https://a.example/x?q=1", false));
+    try std.testing.expect(!clean("https://a.example/x y", false));
+    try std.testing.expect(clean("X-Test: a b", true));
+    try std.testing.expect(!clean("X: a\r\nEvil: 1", true));
 }

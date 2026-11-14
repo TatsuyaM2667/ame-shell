@@ -17,6 +17,13 @@ const c = @cImport({
 });
 
 extern "c" fn setsid() c_int;
+
+/// 裏に回ったら、呼んだ側の標準入出力を手放す(持ったままだと `x=$(echo hi | ame-copy)` が終わらない)
+fn detachStdio() void {
+    const fd = std.posix.open("/dev/null", .{ .ACCMODE = .RDWR }, 0) catch return;
+    for ([_]i32{ 0, 1, 2 }) |t| std.posix.dup2(fd, t) catch {};
+    if (fd > 2) std.posix.close(fd);
+}
 const A = std.heap.c_allocator;
 const text_types = [_][*:0]const u8{ "text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "STRING", "TEXT" };
 
@@ -94,6 +101,7 @@ fn copy(mime: ?[:0]const u8) void {
     const pid = std.posix.fork() catch fail("裏に回れません");
     if (pid != 0) std.process.exit(0);
     _ = setsid();
+    detachStdio();
     while (!done and c.wl_display_dispatch(conn.dpy) >= 0) {}
 }
 

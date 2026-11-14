@@ -389,6 +389,9 @@ pub fn main() u8 {
         const pid = std.posix.fork() catch die("裏に回れません", .{});
         if (pid != 0) std.process.exit(0);
         _ = c.setsid();
+        // 呼んだ側の標準入出力を手放す(持ったままだと、出力を待つ呼び出し元が戻らない)
+        const nul = std.posix.open("/dev/null", .{ .ACCMODE = .RDWR }, 0) catch -1;
+        if (nul >= 0) for ([_]i32{ 0, 1, 2 }) |t| std.posix.dup2(nul, t) catch {};
     }
 
     const fd = c.wl_display_get_fd(dpy);
