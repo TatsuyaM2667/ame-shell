@@ -7,7 +7,7 @@ git clone https://github.com/TatsuyaM2667/ame-shell && cd ame-shell
 sh install.sh
 ```
 
-`install.sh` が OS を見て、必要なものを判断します。依存パッケージ、ツールチェイン(Zig 0.13・Odin)、River、ame-shell のビルド、インストール、ログイン画面(SDDM)のセッションまで、すべて自動です。終わったら、ログイン画面のセッション一覧から **「Ame Shell (River 0.5)」** を選んでください。
+`install.sh` が OS を見て、必要なものを判断します。依存パッケージ、ツールチェイン(Zig 0.13・Odin)、River、**ame のアプリ**(ファイルマネージャ ame-filemanager・端末 kuraokami・コードエディタ seoritsu)、ame-shell のビルド、インストール、ログイン画面のセッションまで、すべて自動です。終わったら、ログイン画面のセッション一覧から **「Ame Shell (River 0.5)」** を選んでください。
 
 | OS | 依存パッケージ | River 0.5 | 備考 |
 |---|---|---|---|
@@ -23,7 +23,26 @@ sh install.sh --user        # 自分だけ(~/.local)。root 不要。SDDM には
 sh install.sh --yes         # 確認しない
 sh install.sh --debug       # デバッグ情報つき・安全検査ありでビルド(クラッシュの原因が分かりやすい)
 sh install.sh --uninstall   # 元に戻す(入れたファイルは share/ame-shell/installed-files に記録されている)
+sh install.sh --no-apps     # ame のアプリを入れない
+sh install.sh --ghostty     # 端末 ghostty もビルドする(既定は ame の端末 kuraokami だけ。GTK4 などを入れずに済む)
 ```
+
+## ame のアプリ {#apps}
+
+ファイルマネージャ・端末・コードエディタは、ame-shell と同じく Odin で書いた ame のアプリです。`install.sh` が GitHub から取ってきてビルドし、`~/.local` に入れます(`scripts/install-apps.sh`)。
+
+| アプリ | 使われるところ | 置き換えたもの |
+|---|---|---|
+| [ame-filemanager](https://github.com/TatsuyaM2667/ame-Filemanager) | Super+E・フォルダを開く既定のアプリ | Thunar |
+| [kuraokami](https://github.com/TatsuyaM2667/kuraokami) | Super+Return(`ame-terminal`) | ghostty・foot |
+| [seoritsu](https://github.com/TatsuyaM2667/seoritsu) | 文字のファイルを開く既定のアプリ(まだ決まっていなければ) | — |
+
+```sh
+sh scripts/install-apps.sh                 # 最新にして入れ直す(名前を並べるとそれだけ)
+sh scripts/install-apps.sh --uninstall     # この script が入れたものだけ外す
+```
+
+自分で入れたもの(同じ名前のコマンドが `~/.local/bin` にあり、この script が入れたのでないもの)は上書きしません。どれかが作れなくても、ほかは続けます。
 
 - どのユーザーが実行してもかまいません。root の権限が必要なところだけ、doas か sudo を使います。どちらも無い人は、自動で `--user` になります。
 - インストールせずに試す: `PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5`(今のセッションの中に窓として開きます)

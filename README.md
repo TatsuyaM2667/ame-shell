@@ -94,7 +94,7 @@ sh install.sh --uninstall [--user]
 
 `install.sh` が依存パッケージ(Chimera Linux は apk、Arch 系は pacman で自動。他のディストリは足りないものを表示)、Zig 0.13、Odin、River(無ければ River 0.5 をソースから)、ame-shell のビルドとインストールまで行います。
 どのユーザーが実行しても構いません。doas / sudo が使えない人は自動で `--user` になります。全ユーザー用では、自分でビルドした River 0.5(`~/.local/opt/river-0.5`)も `/usr/local/opt` にコピーされ、他のアカウントからも River 0.5 のセッションが使えます。
-端末は ghostty(無ければ foot)。下の「端末とシェル」を参照。
+ファイルマネージャ・端末・コードエディタは ame のアプリ(ame-filemanager・kuraokami・seoritsu)を GitHub から取ってきてビルドし、`~/.local` に入れます(下の「ame のアプリ」)。
 
 ### Chimera Linux(新規インストールから)
 
@@ -107,9 +107,9 @@ Chimera のリポジトリには River 0.3 が無いので、`install.sh` が Ri
    ```
 2. `sh install.sh` を実行する。次のことを順に行います
    - **パッケージ**(`doas apk add`): ビルドに要るもの(clang・llvm-devel・linux-headers・pkgconf・wayland / mesa / libdrm / xkbcommon / freetype / harfbuzz / fontconfig / dbus / linux-pam・openssl3 の -devel)、
-     River 0.5 のビルドに要るもの(wlroots0.20-devel など)、動かすのに要るもの(greetd・foot・mesa-dri・polkit・pipewire・wireplumber・libpulse-progs・ffmpeg・util-linux-rfkill・networkmanager・bluez・thunar・tumbler・xdg-desktop-portal(-gtk・-wlr)・fonts-noto-sans-cjk-otf・fonts-nerd-jetbrains-mono・fonts-nerd-symbols-only・adwaita / hicolor のアイコンテーマ)。
+     River 0.5 のビルドに要るもの(wlroots0.20-devel など)、動かすのに要るもの(greetd・foot・mesa-dri・polkit・pipewire・wireplumber・libpulse・ffmpeg・sdl3・libarchive-progs・util-linux-rfkill・networkmanager・bluez・xdg-desktop-portal(-gtk・-wlr)・fonts-noto-sans-cjk-otf・fonts-nerd-jetbrains-mono・fonts-nerd-symbols-only・adwaita / hicolor のアイコンテーマ)。
      どれかが入らないとそこで止まります(足りないまま進めて、スクショや波形が動かないことが無いように)
-   - Zig 0.13 と Odin、River 0.5 のビルド、ame-shell のビルドとインストール
+   - Zig 0.13 と Odin、River 0.5 のビルド、**ame のアプリ**(ame-filemanager・kuraokami・seoritsu)のビルド、ame-shell のビルドとインストール
    - **インストール後の設定**(1 つずつ `[y/N]` で確認。`--yes` で全部、`--no-setup` で何もしない):
      video・input グループへの追加 / networkmanager・bluetoothd を次の起動から有効に / ログイン画面を ame-shell(greetd)に /
      wheel グループが NetworkManager を操作できる polkit のルール(`/etc/polkit-1/rules.d/50-networkmanager.rules`。無いと Wi-Fi パネルから接続できません)
@@ -120,10 +120,10 @@ Chimera のリポジトリには River 0.3 が無いので、`install.sh` が Ri
 インストールの中身だけを確かめるには `sh session/install-session.sh --dry-run`(何も書き込みません)。
 
 **SDDM と、そのために入った KDE Plasma を消す**: ログイン画面は ame-shell(greetd)なので SDDM は要りません。Chimera の sddm は、既定のテーマ(plasma-desktop)とコンポジタ(kwin)のために KDE Plasma 一式(800 以上・約 2.5GB)を引き込んでいます。
-ログイン画面を ame-shell にした後(`sh install.sh` の確認、または `doas sh scripts/greeter-setup.sh`)なら、次で消せます(Dolphin・Konsole・Okular・Kate なども消えます。ファイルマネージャは thunar):
+ログイン画面を ame-shell にした後(`sh install.sh` の確認、または `doas sh scripts/greeter-setup.sh`)なら、次で消せます(Dolphin・Konsole・Okular・Kate なども消えます。ファイルマネージャ・端末・エディタは ame のアプリ):
 ```sh
 # ame-shell が使うもの(KDE と一緒に入っていたもの)は残すよう明示する。'!sddm' は「sddm を入れない」の指定
-doas apk add greetd greetd-dinit thunar tumbler ffmpeg mpv-libs libpulse-progs xwayland upower power-profiles-daemon '!sddm'
+doas apk add greetd greetd-dinit ffmpeg mpv-libs libpulse sdl3 libarchive-progs xwayland upower power-profiles-daemon '!sddm'
 ```
 消す前に `apk add --simulate …`(同じ引数)で消えるものを確かめられます。SDDM をまた入れるときは `doas apk del '!sddm'` で指定を外してください。
 
@@ -134,8 +134,8 @@ Bluetooth のイヤホンの音には `pipewire-audio`、バーのアイコン�
 ### 画面の拡大率・端末
 - **拡大率は自動**(River 0.5 のセッション、`wlr-randr` を使用): 画素の細かさを作者の環境(14 インチ 1920x1200、拡大率 1)と比べて 0.25 刻みで決めます。ふつうの画面は 1 のまま、14 インチ 2880x1800 なら 1.5、13 インチ 4K なら 2。
   自分で決めるときは `~/.config/ame-shell/output-scale` に `1.5` や `eDP-1 1.5`(画面ごと)、`off` で自動設定なし。
-- **端末(ghostty)とシェル(zsh)**: Super+Return で `ame-terminal` が ghostty(ame-shell と同じ Zig 製)を開きます。無ければ foot。
-  - ghostty は Arch・FreeBSD ではパッケージ、Chimera はパッケージが無いので `install.sh` が公式のソースから Zig 0.17 でビルドします(GTK4・libadwaita の開発ファイルを入れて。失敗しても foot で続けます。`--no-ghostty` で飛ばす)
+- **端末(kuraokami)とシェル(zsh)**: Super+Return で `ame-terminal` が ame の端末 kuraokami を開きます。無ければ ghostty、foot の順。
+  - ghostty は既定では入れません(`sh install.sh --ghostty` で、Chimera では公式のソースから Zig 0.17 でビルドします。GTK4・libadwaita の開発ファイルも入ります)
   - ghostty の設定: 自分の `~/.config/ghostty/config` が無ければ ame-shell のもの(`data/ghostty/config`: 夜空の紺に半透明、JetBrainsMono Nerd Font、ame の 16 色、タイトルバーなし、2 つ目からの窓はすぐ開く)
   - 端末の中のシェルは zsh(ログインシェルは変えません)。自分の `~/.zshrc` が無ければ ame-shell の設定(`data/zsh/.zshrc`): 2 行のプロンプト(場所・git のブランチと状態・かかった時間・終了コード・時刻)、矢印で選べる補完、↑↓ で入力中の文字から始まる履歴、灰色の候補(zsh-autosuggestions)、色分け(zsh-syntax-highlighting)、fzf(Ctrl+R)・zoxide(`z`)・eza(アイコン付きの `ls`)。足したい設定は `~/.config/ame-shell/zshrc.local` に
   - 開くと最初に `fastfetch` を表示します(`AME_FASTFETCH=0` で無効)
@@ -241,13 +241,13 @@ PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5
 | キー | 動作 |
 |---|---|
 | Super(単独で押して離す)/ Super+D | ランチャー |
-| Super+Return / Super+T | 端末(ghostty。無ければ foot)|
+| Super+Return / Super+T | 端末(kuraokami。無ければ ghostty、foot)|
 | Super+A / Super+N / Super+U | ダッシュボード / 通知センター / ユーティリティ |
 | Super+C | AI チャット(右から生えるパネル) |
 | Super+Escape | セッション(ロック・ログアウト・再起動・電源オフ。危険な操作は 2 回押し)|
 | Super+L | ロック |
 | Super+Shift+W | 壁紙ピッカー |
-| Super+E | ファイルマネージャ(Thunar。ame-shell のセッションでは端末と同じ半透明のテーマ AmeGlass で開く。`AME_FILES_THEME=0` でいつものテーマ)|
+| Super+E | ファイルマネージャ(ame-filemanager。無ければ Thunar、それも無ければフォルダを開く既定のアプリ)|
 | Super+Q / Super+F / Super+Space | 閉じる / 全画面 / フロート |
 | Super+J・K / Super+Shift+J・K | フォーカス / 入れ替え |
 | Super+Ctrl+H・L | 左右の比率 |
@@ -347,6 +347,26 @@ ame-ctl watch                            (出来事を 1 行 1 つの JSON で�
 - FreeBSD: Bluetooth の機器の追加は端末(`doas bluetooth-config scan`)。ログイン画面は SDDM。
 - 動画壁紙は再生中に CPU 約 5%(720p)・メモリ +130MB 程度を使う(透明な窓から見えるよう、窓を開いていても動き続ける。止まるのは全画面の窓があるときだけ)。
 - 詳細は `docs/blockers.md`、計測値は `docs/perf.md`。
+
+## ame のアプリ
+
+ame-shell と同じ考え方(ツールキットを使わず GPU / ソフトウェアで直接描く・半透明・日本語)で作った、Odin のアプリです。それぞれ別のリポジトリで、`install.sh` が GitHub から取ってきてビルドし、`~/.local` に入れます(`scripts/install-apps.sh`。root は要りません)。
+
+| アプリ | すること | ame-shell とのつながり | 置き換えたもの |
+|---|---|---|---|
+| [ame-filemanager](https://github.com/TatsuyaM2667/ame-Filemanager) | ファイルマネージャ(タブ・2 画面・ドラッグで変換・圧縮ファイル・プレビュー・ゴミ箱) | Super+E、フォルダを開く既定のアプリ | Thunar |
+| [kuraokami](https://github.com/TatsuyaM2667/kuraokami) | 端末(日本語入力・全角・カラー絵文字・zsh の候補表示と色分けを内蔵) | Super+Return(`ame-terminal`) | ghostty・foot |
+| [seoritsu](https://github.com/TatsuyaM2667/seoritsu) | コードエディタ(Zed の設定と拡張を読む・tree-sitter の色分け・プロジェクトのパネル) | 文字のファイルを開く既定のアプリ(未設定のとき) | — |
+
+```sh
+sh scripts/install-apps.sh                 # 3 つとも最新にして入れ直す(名前を並べるとそれだけ)
+sh scripts/install-apps.sh --uninstall     # この script が入れたものだけ外す
+```
+
+- 自分で入れたもの(同じ名前のコマンドが `~/.local/bin` にあり、この script が入れたのでないもの)は上書きしません。開発中の版はそのまま使えます。
+- 取ってきたソースは `~/.cache/ame-shell/apps/`。seoritsu の tree-sitter の部分だけ Zig 0.17 を使い、無ければ取ってきます。
+- どれかが作れなくても、ほかは続けます(端末は foot、フォルダは既定のアプリで代わりにします)。
+- 窓のたわむアニメーションでは、3 つとも半透明の窓として扱います。
 
 ## 小さな道具(端末からも使える)
 

@@ -90,3 +90,11 @@ Chimera Linux x86_64 / musl / dinit / AMD Ryzen 7 7735HS (16 スレッド) / Rad
 - 録画(ame-rec): 画面は ext-image-copy-capture で変わったときだけ撮り、生の画素を ffmpeg に流す(VAAPI、無ければ libx264)。時刻は `-fps_mode passthrough`(vfr だと 25 コマ/秒に並べ直されて短くなる)、止まった画面は 1 秒ごとに同じコマ、終わりは SIGINT で ffmpeg に仕上げさせる(音の入力は自分では終わらない。`-shortest` は音に合わせて動画を切ってしまった)。却下: H.264 のエンコーダを自作(量が大きく、GPU を使えない)、libavcodec に直接つなぐ(ffmpeg のコマンドで足りる)。
 - ロック(ame-iwato): ame-shell の中のロック画面(顔認証・曲のカード)はそのまま残し、どのコンポジタでも動く単体のものを別に作った。ame-shell が落ちてロックが残ったときに外す道具にもなる。却下: 中のロック画面を切り出す(描画・顔認証・曲のカードが ame-shell の多くに依存)。FreeBSD で swaylock に任せていたところは、ame-auth を入れるよう知らせる形にした。
 - 名前: 日本の神話と古い言葉から(ame は「雨」と「天」)。古い名前はしばらくリンクとして入れる。
+
+## ame のアプリ(ファイルマネージャ・端末・エディタ)をエコシステムに(2026-11)
+- 決定: ame-filemanager(ファイルマネージャ)・kuraokami(端末)・seoritsu(コードエディタ)は別のリポジトリのまま、ame-shell の `install.sh` が `scripts/install-apps.sh` で取ってきてビルドし、本人の `~/.local` に入れる。Super+E・Super+Return(`ame-terminal`)・文字のファイルの既定のアプリが使う。
+- 理由: どれも Odin で書いた半透明のアプリで、ame-shell と同じツールチェイン(Odin dev-2026-08・Zig)で作れる。Thunar(GTK3)と、ビルドに GTK4・libadwaita・glslang などを要する ghostty を既定で入れずに済む。
+- `~/.local` に入れる: アプリ自身のインストーラと同じ場所で、root が要らない。ランチャーの `.desktop` の Exec はフルパスにする(PATH に ~/.local/bin が無いことがある)。
+- 自分で入れたものは上書きしない: この script が入れた印(`~/.local/share/ame-shell/apps/<名前>`)が無いのに同じ名前のコマンドがあれば、開発中の版とみなして触らない。
+- 各アプリの install.sh は使わない: GNU の `install -D` など、BSD の install(1)(Chimera・FreeBSD)で動かない書き方があるため、入れる部分は POSIX sh で ame-shell 側に書いた。
+- 却下: ame-shell のリポジトリに取り込む(それぞれ独立に作られ、単独でも使われる)、git submodule(更新の手間が増え、取ってくるだけで十分)。

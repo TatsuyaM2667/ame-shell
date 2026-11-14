@@ -43,6 +43,15 @@
 Zig の道具は `zig build`、Odin の道具は `sh build.sh` と `odin test .`、Wayland の道具はプロトコルの XML を持ち、ビルドで wayland-scanner を通す。
 正本はこの ame-shell(全部入り)で、切り出したものは `sh scripts/split-repos.sh` が生成して同期する(道具を直したら実行し直す)。
 
+## ame のアプリ(別のリポジトリ)
+| アプリ | すること | 使われるところ |
+|---|---|---|
+| [ame-filemanager](https://github.com/TatsuyaM2667/ame-Filemanager) | ファイルマネージャ(Odin) | Super+E・フォルダを開く既定のアプリ |
+| [kuraokami](https://github.com/TatsuyaM2667/kuraokami) | 端末(Odin + SDL3) | Super+Return の `ame-terminal` |
+| [seoritsu](https://github.com/TatsuyaM2667/seoritsu) | コードエディタ(Odin) | 文字のファイルを開く既定のアプリ |
+
+`install.sh` が `scripts/install-apps.sh` で GitHub から取ってきてビルドし、`~/.local` に入れる(自分で入れたものは上書きしない)。
+
 ## ソースの置き場
 ```
 src/

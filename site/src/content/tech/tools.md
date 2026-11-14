@@ -123,6 +123,18 @@ Zed などのアプリは、API キーを `org.freedesktop.secrets`(Secret Servi
 - やりとりは平文のセッション(`plain`)だけです。同じユーザーのプロセスからしか D-Bus のセッションバスに入れないので、それで足ります。
 - gnome-keyring を入れずに済み、ame-shell 以外への依存が増えません。
 
+## ame のアプリ {#apps}
+
+小さな道具とは別に、画面を持つアプリも ame のエコシステムに入っています。どれも Odin で書かれ、ツールキットを使わずに描く半透明のアプリです。ame-shell の `install.sh` が `scripts/install-apps.sh` で GitHub から取ってきてビルドし、`~/.local` に入れます。
+
+| アプリ | 種類 | 描き方 | 使われるところ |
+|---|---|---|---|
+| [ame-filemanager](https://github.com/TatsuyaM2667/ame-Filemanager) | ファイルマネージャ | Wayland に直接、ソフトウェアで描く | Super+E・フォルダを開く既定のアプリ |
+| [kuraokami](https://github.com/TatsuyaM2667/kuraokami) | 端末 | SDL3 + OpenGL 3.3 | Super+Return(`ame-terminal`) |
+| [seoritsu](https://github.com/TatsuyaM2667/seoritsu) | コードエディタ | Wayland に直接、ソフトウェアで描く(tree-sitter の部分だけ Zig) | 文字のファイルを開く既定のアプリ |
+
+これで GTK のアプリ(Thunar)と、ビルドに GTK4・libadwaita を要する端末(ghostty)を入れずに済むようになりました。自分で入れたものは上書きしないので、開発中の版もそのまま使えます。
+
 ## 単独のリポジトリにも {#split}
 
 道具は、どれも単独でビルドできるリポジトリにも切り出してあります。正本は ame-shell(全部入り)で、`sh scripts/split-repos.sh` が、道具が使う部品だけを集めて各リポジトリを生成・同期します。

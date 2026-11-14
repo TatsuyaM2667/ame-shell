@@ -16,6 +16,7 @@
 | クリップボード: ame-copy / ame-paste(同梱。ext-data-control。wl-copy / wl-paste の代わり。River 0.3 のスクショのコピーだけは wl-copy) | 任意 | あり |
 | 録画: ame-rec(同梱。画面は ext-image-copy-capture で自分で撮り、動画にするのは ffmpeg(VAAPI、無ければ libx264)。wf-recorder の代わり。River 0.5 から) | 任意 | あり |
 | ロック: ame-shell の中のロック画面(ext-session-lock + PAM。FreeBSD は setuid の ame-auth)と、単体の ame-iwato(同梱。swaylock の代わり。ame-shell が落ちてロックが残ったときにも) | 任意 | あり |
+| ame のアプリ(scripts/install-apps.sh が ~/.local に入れる): ame-filemanager(bsdtar = libarchive-progs)・kuraokami(SDL3・fontconfig・FreeType)・seoritsu(tree-sitter の部分に Zig 0.17)。Thunar・ghostty は既定では入れない | 任意 | あり |
 | 再生中の曲(MPRIS を D-Bus で直接。playerctl は使わない)/ 通信: ame-yatagarasu(同梱。curl の代わり。HTTP/1.1 は自前、暗号は OpenSSL の libssl。アート・歌詞・天気・AI) | 任意 | あり |
 | libpulse-simple(ame-hamon が実行時に読む。スペクトラムの録音。cava は使わない) | 任意 | あり |
 | 明るさ: amaterasu(同梱。sysfs、書けなければ logind の SetBrightness。brightnessctl は使わない) / 電源プロファイル: ame-tajikara(同梱。power-profiles-daemon に D-Bus で直接。powerprofilesctl は使わない) | 任意 | あり |
