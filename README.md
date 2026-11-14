@@ -54,7 +54,7 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
 ### そのほか
 - 通知サーバ内蔵(`org.freedesktop.Notifications`。他のデーモンが動いていれば譲る)。送り主の画像(Discord なら相手のアイコン)を丸く出し、右下にアプリのアイコン。**押すとそのアプリの窓があるワークスペースへ移る**(ロック画面では解除したあとに)
   - 電池の残量が少ないとき、充電器の抜き差し(満充電まであと何分・何時ごろ)、USB 機器・USB メモリ・SD カードの抜き差し(名前・容量・ラベル)も通知
-- **録画**(ユーティリティの録画ボタン): 自前の `ame-emaki`(絵巻)で `~/Videos` に保存。**PC で鳴っている音も一緒に**録る。画面は ext-image-copy-capture で変わったときだけ撮り、動画にするのは ffmpeg(GPU の VAAPI、使えなければ CPU)。River 0.5 のセッションで使える
+- **録画**(ユーティリティの録画ボタン): 自前の `ame-rec` で `~/Videos` に保存。**PC で鳴っている音も一緒に**録る。画面は ext-image-copy-capture で変わったときだけ撮り、動画にするのは ffmpeg(GPU の VAAPI、使えなければ CPU)。River 0.5 のセッションで使える
 - **スクリーンショット**: grim / slurp / wl-copy を使わず ame-shell が自分で撮る(ext-image-copy-capture、PNG は自前のエンコーダ、クリップボードは ext-data-control)
 - **明るさ・音量・電源プロファイルを覚える**: 最後に変えた明るさ(`amaterasu`)・音量と消音(`ame-uzume`)・電源プロファイル(`ame-tajikara`)を、ログインのたびに戻す(カーネルは再起動のたびに明るさをファームウェアの値に戻し、音量は出力の機器ごとに別になるため)
 - **スリープのあとに AirPods をつなぎ直す**: スリープの前につながっていたイヤホン・スピーカーを、戻るとすぐつなぎ直して音の出力先にも戻す(`airpods { reconnect-after-sleep off }` で止める)
@@ -360,10 +360,10 @@ ame-ctl watch                            (出来事を 1 行 1 つの JSON で�
 | `ame-uzume` | 音量を読む・変える・消音・見張る・覚えて戻す(Odin) | wpctl・`pactl subscribe` | 天宇受売命 |
 | `ame-hamon` | 今鳴っている音のスペクトラムを 1 行ずつ流す(Odin) | cava | 波紋 |
 | `ame-yatagarasu` | URL の中身を取ってくる(curl と同じオプション。暗号は OpenSSL) | curl | 八咫烏 |
-| `ame-emaki` | 画面を動画に録る(変換は ffmpeg) | wf-recorder | 絵巻 |
+| `ame-rec` | 画面を動画に録る(変換は ffmpeg) | wf-recorder | |
 | `ame-iwato` | 画面をロックする(単体。ame-shell が落ちてロックが残ったときにも) | swaylock | 天岩戸 |
 | `ame-copy` / `ame-paste` | クリップボードに入れる・出す | wl-copy・wl-paste | |
-| `ame-kuraokami` | 今の天気 | | 闇龗神(雨の龍神) |
+| `ame-weather` | 今の天気 | | |
 | `ame-lyrics` | 曲の同期歌詞(LRC)を探す | | |
 | `ame-ai` / `ame-agent` | AI と話す / コーディング CLI の出力を共通の JSON の行に | | |
 | `ame-keyring` | 鍵束(`org.freedesktop.secrets`) | gnome-keyring | |
@@ -377,10 +377,10 @@ ame-uzume set 40; ame-uzume mute                          # 音量 40%・消音�
 ame-tajikara set balanced                                 # 電源プロファイル(power-saver / balanced / performance)
 ame-hamon -b 32 | head -3                                 # 棒 32 本のスペクトラム(cava の raw ascii と同じ形)
 ame-yatagarasu -sSfL -o page.html https://example.com     # 取ってくる(-w '%{http_code}'・-K - なども curl と同じ)
-ame-emaki -f ~/Videos/a.mp4                               # 録画(Ctrl+C で保存して終わる。--no-audio・--cpu)
+ame-rec -f ~/Videos/a.mp4                               # 録画(Ctrl+C で保存して終わる。--no-audio・--cpu)
 ame-iwato -f                                              # 画面をロック(-f でロックできたらすぐ戻る)
 echo hi | ame-copy; ame-paste                              # クリップボード(-t image/png、ame-paste -l で種類の一覧)
-ame-kuraokami Sapporo                                     # 今の天気(--json で JSON)
+ame-weather Sapporo                                     # 今の天気(--json で JSON)
 ame-lyrics 'YOASOBI' 'アイドル' > idol.lrc               # 歌詞を探す(0 見つかった / 1 無い / 2 一時的な失敗)
 echo 'Zig の comptime を一言で' | ame-ai -p anthropic       # AI に聞く(会社とモデルは省くとチャットで最後に選んだもの)
 echo 'これは何?' | ame-ai -i photo.png                      # 画像を付けて聞く(-i は何枚でも、8 枚まで)
@@ -394,9 +394,9 @@ ame-keyring list                                          # 鍵束にしまっ�
 ame-ctl watch | jq -r 'select(.event=="workspace").workspace'   # 出来事を流し続ける(自分のバーやスクリプトから)
 ```
 
-古い名前(ame-light・ame-power・ame-weather・ame-vol・ame-spectrum)は、しばらく新しい名前へのリンクとして入ります。
+古い名前(ame-light・ame-power・ame-vol・ame-spectrum・ame-kuraokami・ame-emaki)は、しばらく新しい名前へのリンクとして入ります。
 道具はそれぞれ単独でビルドできるリポジトリにもなっています(`scripts/split-repos.sh` が ame-shell から生成。正本は ame-shell):
-[amaterasu](https://github.com/TatsuyaM2667/amaterasu)・[ame-tajikara](https://github.com/TatsuyaM2667/ame-tajikara)・[ame-uzume](https://github.com/TatsuyaM2667/ame-uzume)・[ame-hamon](https://github.com/TatsuyaM2667/ame-hamon)・[ame-yatagarasu](https://github.com/TatsuyaM2667/ame-yatagarasu)・[ame-emaki](https://github.com/TatsuyaM2667/ame-emaki)・[ame-iwato](https://github.com/TatsuyaM2667/ame-iwato)・[ame-clip](https://github.com/TatsuyaM2667/ame-clip)・[ame-kuraokami](https://github.com/TatsuyaM2667/ame-kuraokami)・[ame-lyrics](https://github.com/TatsuyaM2667/ame-lyrics)・[ame-ai](https://github.com/TatsuyaM2667/ame-ai)・[ame-agent](https://github.com/TatsuyaM2667/ame-agent)・[ame-keyring](https://github.com/TatsuyaM2667/ame-keyring)・[ame-airpods](https://github.com/TatsuyaM2667/ame-airpods)・[ame-handtrack](https://github.com/TatsuyaM2667/ame-handtrack)・[ame-config](https://github.com/TatsuyaM2667/ame-config)。
+[amaterasu](https://github.com/TatsuyaM2667/amaterasu)・[ame-tajikara](https://github.com/TatsuyaM2667/ame-tajikara)・[ame-uzume](https://github.com/TatsuyaM2667/ame-uzume)・[ame-hamon](https://github.com/TatsuyaM2667/ame-hamon)・[ame-yatagarasu](https://github.com/TatsuyaM2667/ame-yatagarasu)・[ame-rec](https://github.com/TatsuyaM2667/ame-rec)・[ame-iwato](https://github.com/TatsuyaM2667/ame-iwato)・[ame-clip](https://github.com/TatsuyaM2667/ame-clip)・[ame-weather](https://github.com/TatsuyaM2667/ame-weather)・[ame-lyrics](https://github.com/TatsuyaM2667/ame-lyrics)・[ame-ai](https://github.com/TatsuyaM2667/ame-ai)・[ame-agent](https://github.com/TatsuyaM2667/ame-agent)・[ame-keyring](https://github.com/TatsuyaM2667/ame-keyring)・[ame-airpods](https://github.com/TatsuyaM2667/ame-airpods)・[ame-handtrack](https://github.com/TatsuyaM2667/ame-handtrack)・[ame-config](https://github.com/TatsuyaM2667/ame-config)。
 手の認識の [ame-senju](https://github.com/TatsuyaM2667/ame-senju)(千手観音)と顔認証の [ame-kagami](https://github.com/TatsuyaM2667/ame-kagami)(八咫鏡)も別のリポジトリです。
 
 構成とソースの置き場は `docs/architecture.md` にあります。

@@ -1,7 +1,6 @@
-// ame-emaki: 画面を動画に録る(wf-recorder の代わり)。
-// 名前は動く場面を巻物に残す絵巻(えまき)から。
+// ame-rec: 画面を動画に録る(wf-recorder の代わり)。
 //
-//   ame-emaki -f 保存先.mp4 [-o 出力の名前] [-r 1 秒のコマ数] [--no-audio] [--cpu]
+//   ame-rec -f 保存先.mp4 [-o 出力の名前] [-r 1 秒のコマ数] [--no-audio] [--cpu]
 //
 // 撮るのは自分(ext-image-copy-capture-v1。画面が変わったときだけ 1 コマ)、動画にするのは ffmpeg(標準入力に生の画素を流す)。
 // 音は既定の出力で鳴っている音(PulseAudio の口の @DEFAULT_MONITOR@)。
@@ -32,12 +31,12 @@ fn pixFmt(fmt: u32) ?[:0]const u8 {
 }
 
 fn die(comptime msg: []const u8, args: anytype) noreturn {
-    std.io.getStdErr().writer().print("ame-emaki: " ++ msg ++ "\n", args) catch {};
+    std.io.getStdErr().writer().print("ame-rec: " ++ msg ++ "\n", args) catch {};
     std.process.exit(1);
 }
 
 fn usage() noreturn {
-    std.io.getStdErr().writeAll("使い方: ame-emaki -f 保存先.mp4 [-o 出力の名前] [-r 1 秒のコマ数] [--no-audio] [--cpu]\n") catch {};
+    std.io.getStdErr().writeAll("使い方: ame-rec -f 保存先.mp4 [-o 出力の名前] [-r 1 秒のコマ数] [--no-audio] [--cpu]\n") catch {};
     std.process.exit(2);
 }
 
@@ -114,7 +113,7 @@ fn sDone(_: ?*anyopaque, _: ?*c.struct_ext_image_copy_capture_session_v1) callco
     const fmt = cap.format orelse die("対応する画素の形式がありません", .{});
     if (cap.w == 0 or cap.h == 0) die("画面の大きさが分かりません", .{});
     const size: usize = @as(usize, cap.w) * cap.h * 4;
-    const fd = memfd_create("ame-emaki", 1);
+    const fd = memfd_create("ame-rec", 1);
     if (fd < 0) die("メモリを確保できません", .{});
     defer std.posix.close(fd);
     std.posix.ftruncate(fd, size) catch die("メモリを確保できません", .{});
@@ -296,7 +295,7 @@ pub fn main() u8 {
                 // 最初のコマで ffmpeg が終わった = GPU の変換が使えない。CPU でやり直す
                 _ = ch.wait() catch {};
                 if (gpu and frames == 0) {
-                    std.io.getStdErr().writeAll("ame-emaki: GPU(VAAPI)で変換できないので CPU で録ります\n") catch {};
+                    std.io.getStdErr().writeAll("ame-rec: GPU(VAAPI)で変換できないので CPU で録ります\n") catch {};
                     gpu = false;
                     continue :attempt;
                 }

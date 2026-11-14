@@ -82,11 +82,11 @@ Chimera Linux x86_64 / musl / dinit / AMD Ryzen 7 7735HS (16 スレッド) / Rad
 - `Debug` 以外はバイナリを strip(ame-shell 626KB, ame-ctl 14KB)。
 
 ## 外部の道具を ame の小さな道具に(2026-11)
-- 決定: brightnessctl・powerprofilesctl・wpctl / `pactl subscribe`・cava・curl・wf-recorder・swaylock・wl-copy / wl-paste を、1 つのことをする自前の道具に置き換えた(amaterasu・ame-tajikara・ame-uzume・ame-hamon・ame-yatagarasu・ame-emaki・ame-iwato・ame-copy / ame-paste)。それぞれ単独のリポジトリにもする(`scripts/split-repos.sh`)。
+- 決定: brightnessctl・powerprofilesctl・wpctl / `pactl subscribe`・cava・curl・wf-recorder・swaylock・wl-copy / wl-paste を、1 つのことをする自前の道具に置き換えた(amaterasu・ame-tajikara・ame-uzume・ame-hamon・ame-yatagarasu・ame-rec・ame-iwato・ame-copy / ame-paste)。それぞれ単独のリポジトリにもする(`scripts/split-repos.sh`)。
 - 理由: 道具をそろえて、入れるパッケージを減らし、同じ書き方(1 行の文字・終了コード)で端末からも使えるようにする。ame-shell は名前を変えて呼ぶだけで済む形を選んだ(呼ぶ側を作り直さない)。
 - 言語: 数値と音の処理は Odin(ame-uzume・ame-hamon。FFT は anim/fft.odin を共有)、D-Bus・Wayland・OpenSSL につなぐものは Zig(生成した Wayland のヘッダと libdbus の包みが既にある)。
 - 明るさ(amaterasu): /sys に書ければそこへ、書けなければ logind の Session.SetBrightness。却下: setuid の補助(root で動くものを増やさない)、udev の規則で video グループに書かせる(/etc を書き換える)。
 - 通信(ame-yatagarasu): HTTP/1.1 は自前、TLS と証明書の確認は OpenSSL。却下: Zig 0.13 の std.http(TLS 1.3 しか話せず、1.2 だけのサイトに届かない)、TLS を自分で書く(暗号は自作しない)。curl と同じオプション・終了コードを読むので、呼ぶ側は名前を変えるだけ。
-- 録画(ame-emaki): 画面は ext-image-copy-capture で変わったときだけ撮り、生の画素を ffmpeg に流す(VAAPI、無ければ libx264)。時刻は `-fps_mode passthrough`(vfr だと 25 コマ/秒に並べ直されて短くなる)、止まった画面は 1 秒ごとに同じコマ、終わりは SIGINT で ffmpeg に仕上げさせる(音の入力は自分では終わらない。`-shortest` は音に合わせて動画を切ってしまった)。却下: H.264 のエンコーダを自作(量が大きく、GPU を使えない)、libavcodec に直接つなぐ(ffmpeg のコマンドで足りる)。
+- 録画(ame-rec): 画面は ext-image-copy-capture で変わったときだけ撮り、生の画素を ffmpeg に流す(VAAPI、無ければ libx264)。時刻は `-fps_mode passthrough`(vfr だと 25 コマ/秒に並べ直されて短くなる)、止まった画面は 1 秒ごとに同じコマ、終わりは SIGINT で ffmpeg に仕上げさせる(音の入力は自分では終わらない。`-shortest` は音に合わせて動画を切ってしまった)。却下: H.264 のエンコーダを自作(量が大きく、GPU を使えない)、libavcodec に直接つなぐ(ffmpeg のコマンドで足りる)。
 - ロック(ame-iwato): ame-shell の中のロック画面(顔認証・曲のカード)はそのまま残し、どのコンポジタでも動く単体のものを別に作った。ame-shell が落ちてロックが残ったときに外す道具にもなる。却下: 中のロック画面を切り出す(描画・顔認証・曲のカードが ame-shell の多くに依存)。FreeBSD で swaylock に任せていたところは、ame-auth を入れるよう知らせる形にした。
 - 名前: 日本の神話と古い言葉から(ame は「雨」と「天」)。古い名前はしばらくリンクとして入れる。

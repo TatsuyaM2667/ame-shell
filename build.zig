@@ -173,13 +173,13 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(clip);
     b.getInstallStep().dependOn(&b.addInstallBinFile(clip.getEmittedBin(), "ame-paste").step);
 
-    // --- 録画(ame-emaki。画面を撮って ffmpeg に渡す。src/cmd/ame-emaki.zig)---
-    const emaki = b.addExecutable(.{ .name = "ame-emaki", .root_source_file = b.path("src/cmd/ame-emaki.zig"), .target = target, .optimize = optimize, .strip = strip });
-    emaki.linkLibC();
-    emaki.addIncludePath(gen.getDirectory());
-    for (proto_c.items) |c_file| emaki.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
-    emaki.linkSystemLibrary("wayland-client");
-    b.installArtifact(emaki);
+    // --- 録画(ame-rec。画面を撮って ffmpeg に渡す。src/cmd/ame-rec.zig)---
+    const rec = b.addExecutable(.{ .name = "ame-rec", .root_source_file = b.path("src/cmd/ame-rec.zig"), .target = target, .optimize = optimize, .strip = strip });
+    rec.linkLibC();
+    rec.addIncludePath(gen.getDirectory());
+    for (proto_c.items) |c_file| rec.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
+    rec.linkSystemLibrary("wayland-client");
+    b.installArtifact(rec);
 
     // --- ロック(ame-iwato。単体のロック画面。src/cmd/ame-iwato.zig)---
     const iwato = b.addExecutable(.{ .name = "ame-iwato", .root_source_file = b.path("src/cmd/ame-iwato.zig"), .target = target, .optimize = optimize, .strip = strip });
@@ -206,7 +206,7 @@ pub fn build(b: *std.Build) void {
     }
     b.installArtifact(ctl);
 
-    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai", "ame-agent", "ame-config", "ame-kuraokami", "ame-airpods", "ame-handtrack", "ame-keyring", "amaterasu", "ame-tajikara", "ame-yatagarasu" };
+    const cmds = [_][]const u8{ "ame-lyrics", "ame-ai", "ame-agent", "ame-config", "ame-weather", "ame-airpods", "ame-handtrack", "ame-keyring", "amaterasu", "ame-tajikara", "ame-yatagarasu" };
     // --- 画面を持たない小さな道具(標準入出力でやりとりする。src/cmd/。libc だけ)---
     for (cmds) |name| {
         const t = b.addExecutable(.{
@@ -378,12 +378,12 @@ pub fn build(b: *std.Build) void {
     for (proto_c.items) |c_file| clip_t.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
     clip_t.linkSystemLibrary("wayland-client");
     test_step.dependOn(&b.addRunArtifact(clip_t).step);
-    const emaki_t = b.addTest(.{ .root_source_file = b.path("src/cmd/ame-emaki.zig"), .target = target, .optimize = optimize });
-    emaki_t.linkLibC();
-    emaki_t.addIncludePath(gen.getDirectory());
-    for (proto_c.items) |c_file| emaki_t.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
-    emaki_t.linkSystemLibrary("wayland-client");
-    test_step.dependOn(&b.addRunArtifact(emaki_t).step);
+    const rec_t = b.addTest(.{ .root_source_file = b.path("src/cmd/ame-rec.zig"), .target = target, .optimize = optimize });
+    rec_t.linkLibC();
+    rec_t.addIncludePath(gen.getDirectory());
+    for (proto_c.items) |c_file| rec_t.addCSourceFile(.{ .file = c_file, .flags = &.{"-std=c11"} });
+    rec_t.linkSystemLibrary("wayland-client");
+    test_step.dependOn(&b.addRunArtifact(rec_t).step);
     const iwato_t = b.addTest(.{ .root_source_file = b.path("src/cmd/ame-iwato.zig"), .target = target, .optimize = optimize });
     iwato_t.linkLibC();
     iwato_t.addIncludePath(gen.getDirectory());

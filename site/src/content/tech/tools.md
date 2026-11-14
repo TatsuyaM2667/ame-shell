@@ -7,7 +7,7 @@ ame-shell は「画面を描く 1 つのプロセス」と「画面の要らな�
 :::easy このページを読む前に
 Unix には「1 つのことをうまくやる小さな道具を、パイプ(`|`)でつないで使う」という考え方があります。`ls | grep zig` のように、ある道具の出力を別の道具の入力にできるのは、どの道具も「文字」でやりとりしているからです。
 
-ame-shell の歌詞さがし・AI との会話・天気・鍵束・明るさ・音量・録画・ロックなども、そういう小さな道具になっています。だから ame-shell が無くても、端末で `ame-kuraokami Tokyo` と打てば天気が出ますし、`amaterasu set +5` で画面が明るくなります。
+ame-shell の歌詞さがし・AI との会話・天気・鍵束・明るさ・音量・録画・ロックなども、そういう小さな道具になっています。だから ame-shell が無くても、端末で `ame-weather Tokyo` と打てば天気が出ますし、`amaterasu set +5` で画面が明るくなります。
 
 名前の多くは日本の神話から取りました。ame は「雨」と「天(あめ)」の両方で、神話の神には「天之(あめの)〜」で始まる名前が多いからです。
 :::
@@ -29,7 +29,7 @@ ame-shell の歌詞さがし・AI との会話・天気・鍵束・明るさ・�
 | `CLI の出力 \| ame-agent [-f 形式]` | Claude Code・Gemini・Codex・OpenCode・Kimi・Antigravity の出力を共通の出来事に | JSON の行 → 出来事の JSON の行 |
 | `ame-agent sessions [フォルダ]` / `history フォルダ id` | Claude Code の会話の一覧・記録 | → JSON の行 |
 | `ame-config check [ファイル]` / `path` | 設定ファイルの文法と値を確かめる・場所を出す | → 「ファイル:行: 内容」。終了コード 0 / 1 警告 / 2 読めない |
-| `ame-kuraokami [--json] [場所]` | 今の天気(wttr.in) | → 「12°C 晴れ(場所)」/ JSON。終了コード 0 / 1 分からない / 2 つながらない |
+| `ame-weather [--json] [場所]` | 今の天気(wttr.in) | → 「12°C 晴れ(場所)」/ JSON。終了コード 0 / 1 分からない / 2 つながらない |
 | `ame-airpods head` / `battery` / `find` | AirPods の頭の動き・電池・接続中のもの(AAP、Linux) | → 1 行 1 つの JSON(head は止めるまで流し続ける) |
 | `ame-handtrack [-d カメラ]` | カメラに映った手の形と位置・関節 21 点 | → 1 行 1 つの JSON(止めるまで流し続ける) |
 | `ame-keyring` / `ame-keyring list` | 鍵束(`org.freedesktop.secrets`)。Zed などが API キーをしまう(gnome-keyring の代わり) | D-Bus の Secret Service / 一覧 |
@@ -38,7 +38,7 @@ ame-shell の歌詞さがし・AI との会話・天気・鍵束・明るさ・�
 | `ame-uzume` / `set N`(`+N`・`-N`)/ `mute` / `restore` / `watch` | 音量と消音(Odin)。覚えて戻す(wpctl・`pactl subscribe` の代わり) | → 「45」/「45 muted」。watch は変わるたびに 1 行 |
 | `ame-hamon [-b 本数]` | 今鳴っている音のスペクトラム(Odin。cava の代わり) | → 棒の高さ 0〜1000 を ';' でつないだ行 |
 | `ame-yatagarasu [curl と同じ] URL` | URL の中身を取ってくる(curl の代わり) | → 中身。終了コードも curl と同じ |
-| `ame-emaki -f 保存先` | 画面を動画に録る(wf-recorder の代わり) | SIGINT で保存して終わる |
+| `ame-rec -f 保存先` | 画面を動画に録る(wf-recorder の代わり) | SIGINT で保存して終わる |
 | `ame-iwato [-f]` | 画面をロックする(swaylock の代わり) | 正しいパスワードで 0 |
 | `ame-copy` / `ame-paste [-l]` | クリップボードに入れる・出す(wl-copy・wl-paste の代わり) | 標準入力 → クリップボード → 標準出力 |
 | `ame-ctl …` | 動いている ame-shell を操作する(`ame-ctl help`) | 引数 → 結果の文字 |
@@ -54,13 +54,13 @@ ame-config check || echo "設定に間違いがあります"
 amaterasu set +5; ame-uzume set 40                           # 明るさを 5% 上げ、音量を 40% に
 ame-uzume watch | while read v; do echo "音量: $v"; done        # 音量が変わるたびに 1 行
 ame-yatagarasu -sSf -w '\n%{http_code}' https://wttr.in/?format=3
-ame-emaki -f ~/Videos/a.mp4                                     # Ctrl+C で保存して終わる
+ame-rec -f ~/Videos/a.mp4                                     # Ctrl+C で保存して終わる
 echo hi | ame-copy; ame-paste
 ```
 
 ## 終了コードで答える {#exit}
 
-小さな道具は、結果の「種類」を終了コードで返します。例えば `ame-kuraokami` は、0 = 取れた、1 = 場所が分からない、2 = つながらない。ame-shell はこれを見て、「場所の名前を見直して」と「ネットにつながっていません」を出し分けます。シェルスクリプトからも `if ame-kuraokami …; then` で同じ判断ができます。
+小さな道具は、結果の「種類」を終了コードで返します。例えば `ame-weather` は、0 = 取れた、1 = 場所が分からない、2 = つながらない。ame-shell はこれを見て、「場所の名前を見直して」と「ネットにつながっていません」を出し分けます。シェルスクリプトからも `if ame-weather …; then` で同じ判断ができます。
 
 ## 名前の由来 {#names}
 
@@ -71,13 +71,11 @@ echo hi | ame-copy; ame-paste
 | 音量 | ame-uzume | 天岩戸の前で舞い、音を鳴らした芸能の神、天宇受売命(あめのうずめ) |
 | スペクトラム | ame-hamon | 雨粒が水面に広げる波紋 |
 | 通信 | ame-yatagarasu | 遠くへ道案内をし、ものを運ぶ八咫烏(やたがらす) |
-| 録画 | ame-emaki | 動く場面を巻物に残す絵巻 |
 | ロック | ame-iwato | 天照大神がこもって世界を閉ざした天岩戸 |
-| 天気 | ame-kuraokami | 雨を司る龍神、闇龗神(くらおかみ) |
 | 手の認識(別のリポジトリ) | ame-senju | 千の手を持つ千手観音 |
 | 顔認証(別のリポジトリ) | ame-kagami | 顔を映す八咫鏡(三種の神器) |
 
-天照・宇受売・手力男は、どれも天岩戸の話に出てきます。古い名前(ame-light・ame-power・ame-weather・ame-vol・ame-spectrum)は、しばらく新しい名前へのリンクとして入ります。
+天照・宇受売・手力男は、どれも天岩戸の話に出てきます。古い名前(ame-light・ame-power・ame-vol・ame-spectrum・ame-kuraokami・ame-emaki)は、しばらく新しい名前へのリンクとして入ります。
 
 ## 明るさ・音量・電源を覚えて戻す {#restore}
 
@@ -99,7 +97,7 @@ HTTP/1.1(chunked・転送・`-w '%{http_code}'`・`-K -` の設定・`-G` / `--d
 
 Zig 0.13 の標準の HTTP は TLS 1.3 しか話せないので使っていません。暗号は自作しません。
 
-## 録画(ame-emaki) {#rec}
+## 録画(ame-rec) {#rec}
 
 画面は ext-image-copy-capture で**変わったときだけ** 1 コマ撮り、生の画素を ffmpeg の標準入力に流します。変換は GPU(VAAPI の H.264)を先に試し、使えなければ CPU(libx264)。音は `@DEFAULT_MONITOR@`。
 
@@ -129,9 +127,9 @@ Zed などのアプリは、API キーを `org.freedesktop.secrets`(Secret Servi
 
 道具は、どれも単独でビルドできるリポジトリにも切り出してあります。正本は ame-shell(全部入り)で、`sh scripts/split-repos.sh` が、道具が使う部品だけを集めて各リポジトリを生成・同期します。
 
-- Zig の道具(`zig build`): [amaterasu](https://github.com/TatsuyaM2667/amaterasu)・[ame-tajikara](https://github.com/TatsuyaM2667/ame-tajikara)・[ame-yatagarasu](https://github.com/TatsuyaM2667/ame-yatagarasu)・[ame-lyrics](https://github.com/TatsuyaM2667/ame-lyrics)・[ame-ai](https://github.com/TatsuyaM2667/ame-ai)・[ame-agent](https://github.com/TatsuyaM2667/ame-agent)・[ame-config](https://github.com/TatsuyaM2667/ame-config)・[ame-kuraokami](https://github.com/TatsuyaM2667/ame-kuraokami)・[ame-airpods](https://github.com/TatsuyaM2667/ame-airpods)・[ame-handtrack](https://github.com/TatsuyaM2667/ame-handtrack)・[ame-keyring](https://github.com/TatsuyaM2667/ame-keyring)
+- Zig の道具(`zig build`): [amaterasu](https://github.com/TatsuyaM2667/amaterasu)・[ame-tajikara](https://github.com/TatsuyaM2667/ame-tajikara)・[ame-yatagarasu](https://github.com/TatsuyaM2667/ame-yatagarasu)・[ame-lyrics](https://github.com/TatsuyaM2667/ame-lyrics)・[ame-ai](https://github.com/TatsuyaM2667/ame-ai)・[ame-agent](https://github.com/TatsuyaM2667/ame-agent)・[ame-config](https://github.com/TatsuyaM2667/ame-config)・[ame-weather](https://github.com/TatsuyaM2667/ame-weather)・[ame-airpods](https://github.com/TatsuyaM2667/ame-airpods)・[ame-handtrack](https://github.com/TatsuyaM2667/ame-handtrack)・[ame-keyring](https://github.com/TatsuyaM2667/ame-keyring)
 - Odin の道具(`sh build.sh`・`odin test .`): [ame-uzume](https://github.com/TatsuyaM2667/ame-uzume)・[ame-hamon](https://github.com/TatsuyaM2667/ame-hamon)
-- Wayland の道具(プロトコルの XML を持ち、ビルドで wayland-scanner を通す): [ame-emaki](https://github.com/TatsuyaM2667/ame-emaki)・[ame-iwato](https://github.com/TatsuyaM2667/ame-iwato)・[ame-clip](https://github.com/TatsuyaM2667/ame-clip)
+- Wayland の道具(プロトコルの XML を持ち、ビルドで wayland-scanner を通す): [ame-rec](https://github.com/TatsuyaM2667/ame-rec)・[ame-iwato](https://github.com/TatsuyaM2667/ame-iwato)・[ame-clip](https://github.com/TatsuyaM2667/ame-clip)
 - 推論(ame-shell が依存として取ってくる): [ame-senju](https://github.com/TatsuyaM2667/ame-senju)(手)・[ame-kagami](https://github.com/TatsuyaM2667/ame-kagami)(顔)
 
 新しい機能を足すときは、画面が要らない部分をまず `src/lib/` に純粋な関数として書いて試験を付け、外から使える意味があれば `src/cmd/`(Zig)か `odin/<名前>/`(Odin)にコマンドを足します(`build.zig` の `cmds` / `odin_cmds`、`session/install-session.sh`、`scripts/split-repos.sh` にも名前を足す)。

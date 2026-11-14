@@ -1,6 +1,6 @@
 // 枠 UI(caelestia 風)が使う追加のデータ源。全て「必要な間だけ」動かす:
 //  * GPU/CPU 温度・GPU 使用率・ストレージ … ダッシュボードが開いている間の 1 秒ティックで読む
-//  * 天気 … wttr.in を ame-kuraokami(ame-yatagarasu)で非同期取得(30 分キャッシュ)。完了は pipe の EOF で知る
+//  * 天気 … wttr.in を ame-weather(ame-yatagarasu)で非同期取得(30 分キャッシュ)。完了は pipe の EOF で知る
 //  * 音声スペクトラム … メディアタブ・ロック画面で曲が流れている間だけ、録音して FFT(cava は使わない)
 //  * 電源プロファイル … ame-tajikara(src/cmd)(ユーティリティを開いたとき)
 const std = @import("std");
@@ -144,7 +144,7 @@ pub const Weather = struct {
     on_update: ?*const fn (ctx: *anyopaque) void = null,
     ctx: *anyopaque = undefined,
 
-    /// 30 分以上経っていれば取り直す(ダッシュボードを開いたときに呼ぶ)。取るのは ame-kuraokami(src/cmd/ame-kuraokami.zig)
+    /// 30 分以上経っていれば取り直す(ダッシュボードを開いたときに呼ぶ)。取るのは ame-weather(src/cmd/ame-weather.zig)
     pub fn refresh(self: *Weather) void {
         if (self.fd >= 0) return;
         if (self.fetched_ms != 0 and loop.nowMs() - self.fetched_ms < 30 * 60 * 1000) return;
@@ -152,7 +152,7 @@ pub const Weather = struct {
         // 場所は shell { weather-location "Sapporo" }。無ければ IP アドレスから推定
         var lb: [128]u8 = undefined;
         const loc = std.fmt.bufPrintZ(&lb, "{s}", .{self.app.cfg.weather_location.get()}) catch return;
-        const fd = sys.spawnReader(&.{ "ame-kuraokami", "--json", loc.ptr }, &self.pid) orelse return;
+        const fd = sys.spawnReader(&.{ "ame-weather", "--json", loc.ptr }, &self.pid) orelse return;
         self.fd = fd;
         self.app.loop.add(fd, c.EPOLLIN | c.EPOLLHUP, self, onRead) catch {
             _ = c.close(fd);

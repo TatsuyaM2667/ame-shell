@@ -1,8 +1,7 @@
-// ame-kuraokami: 今の天気を wttr.in から取ってくる。
-// 名前は雨を司る龍神、闇龗神(くらおかみ)から。
+// ame-weather: 今の天気を wttr.in から取ってくる。
 //
-//   ame-kuraokami [-l 言葉] [場所]          「12°C 晴れ(Sapporo, Japan)」の 1 行
-//   ame-kuraokami --json [-l 言葉] [場所]   {"temp","condition","symbol","icon","place"} の 1 行
+//   ame-weather [-l 言葉] [場所]          「12°C 晴れ(Sapporo, Japan)」の 1 行
+//   ame-weather --json [-l 言葉] [場所]   {"temp","condition","symbol","icon","place"} の 1 行
 //
 // 場所を省くと IP アドレスから推定。言葉は既定 ja(wttr.in の lang)。icon は Nerd Font の天気のアイコン(夜は月)。
 // 終了コード: 0 取れた / 1 場所が分からない・返事の形が違う / 2 つながらない(ame-yatagarasu が要る)
@@ -10,7 +9,7 @@ const std = @import("std");
 const weather = @import("ame_lib").weather;
 
 fn usage() noreturn {
-    std.io.getStdErr().writeAll("使い方: ame-kuraokami [--json] [-l 言葉] [場所]\n") catch {};
+    std.io.getStdErr().writeAll("使い方: ame-weather [--json] [-l 言葉] [場所]\n") catch {};
     std.process.exit(2);
 }
 
@@ -49,15 +48,15 @@ pub fn main() !void {
     var ub: [256]u8 = undefined;
     const u = weather.url(place, lang, &ub) orelse usage();
     const r = std.process.Child.run(.{ .allocator = a, .argv = &.{ "ame-yatagarasu", "-s", "--max-time", "8", u }, .max_output_bytes = 4096 }) catch {
-        std.io.getStdErr().writeAll("ame-kuraokami: ame-yatagarasu を起動できません\n") catch {};
+        std.io.getStdErr().writeAll("ame-weather: ame-yatagarasu を起動できません\n") catch {};
         std.process.exit(2);
     };
     if (r.term != .Exited or r.term.Exited != 0) {
-        std.io.getStdErr().writeAll("ame-kuraokami: wttr.in につながりません\n") catch {};
+        std.io.getStdErr().writeAll("ame-weather: wttr.in につながりません\n") catch {};
         std.process.exit(2);
     }
     const rep = weather.parse(r.stdout) orelse {
-        std.io.getStdErr().writer().print("ame-kuraokami: 天気が分かりません: {s}\n", .{std.mem.trim(u8, r.stdout, " \n")}) catch {};
+        std.io.getStdErr().writer().print("ame-weather: 天気が分かりません: {s}\n", .{std.mem.trim(u8, r.stdout, " \n")}) catch {};
         std.process.exit(1);
     };
     const w = std.io.getStdOut().writer();

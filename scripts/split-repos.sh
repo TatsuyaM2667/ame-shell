@@ -23,7 +23,7 @@ COMPONENTS='ame-lyrics|lrc|curl||曲の同期歌詞(LRC)を探す小さなコマ
 ame-ai|ai mcp|ame-yatagarasu||いろいろな会社の AI と標準入出力で話す小さなコマンド(MCP のツール呼び出しつき)
 ame-agent|agentfmt|||コーディング CLI(Claude Code・Gemini・Codex・OpenCode・Kimi)の出力を共通の JSON の行に直すフィルタ
 ame-config|config|||ame-shell の設定ファイル(config.ame)の文法と値を確かめる小さなコマンド
-ame-kuraokami|weather|ame-yatagarasu||今の天気を wttr.in から取ってくる小さなコマンド(文字 / JSON)
+ame-weather|weather|ame-yatagarasu||今の天気を wttr.in から取ってくる小さなコマンド(文字 / JSON)
 ame-airpods|aap|bluetoothctl||AirPods の頭の動き・電池を Bluetooth(AAP)で読む小さなコマンド(Linux)
 ame-handtrack||ame-yatagarasu|ame-hand|カメラに映った手の形と位置・関節 21 点を JSON の行で流し続ける小さなコマンド(Linux)
 ame-keyring|secretstore||dbus|鍵束(org.freedesktop.secrets)。アプリが API キー・パスワードをしまう Secret Service(gnome-keyring の代わり)
@@ -33,7 +33,7 @@ ame-uzume||libpulse||音量を読む・変える・消音・見張る小さな�
 ame-hamon|fft|libpulse-simple||今鳴っている音のスペクトラムを 1 行ずつ流す小さなコマンド(Odin。cava の代わり)
 ame-yatagarasu|||ssl|URL の中身を取ってくる小さなコマンド(curl の代わり。curl と同じオプションを読む。暗号は OpenSSL)
 ame-clip|ext-data-control-v1||wayland|Wayland のクリップボードに入れる・出す小さなコマンド ame-copy / ame-paste(wl-copy・wl-paste の代わり)
-ame-emaki|ext-foreign-toplevel-list-v1 ext-image-capture-source-v1 ext-image-copy-capture-v1|ffmpeg|wayland|画面を動画に録る小さなコマンド(wf-recorder の代わり。名前は絵巻から)
+ame-rec|ext-foreign-toplevel-list-v1 ext-image-capture-source-v1 ext-image-copy-capture-v1|ffmpeg|wayland|画面を動画に録る小さなコマンド(wf-recorder の代わり)
 ame-iwato|ext-session-lock-v1|libpam|wayland-xkb|画面をロックする小さなコマンド(swaylock の代わり。名前は天岩戸から)'
 
 REV=$(git -C "$ROOT" rev-parse --short HEAD)

@@ -138,7 +138,7 @@ APK_RIVER="wlroots0.20-devel libevdev-devel pixman-devel libinput-devel xwayland
 #   ログイン画面は greetd + ame-shell(ame-greeter)。SDDM は入れない(Chimera の sddm は既定のテーマ・コンポジタの
 #   ために KDE Plasma 一式を引き込む。SDDM を使うなら sddm-theme-none と sddm-default-weston も一緒に)
 #   (スクショ・録画・クリップボード・ロック・明るさ・音量・通信は ame の小さな道具が受け持つので grim / slurp / wl-clipboard / wf-recorder /
-#    swaylock / brightnessctl / curl は要らない。openssl3-devel は ame-yatagarasu(通信)のリンク用 / ffmpeg: 録画(ame-emaki)の変換 /
+#    swaylock / brightnessctl / curl は要らない。openssl3-devel は ame-yatagarasu(通信)のリンク用 / ffmpeg: 録画(ame-rec)の変換 /
 #    音の出力先の一覧と切り替え: libpulse-progs(pactl)/ 無線: util-linux-rfkill)
 APK_RUN="greetd greetd-dinit foot dbus mesa-dri polkit upower power-profiles-daemon pipewire wireplumber libpulse-progs mpv-libs ffmpeg
  util-linux-rfkill networkmanager bluez thunar tumbler xdg-utils
