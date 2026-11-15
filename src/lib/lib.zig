@@ -9,6 +9,7 @@ pub const config = @import("config.zig");
 pub const weather = @import("weather.zig");
 pub const aap = @import("aap.zig");
 pub const secretstore = @import("secretstore.zig");
+pub const paths = @import("paths.zig");
 
 test {
     _ = lrc;
@@ -20,4 +21,5 @@ test {
     _ = weather;
     _ = aap;
     _ = secretstore;
+    _ = paths;
 }

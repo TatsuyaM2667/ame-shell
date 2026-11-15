@@ -126,8 +126,7 @@ fn sessionByPid(bus: *sysbus.Bus, buf: *[128]u8) ?[*:0]const u8 {
 }
 
 fn statePath(buf: []u8) ?[]const u8 {
-    if (std.posix.getenv("XDG_STATE_HOME")) |x| if (x.len > 0) return std.fmt.bufPrint(buf, "{s}/ame-shell/light", .{x}) catch null;
-    return std.fmt.bufPrint(buf, "{s}/.local/state/ame-shell/light", .{std.posix.getenv("HOME") orelse return null}) catch null;
+    return @import("ame_lib").paths.stateFile(buf, "light");
 }
 
 fn loadSaved(buf: []u8) ?[]const u8 {

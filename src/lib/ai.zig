@@ -59,17 +59,9 @@ pub fn providerIndex(id: []const u8) ?usize {
 // 置き場・API キー
 // ---------------------------------------------------------------------------
 
-pub fn configDir(buf: []u8) ?[]const u8 {
-    if (std.posix.getenv("XDG_CONFIG_HOME")) |x| if (x.len > 0) return std.fmt.bufPrint(buf, "{s}/ame-shell", .{x}) catch null;
-    const h = std.posix.getenv("HOME") orelse return null;
-    return std.fmt.bufPrint(buf, "{s}/.config/ame-shell", .{h}) catch null;
-}
-
-pub fn stateDir(buf: []u8) ?[]const u8 {
-    if (std.posix.getenv("XDG_STATE_HOME")) |x| if (x.len > 0) return std.fmt.bufPrint(buf, "{s}/ame-shell", .{x}) catch null;
-    const h = std.posix.getenv("HOME") orelse return null;
-    return std.fmt.bufPrint(buf, "{s}/.local/state/ame-shell", .{h}) catch null;
-}
+// 設定と状態の置き場所(paths.zig。ame-shell 全体で同じもの)
+pub const configDir = @import("paths.zig").configDir;
+pub const stateDir = @import("paths.zig").stateDir;
 
 pub fn readSmall(path: []const u8, buf: []u8) ?[]const u8 {
     const f = std.fs.cwd().openFile(path, .{}) catch return null;

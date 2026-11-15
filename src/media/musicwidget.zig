@@ -401,9 +401,7 @@ pub const MusicWidget = struct {
 // ---- 覚えた隅 ----
 
 fn statePath(buf: []u8) ?[]const u8 {
-    if (std.posix.getenv("XDG_STATE_HOME")) |s| if (s.len > 0) return std.fmt.bufPrint(buf, "{s}/ame-shell/music-widget", .{s}) catch null;
-    const home = std.posix.getenv("HOME") orelse return null;
-    return std.fmt.bufPrint(buf, "{s}/.local/state/ame-shell/music-widget", .{home}) catch null;
+    return @import("ame_lib").paths.stateFile(buf, "music-widget");
 }
 
 fn loadCorner() ?Corner {

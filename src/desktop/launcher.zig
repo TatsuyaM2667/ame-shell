@@ -264,9 +264,7 @@ pub const Launcher = struct {
     }
 
     fn historyPath(buf: []u8) ?[]const u8 {
-        const home = std.posix.getenv("HOME") orelse return null;
-        if (std.posix.getenv("XDG_STATE_HOME")) |s| return std.fmt.bufPrint(buf, "{s}/ame-shell/launcher-history", .{s}) catch null;
-        return std.fmt.bufPrint(buf, "{s}/.local/state/ame-shell/launcher-history", .{home}) catch null;
+        return @import("ame_lib").paths.stateFile(buf, "launcher-history");
     }
 
     fn loadHistory(self: *Launcher) void {

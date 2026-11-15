@@ -471,9 +471,7 @@ pub const Wallpaper = struct {
 // ---- 最後に選んだ壁紙の保存(~/.local/state/ame-shell/wallpaper)----
 
 fn statePath(buf: []u8) ?[]const u8 {
-    if (std.posix.getenv("XDG_STATE_HOME")) |s| return std.fmt.bufPrint(buf, "{s}/ame-shell/wallpaper", .{s}) catch null;
-    const home = std.posix.getenv("HOME") orelse return null;
-    return std.fmt.bufPrint(buf, "{s}/.local/state/ame-shell/wallpaper", .{home}) catch null;
+    return @import("ame_lib").paths.stateFile(buf, "wallpaper");
 }
 
 /// 1 行目: aurora|rain|image、2 行目: 画像のパス

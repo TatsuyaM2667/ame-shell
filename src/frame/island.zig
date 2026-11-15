@@ -201,9 +201,7 @@ fn onTimer(_: *anyopaque, _: c_int, _: u32) void {
 // ---------------------------------------------------------------------------
 
 fn prefPath(buf: []u8) ?[]const u8 {
-    var d: [400]u8 = undefined;
-    const dir = @import("ame_lib").ai.stateDir(&d) orelse return null;
-    return std.fmt.bufPrint(buf, "{s}/island", .{dir}) catch null;
+    return @import("ame_lib").paths.stateFile(buf, "island");
 }
 
 /// ボタンで選んだもの。選んでいなければ null(設定の island を使う)

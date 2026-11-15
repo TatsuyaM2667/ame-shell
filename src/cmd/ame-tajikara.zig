@@ -30,8 +30,7 @@ fn known(v: []const u8) ?[*:0]const u8 {
 }
 
 fn statePath(buf: []u8) ?[]const u8 {
-    if (std.posix.getenv("XDG_STATE_HOME")) |x| if (x.len > 0) return std.fmt.bufPrint(buf, "{s}/ame-shell/power", .{x}) catch null;
-    return std.fmt.bufPrint(buf, "{s}/.local/state/ame-shell/power", .{std.posix.getenv("HOME") orelse return null}) catch null;
+    return @import("ame_lib").paths.stateFile(buf, "power");
 }
 
 fn save(name: []const u8) void {
