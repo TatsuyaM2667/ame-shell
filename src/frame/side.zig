@@ -520,9 +520,9 @@ fn toggleRecord(f: *Frame) void {
         f.app.notifs.post("ame-shell", "録画できません", "このコンポジタは画面の撮影(ext-image-copy-capture)に対応していません(River 0.5 のセッションで使えます)", 0);
         return;
     }
-    if (!inPath("ame-rec") or !inPath("ffmpeg")) {
+    if (!sys.hasCommand("ame-rec") or !sys.hasCommand("ffmpeg")) {
         theme.flashError(f.app);
-        const hint = if (!inPath("ffmpeg")) "ffmpeg がありません。パッケージを入れてください" else "ame-rec がありません(ame-shell を入れ直してください)";
+        const hint = if (!sys.hasCommand("ffmpeg")) "ffmpeg がありません。パッケージを入れてください" else "ame-rec がありません(ame-shell を入れ直してください)";
         f.app.notifs.post("ame-shell", "録画できません", hint, 0);
         return;
     }
@@ -542,16 +542,4 @@ fn toggleRecord(f: *Frame) void {
     sys.spawnDetachedArgs("exec ame-rec -f \"$1\" >/dev/null 2>&1", &.{(std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return).ptr});
     f.sidev.recording = true;
     f.app.notifs.post("ame-shell", "録画を開始しました(もう一度押すと停止)", path, 0);
-}
-
-fn inPath(name: []const u8) bool {
-    const path = std.posix.getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
-    var it = std.mem.splitScalar(u8, path, ':');
-    var buf: [512]u8 = undefined;
-    while (it.next()) |d| {
-        if (d.len == 0) continue;
-        const full = std.fmt.bufPrintZ(&buf, "{s}/{s}", .{ d, name }) catch continue;
-        if (c.access(full.ptr, c.X_OK) == 0) return true;
-    }
-    return false;
 }

@@ -165,14 +165,8 @@ fn hasBin(bin: []const u8) bool {
         std.fs.cwd().access(bin, .{}) catch return false;
         return true;
     }
-    const path = std.posix.getenv("PATH") orelse "/usr/bin:/bin";
-    var it = std.mem.tokenizeScalar(u8, path, ':');
+    if (sys.hasCommand(bin)) return true;
     var pb: [1024]u8 = undefined;
-    while (it.next()) |dir| {
-        const p = std.fmt.bufPrint(&pb, "{s}/{s}", .{ dir, bin }) catch continue;
-        std.fs.cwd().access(p, .{}) catch continue;
-        return true;
-    }
     // ~/.local/bin など、セッションの PATH に無い置き場
     const home = std.posix.getenv("HOME") orelse return false;
     for ([_][]const u8{ ".local/bin", ".npm-global/bin", ".bun/bin", ".cargo/bin", "go/bin", ".opencode/bin" }) |d| {
