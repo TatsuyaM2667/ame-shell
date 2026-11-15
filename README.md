@@ -168,6 +168,7 @@ Bluetooth のイヤホンの音には `pipewire-audio`、バーのアイコン�
 ame-update            # OS のパッケージ(FreeBSD は pkg、Chimera は apk)→ ame-shell(git pull → ビルド → インストール)→ 再起動
 ame-update --check    # 更新があるかを見るだけ
 ame-update --no-pkg   # ame-shell だけ(--no-self でパッケージだけ)
+ame-update --no-apps  # ame のアプリ(ame-filemanager・kuraokami・seoritsu)は更新しない(既定では、ame-shell が決めた版に合わせる)
 ```
 
 ランチャーで `>` → 「アップデート」からも実行できます(端末が開きます)。root が必要な作業は doas → sudo → su の順に使える方で行います。
@@ -258,6 +259,7 @@ PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5
 | Super+Alt+ドラッグ | タイルのまま移動(重ねたタイルと入れ替え・別の画面へ) |
 | タイトルバーをドラッグ | 窓をタイルから外して浮かせる(ひと回り小さくなる)。浮いた窓は、つかんで動かすと紙のようにたわみ、離すとすーっと元の形に戻る(AME_WOBBLE=0 で無効)。浮いた窓は縁をドラッグで大きさを変更。縁(窓のすぐ外側)かタイトルバーのダブルクリック・画面の上の端へドラッグ・Super+Space でタイルに戻す |
 | Print / Shift+Print / Super+Print | 範囲 / 全画面のスクリーンショット(~/Pictures/Screenshots + クリップボード)/ 全画面をクリップボードだけ。ame-shell が自前で撮る(止めた画面の上でドラッグ、Enter で全体、Esc でやめる)。ext-image-copy-capture の無い River 0.3 などでは grim・slurp・wl-copy を使う |
+| Ctrl+Print / Ctrl+Shift+Print | 範囲を選んで録画 / 範囲を選んで GIF に(~/Videos。録画中にもう一度押すと止める。`ame-ctl record region|gif|toggle|stop`)|
 | 音量・明るさ・メディアキー | OSD つき |
 | Super+Shift+R | ame-shell を読み込み直す(更新を入れた後に。窓はそのまま)|
 | Super+Shift+E | セッションを終了 |
@@ -359,7 +361,8 @@ ame-shell と同じ考え方(ツールキットを使わず GPU / ソフトウ�
 | [seoritsu](https://github.com/TatsuyaM2667/seoritsu) | コードエディタ(Zed の設定と拡張を読む・tree-sitter の色分け・プロジェクトのパネル) | 文字のファイルを開く既定のアプリ(未設定のとき) | — |
 
 ```sh
-sh scripts/install-apps.sh                 # 3 つとも最新にして入れ直す(名前を並べるとそれだけ)
+sh scripts/install-apps.sh                 # 3 つとも、ame-shell が決めた版(scripts/pins.sh)で入れる(名前を並べるとそれだけ)
+sh scripts/install-apps.sh --latest        # 決めた版ではなく最新を入れる
 sh scripts/install-apps.sh --uninstall     # この script が入れたものだけ外す
 ```
 
@@ -379,10 +382,10 @@ sh scripts/install-apps.sh --uninstall     # この script が入れたものだ
 | `ame-tajikara` | 電源プロファイルを読む・変える・覚えて戻す | powerprofilesctl | 天手力男神 |
 | `ame-uzume` | 音量を読む・変える・消音・見張る・覚えて戻す・出力先と入力先を選ぶ(Odin) | wpctl・pactl | 天宇受売命 |
 | `ame-hamon` | 今鳴っている音のスペクトラムを 1 行ずつ流す(Odin) | cava | 波紋 |
-| `ame-yatagarasu` | URL の中身を取ってくる(curl と同じオプション。暗号は OpenSSL) | curl | 八咫烏 |
-| `ame-rec` | 画面を動画に録る(変換は ffmpeg) | wf-recorder | |
-| `ame-iwato` | 画面をロックする(単体。ame-shell が落ちてロックが残ったときにも) | swaylock | 天岩戸 |
-| `ame-copy` / `ame-paste` | クリップボードに入れる・出す | wl-copy・wl-paste | |
+| `ame-yatagarasu` | URL の中身を取ってくる(curl と同じオプション・`--compressed`。暗号は OpenSSL。転送で別の相手へ行ったら API キーなどのヘッダは送らない) | curl | 八咫烏 |
+| `ame-rec` | 画面を動画・GIF に録る(範囲も。変換は ffmpeg) | wf-recorder | |
+| `ame-iwato` | 画面をロックする(単体。時計と電池つき。ame-shell が落ちてロックが残ったときにも) | swaylock | 天岩戸 |
+| `ame-copy` / `ame-paste` | クリップボードに入れる・出す・見張る(履歴) | wl-copy・wl-paste | |
 | `ame-weather` | 今の天気 | | |
 | `ame-lyrics` | 曲の同期歌詞(LRC)を探す | | |
 | `ame-ai` / `ame-agent` | AI と話す / コーディング CLI の出力を共通の JSON の行に | | |
@@ -399,8 +402,10 @@ ame-tajikara set balanced                                 # 電源プロファ�
 ame-hamon -b 32 | head -3                                 # 棒 32 本のスペクトラム(cava の raw ascii と同じ形)
 ame-yatagarasu -sSfL -o page.html https://example.com     # 取ってくる(-w '%{http_code}'・-K - なども curl と同じ)
 ame-rec -f ~/Videos/a.mp4                               # 録画(Ctrl+C で保存して終わる。--no-audio・--cpu)
+ame-rec -g "0,0 640x480" -f a.gif                        # 範囲を GIF に(音なし)
 ame-iwato -f                                              # 画面をロック(-f でロックできたらすぐ戻る)
 echo hi | ame-copy; ame-paste                              # クリップボード(-t image/png、ame-paste -l で種類の一覧)
+ame-paste --watch                                          # コピーされた文字を JSON の 1 行ずつ(ランチャーの「>クリップ」の履歴はこれ)
 ame-weather Sapporo                                     # 今の天気(--json で JSON)
 ame-lyrics 'YOASOBI' 'アイドル' > idol.lrc               # 歌詞を探す(0 見つかった / 1 無い / 2 一時的な失敗)
 echo 'Zig の comptime を一言で' | ame-ai -p anthropic       # AI に聞く(会社とモデルは省くとチャットで最後に選んだもの)
@@ -421,6 +426,13 @@ ame-ctl watch | jq -r 'select(.event=="workspace").workspace'   # 出来事を�
 手の認識の [ame-senju](https://github.com/TatsuyaM2667/ame-senju)(千手観音)と顔認証の [ame-kagami](https://github.com/TatsuyaM2667/ame-kagami)(八咫鏡)も別のリポジトリです。
 
 構成とソースの置き場は `docs/architecture.md` にあります。
+
+## 安全のために
+
+- **取ってくるものを確かめる**: `install.sh` が取ってくる Zig・ghostty は公式の SHA-256、Odin・River・zsh-autosuggestions・ame のアプリは決めたコミットと照らし、合わなければ使わずに止めます(`scripts/pins.sh` が 1 か所にまとめています)。
+- **パスワードの照合**: ロック画面と `ame-iwato` は同じ照合のコード(`src/cmd/pam.zig`)を使い、照合できない構成ならロックしません。FreeBSD の照合の補助 `ame-auth` は、続けて 5 回まちがえると、しばらく(30 秒から倍々、最大 15 分)照合しません。
+- **クリップボードの履歴**はメモリの中だけで、ファイルに書きません。パスワード管理のアプリが「秘密」の印を付けたものは覚えません。
+- **通信**: `ame-yatagarasu` は、転送で別のサイトへ行ったら自分で付けたヘッダ(API キーなど)を送らず、改行などの入ったヘッダや URL を断ります。
 
 ## ドキュメントサイト
 

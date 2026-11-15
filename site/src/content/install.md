@@ -27,6 +27,10 @@ sh install.sh --no-apps     # ame のアプリを入れない
 sh install.sh --ghostty     # 端末 ghostty もビルドする(既定は ame の端末 kuraokami だけ。GTK4 などを入れずに済む)
 ```
 
+## 取ってくるものを確かめる {#verify}
+
+`install.sh` が取ってくるものは、中身を確かめてから使います。Zig・ghostty は公式の SHA-256、Odin・River・zsh-autosuggestions・ame のアプリは決めたコミットと照らし、合わなければ止めます(配布元や途中で書き換えられても気づける)。版と確かめる値は `scripts/pins.sh` の 1 か所にあります。
+
 ## ame のアプリ {#apps}
 
 ファイルマネージャ・端末・コードエディタは、ame-shell と同じく Odin で書いた ame のアプリです。`install.sh` が GitHub から取ってきてビルドし、`~/.local` に入れます(`scripts/install-apps.sh`)。
@@ -38,7 +42,8 @@ sh install.sh --ghostty     # 端末 ghostty もビルドする(既定は ame �
 | [seoritsu](https://github.com/TatsuyaM2667/seoritsu) | 文字のファイルを開く既定のアプリ(まだ決まっていなければ) | — |
 
 ```sh
-sh scripts/install-apps.sh                 # 最新にして入れ直す(名前を並べるとそれだけ)
+sh scripts/install-apps.sh                 # ame-shell が決めた版で入れる(名前を並べるとそれだけ)
+sh scripts/install-apps.sh --latest        # 決めた版ではなく最新を入れる
 sh scripts/install-apps.sh --uninstall     # この script が入れたものだけ外す
 ```
 

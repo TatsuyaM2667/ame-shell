@@ -98,3 +98,11 @@ Chimera Linux x86_64 / musl / dinit / AMD Ryzen 7 7735HS (16 スレッド) / Rad
 - 自分で入れたものは上書きしない: この script が入れた印(`~/.local/share/ame-shell/apps/<名前>`)が無いのに同じ名前のコマンドがあれば、開発中の版とみなして触らない。
 - 各アプリの install.sh は使わない: GNU の `install -D` など、BSD の install(1)(Chimera・FreeBSD)で動かない書き方があるため、入れる部分は POSIX sh で ame-shell 側に書いた。
 - 却下: ame-shell のリポジトリに取り込む(それぞれ独立に作られ、単独でも使われる)、git submodule(更新の手間が増え、取ってくるだけで十分)。
+
+## 取ってくるものを確かめる・照合を 1 つに・機能の追加(2026-11)
+- 取ってくるもの: Zig・ghostty は公式の SHA-256、git のものは決めたコミットと照らす(`scripts/pins.sh`。版の定義もここだけ)。却下: HTTPS だけに任せる(配布元が書き換えられると気づけない)、minisign の署名を確かめる(道具がもう 1 つ要る。SHA-256 を公式の一覧で確かめてから書けば足りる)。
+- ame のアプリは既定で決めた版を入れる(`--latest` で最新)。ame-update は ame-shell を更新したあと、決めた版に合わせる(同じ版なら作り直さない)。
+- パスワードの照合: ロック画面・ame-iwato・ame-auth が `src/cmd/pam.zig` を共有する(3 つの写しを 1 つに)。単体の道具は自分のフォルダの外を import できないので、共有のファイルは src/cmd に置き、ame-shell の本体からは ../cmd/pam.zig で読む。
+- ame-auth の総当たり対策: 5 回までは待たずに試せ、その後は 30 秒から倍々(最大 15 分)照合しない。数えるのは root だけが書ける /var/db/ame-auth。却下: 本人の ~ に数える(本人が消せる)、PAM の faillock に任せる(FreeBSD の OpenPAM には無い)。
+- クリップボードの履歴は ame-paste --watch の 1 行を読むだけ(本体は Wayland の別の口を増やさない)。メモリの中だけ・パスワード管理の「秘密」は覚えない。
+- 録画の範囲はスクショの範囲選択を使い回し、ame-rec には -g で渡す(ame-rec は画面の座標だけを知っていればよい)。
