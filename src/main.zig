@@ -41,6 +41,7 @@ pub fn main() !u8 {
         // 新しい自分がもう 1 つずつ起動するので、先に止める
         if (app.media.fd >= 0 and app.media.pid > 0) _ = c.kill(app.media.pid, c.SIGTERM);
         if (app.pactl_fd >= 0 and app.pactl_pid > 0) _ = c.kill(app.pactl_pid, c.SIGTERM);
+        app.cliphist.stop(); // ame-paste --watch も(残すと再起動のたびに増える)
         const arg0 = std.os.argv[0];
         const argv = [_:null]?[*:0]const u8{ arg0, null };
         _ = c.execvp(arg0, @ptrCast(&argv));

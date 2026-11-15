@@ -75,10 +75,11 @@ pub const Wall = struct {
     px: ?[*]u8 = null,
 };
 
-const Action = enum { ai_chat, wallpaper, update, lock, face_enroll, hand_poses, hand_windows, hand_poses_only, logout, sleep, reboot, poweroff };
+const Action = enum { ai_chat, wallpaper, clipboard, update, lock, face_enroll, hand_poses, hand_windows, hand_poses_only, logout, sleep, reboot, poweroff };
 const actions = [_]struct { a: Action, icon: []const u8, name: []const u8, desc: []const u8, keys: []const u8 }{
     .{ .a = .ai_chat, .icon = "\u{F0674}", .name = "AI チャット", .desc = "右から出るパネルで AI と話す(OpenAI・Claude・Gemini・DeepSeek・OpenRouter など。Super+C)", .keys = "ai chat gpt claude gemini mistral deepseek openrouter kimi chatto" },
     .{ .a = .wallpaper, .icon = "\u{F0E09}", .name = "壁紙", .desc = "壁紙を選ぶ", .keys = "wallpaper kabegami" },
+    .{ .a = .clipboard, .icon = "\u{F014F}", .name = "クリップボードの履歴", .desc = "前にコピーした文字を選んで、もう一度コピーする(>クリップ)", .keys = "clipboard history kurippu rireki copy" },
     .{ .a = .update, .icon = "\u{F06B0}", .name = "アップデート", .desc = "パッケージと ame-shell を更新する(ame-update)", .keys = "update upgrade appudeto koushin" },
     .{ .a = .lock, .icon = "\u{F033E}", .name = "ロック", .desc = "画面をロックする", .keys = "lock rokku" },
     .{ .a = .face_enroll, .icon = "\u{F0C7B}", .name = "顔を登録", .desc = "パスワードで本人を確かめてから、顔認証用にカメラで顔を登録する", .keys = "face kao touroku faceid ninshou" },
@@ -91,7 +92,7 @@ const actions = [_]struct { a: Action, icon: []const u8, name: []const u8, desc:
     .{ .a = .poweroff, .icon = "\u{F0425}", .name = "電源オフ", .desc = "コンピュータの電源を切る", .keys = "shutdown poweroff" },
 };
 
-const Kind = enum { app, action, command, wallpaper };
+const Kind = enum { app, action, command, wallpaper, clip };
 const Result = struct { kind: Kind, idx: u32, score: i32 };
 
 pub const Launcher = struct {
@@ -360,6 +361,13 @@ pub const Launcher = struct {
     // 検索
     // ---------------------------------------------------------------------
 
+    /// クリップボードの履歴: 「>クリップ」(の後ろの語で絞り込む)
+    fn isClipQuery(q: []const u8) bool {
+        if (q.len == 0 or q[0] != '>') return false;
+        const rest = std.mem.trimLeft(u8, q[1..], " ");
+        return std.mem.startsWith(u8, rest, "クリップ") or std.mem.startsWith(u8, rest, "clip");
+    }
+
     fn isWallQuery(q: []const u8) bool {
         if (q.len == 0 or q[0] != '>') return false;
         const rest = std.mem.trimLeft(u8, q[1..], " ");
@@ -378,6 +386,15 @@ pub const Launcher = struct {
             for (self.walls.items, 0..) |w, i| {
                 const sc = if (filt.len == 0) 0 else anim.fuzzy(filt, w.name);
                 if (sc >= 0) self.results.append(.{ .kind = .wallpaper, .idx = @intCast(i), .score = sc }) catch {};
+            }
+        } else if (isClipQuery(q)) {
+            const sp = std.mem.indexOfScalar(u8, q, ' ');
+            const filt = if (sp) |i| std.mem.trim(u8, q[i..], " ") else "";
+            const h = &self.app.cliphist;
+            for (0..h.n) |i| {
+                // 新しい順を保つ(絞り込むときは一致の良さ)
+                const sc: i32 = if (filt.len == 0) -@as(i32, @intCast(i)) else anim.fuzzy(filt, h.get(i)[0..@min(h.get(i).len, 200)]);
+                if (sc >= 0 or filt.len == 0) self.results.append(.{ .kind = .clip, .idx = @intCast(i), .score = sc }) catch {};
             }
         } else if (q.len > 0 and q[0] == '>') {
             const rest = std.mem.trim(u8, q[1..], " ");
@@ -584,6 +601,11 @@ pub const Launcher = struct {
             },
             .action => {
                 const a = actions[r.idx].a;
+                if (a == .clipboard) {
+                    // 履歴の一覧へ(検索欄を「>クリップ 」に)
+                    self.setQuery(">クリップ ");
+                    return;
+                }
                 if (a == .wallpaper) {
                     // 全画面の壁紙ピッカーへ
                     self.close();
@@ -618,10 +640,11 @@ pub const Launcher = struct {
                     .poweroff => sys.power(.poweroff),
                     // 端末で ame-update を実行(root のパスワードを聞かれることがあるので端末の中で)
                     .update => sys.spawnDetached("ame-terminal --title ame-update -e sh -c 'ame-update; echo; printf \"Enter で閉じます \"; read x'"),
-                    .wallpaper => {},
+                    .wallpaper, .clipboard => {},
                 }
                 return;
             },
+            .clip => self.app.cliphist.copy(r.idx),
             .wallpaper => {
                 const w = self.walls.items[r.idx];
                 for (self.app.outputs.items) |o| if (o.wall) |wp| wp.switchTo(w.mode, w.path);
@@ -745,6 +768,18 @@ pub const Launcher = struct {
                 }
                 _ = cv.text(ix + 54, ry + 26, 16, txt, e.display(), .{ .bold = true, .max_w = w - 100 });
                 const desc = if (e.comment.len > 0) e.comment else if (e.generic.len > 0) e.generic else firstWord(e.exec);
+                _ = cv.text(ix + 54, ry + 46, 12.5, sub, desc, .{ .max_w = w - 100 });
+            },
+            .clip => {
+                const s = self.app.cliphist.get(res.idx);
+                cv.rect(ix, iy, 38, 38, 11, acc.alpha(0.18));
+                _ = cv.text(ix + 19, iy + 27, 20, txt, "\u{F014F}", .{ .alignment = .center });
+                // 1 行目を題に、行の数と長さを下に
+                const first = std.mem.trim(u8, s[0 .. std.mem.indexOfScalar(u8, s, '\n') orelse s.len], " \t\r");
+                _ = cv.text(ix + 54, ry + 26, 16, txt, if (first.len > 0) first[0..@min(first.len, 300)] else "(空白)", .{ .bold = true, .max_w = w - 100 });
+                var db: [64]u8 = undefined;
+                const lines = std.mem.count(u8, std.mem.trimRight(u8, s, "\n"), "\n") + 1; // 最後の改行は数えない
+                const desc = std.fmt.bufPrint(&db, "{d} 文字・{d} 行(Enter でコピー)", .{ std.unicode.utf8CountCodepoints(s) catch s.len, lines }) catch "";
                 _ = cv.text(ix + 54, ry + 46, 12.5, sub, desc, .{ .max_w = w - 100 });
             },
             .wallpaper => {},

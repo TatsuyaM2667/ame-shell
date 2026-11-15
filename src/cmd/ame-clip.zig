@@ -5,6 +5,7 @@
 //   ame-paste                     クリップボードの中身を標準出力へ(文字を優先)
 //   ame-paste -t image/png        その種類で出す
 //   ame-paste -l                  入っている種類の一覧
+//   ame-paste --watch             文字がコピーされるたびに、その中身を JSON の文字列 1 行で(終わらない。パスワード管理の「秘密」は除く)
 //
 // 1 つの実行ファイルで、呼ばれた名前(ame-copy / ame-paste)で動きを変える。
 // コンポジタの ext-data-control-v1 を使う(River 0.5 / wlroots 0.19 以降。River 0.3 には無い)。
@@ -44,7 +45,7 @@ fn fail(comptime msg: []const u8) noreturn {
 }
 
 fn usage(for_paste: bool) noreturn {
-    std.io.getStdErr().writeAll(if (for_paste) "使い方: ame-paste [-t 種類 | -l]\n" else "使い方: ame-copy [-t 種類] < データ\n") catch {};
+    std.io.getStdErr().writeAll(if (for_paste) "使い方: ame-paste [-t 種類 | -l | --watch]\n" else "使い方: ame-copy [-t 種類] < データ\n") catch {};
     std.process.exit(2);
 }
 
@@ -179,21 +180,77 @@ fn paste(want: ?[]const u8, list: bool) void {
     }
 }
 
+/// 選ばれている offer の、ある種類の中身を読む(最大 max バイト。超えたら null)
+fn receive(dpy: *c.struct_wl_display, offer: *c.struct_ext_data_control_offer_v1, i: usize, out: *std.ArrayList(u8), max: usize) bool {
+    var mime: [129]u8 = undefined;
+    @memcpy(mime[0..type_lens[i]], typeAt(i));
+    mime[type_lens[i]] = 0;
+    const p = std.posix.pipe() catch return false;
+    c.ext_data_control_offer_v1_receive(offer, @ptrCast(&mime), p[1]);
+    _ = c.wl_display_flush(dpy);
+    std.posix.close(p[1]);
+    defer std.posix.close(p[0]);
+    var buf: [16384]u8 = undefined;
+    while (true) {
+        const n = std.posix.read(p[0], &buf) catch return false;
+        if (n == 0) return true;
+        if (out.items.len + n > max) return false;
+        out.appendSlice(buf[0..n]) catch return false;
+    }
+}
+
+/// パスワード管理のアプリが「秘密」の印を付けた中身か(KeePassXC など。履歴に残さない)
+fn isSecret() bool {
+    for (0..n_types) |i| if (std.mem.eql(u8, typeAt(i), "x-kde-passwordManagerHint")) return true;
+    return false;
+}
+
+/// ame-paste --watch: 文字がコピーされるたびに、その中身を JSON の文字列 1 行で書く(改行を含んでも 1 行)。終わらない
+fn watch() void {
+    const conn = connect();
+    _ = c.ext_data_control_device_v1_add_listener(conn.dev, &device_listener, null);
+    var last = std.ArrayList(u8).init(A);
+    var cur = std.ArrayList(u8).init(A);
+    var seen: ?*c.struct_ext_data_control_offer_v1 = null;
+    const out = std.io.getStdOut().writer();
+    while (c.wl_display_dispatch(conn.dpy) >= 0) {
+        const offer = selection orelse continue;
+        if (offer == seen or offer != pending) continue;
+        // 前の中身の offer はもう要らない(残すと長く動くうちに溜まる)
+        if (seen) |old| c.ext_data_control_offer_v1_destroy(old);
+        seen = offer;
+        if (isSecret()) continue;
+        // 文字だけ(画像などは履歴にしない)。種類を指定しなければ pick は文字を優先して選ぶが、文字が無ければ飛ばす
+        const i = pick(null) orelse continue;
+        if (!std.mem.startsWith(u8, typeAt(i), "text/") and !std.mem.eql(u8, typeAt(i), "UTF8_STRING") and !std.mem.eql(u8, typeAt(i), "STRING")) continue;
+        cur.clearRetainingCapacity();
+        if (!receive(conn.dpy, offer, i, &cur, 64 * 1024) or cur.items.len == 0) continue;
+        if (std.mem.eql(u8, cur.items, last.items)) continue;
+        std.json.stringify(cur.items, .{}, out) catch return;
+        out.writeByte('\n') catch return;
+        last.clearRetainingCapacity();
+        last.appendSlice(cur.items) catch {};
+    }
+}
+
 pub fn main() u8 {
     var it = std.process.args();
     const argv0 = std.fs.path.basename(it.next() orelse "ame-copy");
     const is_paste = std.mem.indexOf(u8, argv0, "paste") != null;
     var mime: ?[:0]const u8 = null;
     var list = false;
+    var watching = false;
     while (it.next()) |a| {
         if (std.mem.eql(u8, a, "-t")) {
             mime = it.next() orelse usage(is_paste);
             if (mime.?.len == 0 or mime.?.len > 127) usage(is_paste);
         } else if (is_paste and std.mem.eql(u8, a, "-l")) {
             list = true;
+        } else if (is_paste and std.mem.eql(u8, a, "--watch")) {
+            watching = true;
         } else usage(is_paste);
     }
-    if (is_paste) paste(mime, list) else copy(mime);
+    if (watching) watch() else if (is_paste) paste(mime, list) else copy(mime);
     return 0;
 }
 

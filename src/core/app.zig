@@ -182,6 +182,8 @@ pub const App = struct {
     warm_started: bool = false,
     inotify_fd: c_int = -1,
     config_wd: c_int = -1,
+    /// クリップボードの履歴(ame-paste --watch。desktop/cliphist.zig)
+    cliphist: @import("../desktop/cliphist.zig").ClipHist = undefined,
     pactl_fd: c_int = -1,
     /// バーに出す Wi-Fi の SSID(裏で聞いた最後の答え)と、聞いている最中の読み口
     ssid_fd: c_int = -1,
@@ -293,6 +295,9 @@ pub const App = struct {
         app.repeat_timer = try loop_mod.Timer.init();
         try app.loop.add(app.repeat_timer.fd, c.EPOLLIN, app, onRepeatTimer);
         app.startPactl();
+        // クリップボードの履歴(コンポジタが ext-data-control を持つときだけ。globals はもう読んである)
+        app.cliphist = .{ .app = app };
+        if (std.posix.getenv("AME_GREETER") == null) app.cliphist.start(); // ログイン画面では覚えない
         app.warmer = text.Warmer.init(alloc);
         app.warmer.add(text.common_chars);
         app.warmer.add(@import("../frame/warm_strings.zig").warm);
