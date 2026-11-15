@@ -109,16 +109,13 @@ fi
 ARCH=$(uname -m)
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/ame-shell/toolchain"
 mkdir -p "$CACHE"
-ZIG_VER=0.13.0
-ZIG_RIVER_VER=0.16.0
-ZIG_GHOSTTY_VER=0.17.0
-GHOSTTY_VER=1.4.0
-ODIN_TAG=dev-2026-08
-
-fetch_to() { # fetch_to <url> <file>
-    if command -v curl >/dev/null 2>&1; then curl -fL --retry 3 -o "$2" "$1"
-    elif command -v wget >/dev/null 2>&1; then wget -O "$2" "$1"
-    else die "curl か wget が必要です"; fi
+# 取ってくるものの SHA-256 とコミットを確かめる(scripts/pins.sh)
+. "$REPO/scripts/pins.sh"
+# zig_get <版> <置き場のフォルダ名>: Zig の公式の配布物を取ってきて確かめ、展開する
+zig_get() {
+    fetch_verified "https://ziglang.org/download/$1/$2.tar.xz" "$CACHE/zig-$1.tar.xz" "$(zig_sha256 "$1" "$ARCH-linux")" ||
+        die "Zig $1 を取ってこられないか、中身を確かめられませんでした"
+    tar -xf "$CACHE/zig-$1.tar.xz" -C "$CACHE"
 }
 
 echo "ame-shell をインストールします($(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-Linux}") / $ARCH)"
@@ -214,8 +211,7 @@ else
     ZIG="$CACHE/zig-linux-$ARCH-$ZIG_VER/zig"
     if [ ! -x "$ZIG" ]; then
         info "Zig $ZIG_VER を取得します"
-        fetch_to "https://ziglang.org/download/$ZIG_VER/zig-linux-$ARCH-$ZIG_VER.tar.xz" "$CACHE/zig-$ZIG_VER.tar.xz"
-        tar -xf "$CACHE/zig-$ZIG_VER.tar.xz" -C "$CACHE"
+        zig_get "$ZIG_VER" "zig-linux-$ARCH-$ZIG_VER"
     fi
 fi
 info "zig: $ZIG($("$ZIG" version))"
@@ -228,7 +224,7 @@ else
     if [ ! -x "$ODIN" ]; then
         info "Odin $ODIN_TAG をソースからビルドします(clang と llvm-config を使用)"
         rm -rf "${ODIN_DIR:?}"
-        git clone --depth 1 --branch "$ODIN_TAG" https://github.com/odin-lang/Odin "$ODIN_DIR"
+        git_at https://github.com/odin-lang/Odin "$ODIN_TAG" "$ODIN_COMMIT" "$ODIN_DIR" || die "Odin $ODIN_TAG のソースを取ってこられないか、確かめられませんでした"
         (cd "$ODIN_DIR" && bash build_odin.sh release)
     fi
 fi
@@ -252,11 +248,10 @@ else
     info "River が無いため River 0.5 をソースからビルドします(Zig $ZIG_RIVER_VER + wlroots 0.20)"
     ZIG16="$CACHE/zig-$ARCH-linux-$ZIG_RIVER_VER/zig"
     if [ ! -x "$ZIG16" ]; then
-        fetch_to "https://ziglang.org/download/$ZIG_RIVER_VER/zig-$ARCH-linux-$ZIG_RIVER_VER.tar.xz" "$CACHE/zig-$ZIG_RIVER_VER.tar.xz"
-        tar -xf "$CACHE/zig-$ZIG_RIVER_VER.tar.xz" -C "$CACHE"
+        zig_get "$ZIG_RIVER_VER" "zig-$ARCH-linux-$ZIG_RIVER_VER"
     fi
     RSRC="$CACHE/river-0.5"
-    [ -d "$RSRC" ] || git clone --depth 1 --branch v0.5.0 https://codeberg.org/river/river "$RSRC"
+    git_at https://codeberg.org/river/river v0.5.0 "$RIVER_COMMIT" "$RSRC" || die "River 0.5 のソースを取ってこられないか、確かめられませんでした"
     (cd "$RSRC" && { "$ZIG16" build -Doptimize=ReleaseSafe -Dxwayland --prefix "$RIVER5_DIR" install ||
         "$ZIG16" build -Doptimize=ReleaseSafe --prefix "$RIVER5_DIR" install; }) || die "River 0.5 のビルドに失敗しました"
     info "River 0.5 → $RIVER5_DIR"
@@ -285,15 +280,14 @@ elif [ "$WITH_GHOSTTY" = 0 ]; then
 elif ! pkg-config --exists gtk4 libadwaita-1 2>/dev/null; then
     info "(GTK4 / libadwaita の開発ファイルが無いため ghostty は作りません。端末は foot を使います)"
 else
-    info "ghostty $GHOSTTY_VER をソースからビルドします(Zig $ZIG_GHOSTTY_VER。数分かかります)"
-    ZIG17="$CACHE/zig-$ARCH-linux-$ZIG_GHOSTTY_VER/zig"
+    info "ghostty $GHOSTTY_VER をソースからビルドします(Zig $ZIG17_VER。数分かかります)"
+    ZIG17="$CACHE/zig-$ARCH-linux-$ZIG17_VER/zig"
     if [ ! -x "$ZIG17" ]; then
-        fetch_to "https://ziglang.org/download/$ZIG_GHOSTTY_VER/zig-$ARCH-linux-$ZIG_GHOSTTY_VER.tar.xz" "$CACHE/zig-$ZIG_GHOSTTY_VER.tar.xz" &&
-            tar -xf "$CACHE/zig-$ZIG_GHOSTTY_VER.tar.xz" -C "$CACHE"
+        zig_get "$ZIG17_VER" "zig-$ARCH-linux-$ZIG17_VER"
     fi
     GSRC="$CACHE/ghostty-$GHOSTTY_VER"
     if [ ! -d "$GSRC" ]; then
-        fetch_to "https://release.files.ghostty.org/$GHOSTTY_VER/ghostty-$GHOSTTY_VER.tar.gz" "$CACHE/ghostty-$GHOSTTY_VER.tar.gz" &&
+        fetch_verified "https://release.files.ghostty.org/$GHOSTTY_VER/ghostty-$GHOSTTY_VER.tar.gz" "$CACHE/ghostty-$GHOSTTY_VER.tar.gz" "$GHOSTTY_SHA256" &&
             tar -xzf "$CACHE/ghostty-$GHOSTTY_VER.tar.gz" -C "$CACHE"
     fi
     rm -rf "${GHOSTTY_PREFIX:?}"
@@ -460,7 +454,7 @@ for f in /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh /usr
 done
 if [ "$have_autosuggest" = 0 ] && command -v zsh >/dev/null 2>&1; then
     mkdir -p "$ZPLUG"
-    git clone --depth 1 https://github.com/zsh-users/zsh-autosuggestions "$ZPLUG/zsh-autosuggestions" >/dev/null 2>&1 &&
+    git_at https://github.com/zsh-users/zsh-autosuggestions "" "$ZSH_AUTOSUGGEST_COMMIT" "$ZPLUG/zsh-autosuggestions" >/dev/null 2>&1 &&
         info "zsh-autosuggestions → $ZPLUG" || info "(zsh-autosuggestions を取ってこられませんでした。候補表示なしで使えます)"
 fi
 if command -v zsh >/dev/null 2>&1; then

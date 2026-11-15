@@ -80,8 +80,8 @@ REPO=$(cd "$(dirname "$SELF")/.." && pwd)
 [ -f "$REPO/build.zig" ] || die "ame-shell のリポジトリの中で実行してください($REPO)"
 
 TOOLS=/usr/local/ame-toolchain
-ZIG_VER=0.13.0
-ODIN_TAG=dev-2026-08
+# 取ってくるものの SHA-256 とコミット(scripts/pins.sh)
+. "$REPO/scripts/pins.sh"
 
 echo "ame-shell を FreeBSD $(freebsd-version) にインストールします"
 echo "  使う人: $TARGET_USER($UHOME)/ 並列数: $JOBS / ツール: $TOOLS"
@@ -249,7 +249,8 @@ if [ -x "$ZIG" ] && [ "$("$ZIG" version)" = "$ZIG_VER" ]; then
 else
     info "Zig $ZIG_VER をソースからビルドします(LLVM 18 を使用。30 分〜1 時間ほど、メモリを 8GB 程度使います)"
     cd "$TOOLS/src"
-    [ -f "zig-$ZIG_VER.tar.xz" ] || fetch -o "zig-$ZIG_VER.tar.xz" "https://ziglang.org/download/$ZIG_VER/zig-$ZIG_VER.tar.xz"
+    fetch_verified "https://ziglang.org/download/$ZIG_VER/zig-$ZIG_VER.tar.xz" "zig-$ZIG_VER.tar.xz" "$(zig_sha256 "$ZIG_VER" src)" ||
+        die "Zig $ZIG_VER のソースを取ってこられないか、中身を確かめられませんでした"
     rm -rf "zig-$ZIG_VER"
     tar -xf "zig-$ZIG_VER.tar.xz"
     mkdir -p "zig-$ZIG_VER/build"
@@ -272,7 +273,7 @@ if [ -x "$ODIN_DIR/odin" ]; then
 else
     info "Odin $ODIN_TAG をソースからビルドします"
     rm -rf "${ODIN_DIR:?}"
-    git clone --depth 1 --branch "$ODIN_TAG" https://github.com/odin-lang/Odin "$ODIN_DIR"
+    git_at https://github.com/odin-lang/Odin "$ODIN_TAG" "$ODIN_COMMIT" "$ODIN_DIR" || die "Odin $ODIN_TAG のソースを取ってこられないか、確かめられませんでした"
     cd "$ODIN_DIR"
     env LLVM_CONFIG=/usr/local/bin/llvm-config18 bash build_odin.sh release
     [ -x "$ODIN_DIR/odin" ] || die "Odin のビルドに失敗しました"

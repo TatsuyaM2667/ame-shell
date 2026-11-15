@@ -3,6 +3,7 @@
 #
 #   sh scripts/install-apps.sh [名前 ...]       省くと全部。install.sh(と FreeBSD の install-freebsd.sh)が呼ぶ
 #   sh scripts/install-apps.sh --uninstall      この script が入れたものを外す
+#   sh scripts/install-apps.sh --latest [名前 ...]  決めた版(scripts/pins.sh のコミット)ではなく最新を入れる
 #
 #   ame-filemanager  ファイルマネージャ(Odin。Super+E・フォルダを開く既定のアプリ)
 #   kuraokami        端末(Odin + SDL3。Super+Return の ame-terminal が最初に使う)
@@ -13,6 +14,8 @@
 # 自分で入れた(この script が入れたのでない)同じ名前のコマンドが $PREFIX/bin にあれば、上書きしない(開発中のものを壊さない)。
 # どれかが作れなくても、ほかは続ける。作れなかったものは最後にまとめて出し、1 で終わる。
 set -u
+# 版とその確かめ方(コミット・SHA-256)
+. "$(dirname "$0")/pins.sh"
 
 OWNER=https://github.com/TatsuyaM2667
 PREFIX="${PREFIX:-$HOME/.local}"
@@ -21,7 +24,6 @@ SRC="${XDG_CACHE_HOME:-$HOME/.cache}/ame-shell/apps"
 MARK="$PREFIX/share/ame-shell/apps"   # この script が入れた印(名前のファイル)
 ODIN="${ODIN:-odin}"
 ZIG="${ZIG:-zig}"
-ZIG17_VER=0.17.0
 ARCH=$(uname -m)
 OS=$(uname -s)
 
@@ -32,6 +34,8 @@ APPS='ame-filemanager|ame-Filemanager|ame-filemanager.desktop|assets/ame-fileman
 kuraokami|kuraokami|assets/kuraokami.desktop|assets/kuraokami.svg
 seoritsu|seoritsu|packaging/seoritsu.desktop|assets/seoritsu.svg'
 
+LATEST=0
+if [ "${1:-}" = --latest ]; then LATEST=1; shift; fi
 if [ "${1:-}" = --uninstall ]; then
     for f in "$MARK"/*; do
         [ -f "$f" ] || continue
@@ -42,13 +46,6 @@ if [ "${1:-}" = --uninstall ]; then
     exit 0
 fi
 
-fetch_to() { # fetch_to <url> <file>
-    if command -v curl >/dev/null 2>&1; then curl -fsL --retry 3 -o "$2" "$1"
-    elif command -v fetch >/dev/null 2>&1; then fetch -q -o "$2" "$1"
-    elif command -v wget >/dev/null 2>&1; then wget -q -O "$2" "$1"
-    else return 1; fi
-}
-
 # seoritsu の tree-sitter の部品(wasm.zig)は Zig 0.17 で書かれている
 zig17() {
     if [ -n "${ZIG17:-}" ] && [ -x "$ZIG17" ]; then echo "$ZIG17"; return 0; fi
@@ -56,20 +53,25 @@ zig17() {
     d="$CACHE/zig-$ARCH-$os-$ZIG17_VER"
     if [ ! -x "$d/zig" ]; then
         mkdir -p "$CACHE"
-        fetch_to "https://ziglang.org/download/$ZIG17_VER/zig-$ARCH-$os-$ZIG17_VER.tar.xz" "$CACHE/zig-$ZIG17_VER.tar.xz" &&
+        fetch_verified "https://ziglang.org/download/$ZIG17_VER/zig-$ARCH-$os-$ZIG17_VER.tar.xz" "$CACHE/zig-$ZIG17_VER.tar.xz" "$(zig_sha256 "$ZIG17_VER" "$ARCH-$os")" >&2 &&
             tar -xf "$CACHE/zig-$ZIG17_VER.tar.xz" -C "$CACHE" || return 1
     fi
     echo "$d/zig"
 }
 
-# 取ってくる(あれば最新に)。浅い clone で十分
+# 取ってくる。既定は pins.sh で決めたコミット(確かめる)、--latest なら最新。浅い clone で十分
 get() { # get <名前> <リポジトリ>
     dir="$SRC/$1"
-    if [ -d "$dir/.git" ]; then
-        git -C "$dir" pull -q --ff-only || { rm -rf "${dir:?}"; git clone -q --depth 1 "$OWNER/$2.git" "$dir"; }
+    mkdir -p "$SRC"
+    if [ "$LATEST" = 0 ]; then
+        eval "commit=\${APP_COMMIT_$(echo "$1" | tr - _):-}"
+        [ -n "$commit" ] || { say "$1: 決めた版が pins.sh にありません"; return 1; }
+        git_at "$OWNER/$2.git" "" "$commit" "$dir"
+    elif [ -d "$dir/.git" ]; then
+        git -C "$dir" fetch -q --depth 1 origin HEAD && git -C "$dir" checkout -q FETCH_HEAD ||
+            { rm -rf "${dir:?}"; git clone -q --depth 1 "$OWNER/$2.git" "$dir"; }
     else
         rm -rf "${dir:?}"
-        mkdir -p "$SRC"
         git clone -q --depth 1 "$OWNER/$2.git" "$dir"
     fi
 }
