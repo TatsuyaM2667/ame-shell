@@ -57,12 +57,6 @@ pub fn prepare() Prepared {
             return .{ .err = "PAM サービス ame-shell が未インストールです(sh install.sh で入れ直してください)" };
         return .{ .ok = .{ .helper = h } };
     }
-    const h = c.dlopen("libpam.so.0", c.RTLD_NOW) orelse c.dlopen("libpam.so", c.RTLD_NOW) orelse
-        return .{ .err = "libpam が見つからないためロックできません" };
-    const s = c.dlsym(h, "pam_start") orelse return .{ .err = "libpam が不完全です" };
-    const a = c.dlsym(h, "pam_authenticate") orelse return .{ .err = "libpam が不完全です" };
-    const ac = c.dlsym(h, "pam_acct_mgmt") orelse return .{ .err = "libpam が不完全です" };
-    const e = c.dlsym(h, "pam_end") orelse return .{ .err = "libpam が不完全です" };
     // サービス設定: /etc/pam.d が優先、無ければ /usr/lib/pam.d(Chimera はこちら)
     const service: [*:0]const u8 = if (exists("/etc/pam.d/ame-shell") or exists("/usr/lib/pam.d/ame-shell"))
         "ame-shell"
@@ -77,7 +71,19 @@ pub fn prepare() Prepared {
         if (st.mode & std.posix.S.ISUID != 0) found = true;
     }
     if (!found) return .{ .err = "unix_chkpwd(setuid)が無いため、一般ユーザーでは認証できません" };
-    return .{ .ok = .{ .pam = .{ .start = @ptrCast(s), .auth = @ptrCast(a), .acct = @ptrCast(ac), .end = @ptrCast(e), .service = service } } };
+    return .{ .ok = .{ .pam = load(service) orelse return .{ .err = "libpam が見つからないか不完全なため、ロックできません" } } };
+}
+
+/// libpam を読む(Linux-PAM は .so.0、FreeBSD の OpenPAM は .so.6)。無い・不完全なら null
+pub fn load(service: [*:0]const u8) ?Pam {
+    const h = c.dlopen("libpam.so.0", c.RTLD_NOW) orelse c.dlopen("libpam.so.6", c.RTLD_NOW) orelse c.dlopen("libpam.so", c.RTLD_NOW) orelse return null;
+    return .{
+        .start = @ptrCast(c.dlsym(h, "pam_start") orelse return null),
+        .auth = @ptrCast(c.dlsym(h, "pam_authenticate") orelse return null),
+        .acct = @ptrCast(c.dlsym(h, "pam_acct_mgmt") orelse return null),
+        .end = @ptrCast(c.dlsym(h, "pam_end") orelse return null),
+        .service = service,
+    };
 }
 
 /// 今のユーザーの名前。照合する相手なので、書き換えられる環境変数(USER・LOGNAME)ではなく実 UID から取る
@@ -111,11 +117,27 @@ pub fn fakeMode() bool {
         std.mem.eql(u8, std.posix.getenv("AME_SESSION_NESTED") orelse "", "1");
 }
 
+/// PAM で、実 UID の本人のパスワードを確かめる(アカウントが使えるかも)。ame-auth もこれを使う
+pub fn verify(p: Pam, pw: []const u8) bool {
+    if (pw.len == 0 or pw.len >= conv_pw.len) return false;
+    defer std.crypto.utils.secureZero(u8, &conv_pw);
+    var ub: [64]u8 = undefined;
+    const user = currentUser(&ub) orelse return false;
+    @memcpy(conv_pw[0..pw.len], pw);
+    conv_pw[pw.len] = 0;
+    const cv = PamConv{ .conv = pamConv, .appdata_ptr = null };
+    var h: ?*anyopaque = null;
+    if (p.start(p.service, user.ptr, &cv, &h) != PAM_SUCCESS) return false;
+    var r = p.auth(h, 0);
+    if (r == PAM_SUCCESS) r = p.acct(h, 0);
+    _ = p.end(h, r);
+    return r == PAM_SUCCESS;
+}
+
 /// パスワードが正しいか(待つので子プロセスの中で呼ぶ)
 pub fn check(auth: Auth, pw: []const u8) bool {
     if (fakeMode()) return std.mem.eql(u8, pw, "ame");
     if (pw.len == 0 or pw.len >= conv_pw.len) return false;
-    defer std.crypto.utils.secureZero(u8, &conv_pw);
     switch (auth) {
         .helper => |hp| {
             // ame-shell は SIGCHLD を無視している(子は自動で片付く)。待てるように既定に戻す(この子プロセスの中だけ)
@@ -142,19 +164,7 @@ pub fn check(auth: Auth, pw: []const u8) bool {
             if (c.waitpid(pid, &status, 0) != pid) return false;
             return c.WIFEXITED(status) and c.WEXITSTATUS(status) == 0;
         },
-        .pam => |pam| {
-            var ub: [64]u8 = undefined;
-            const user = currentUser(&ub) orelse return false;
-            @memcpy(conv_pw[0..pw.len], pw);
-            conv_pw[pw.len] = 0;
-            const cv = PamConv{ .conv = pamConv, .appdata_ptr = null };
-            var h: ?*anyopaque = null;
-            if (pam.start(pam.service, user.ptr, &cv, &h) != PAM_SUCCESS) return false;
-            var r = pam.auth(h, 0);
-            if (r == PAM_SUCCESS) r = pam.acct(h, 0);
-            _ = pam.end(h, r);
-            return r == PAM_SUCCESS;
-        },
+        .pam => |p| return verify(p, pw),
     }
 }
 

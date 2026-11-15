@@ -25,6 +25,7 @@ test {
     _ = @import("frame/data.zig");
     _ = @import("media/audio.zig");
     _ = @import("cmd/pam.zig");
+    _ = @import("auth_helper.zig");
     _ = @import("core/events.zig");
 }
 
