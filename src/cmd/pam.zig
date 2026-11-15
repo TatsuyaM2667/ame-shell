@@ -29,7 +29,7 @@ const PamConv = extern struct { conv: ConvFn, appdata_ptr: ?*anyopaque };
 const PamStart = *const fn ([*:0]const u8, [*:0]const u8, *const PamConv, *?*anyopaque) callconv(.C) c_int;
 const PamFn = *const fn (?*anyopaque, c_int) callconv(.C) c_int;
 
-pub const Pam = struct { start: PamStart, auth: PamFn, acct: PamFn, end: PamFn, service: [*:0]const u8 };
+pub const Pam = struct { start: PamStart, auth: PamFn, end: PamFn, service: [*:0]const u8 };
 
 /// 照合の方法
 pub const Auth = union(enum) { pam: Pam, helper: [*:0]const u8 };
@@ -80,7 +80,6 @@ pub fn load(service: [*:0]const u8) ?Pam {
     return .{
         .start = @ptrCast(c.dlsym(h, "pam_start") orelse return null),
         .auth = @ptrCast(c.dlsym(h, "pam_authenticate") orelse return null),
-        .acct = @ptrCast(c.dlsym(h, "pam_acct_mgmt") orelse return null),
         .end = @ptrCast(c.dlsym(h, "pam_end") orelse return null),
         .service = service,
     };
@@ -117,7 +116,7 @@ pub fn fakeMode() bool {
         std.mem.eql(u8, std.posix.getenv("AME_SESSION_NESTED") orelse "", "1");
 }
 
-/// PAM で、実 UID の本人のパスワードを確かめる(アカウントが使えるかも)。ame-auth もこれを使う
+/// PAM で、実 UID の本人のパスワードを確かめる。ame-auth もこれを使う
 pub fn verify(p: Pam, pw: []const u8) bool {
     if (pw.len == 0 or pw.len >= conv_pw.len) return false;
     defer std.crypto.utils.secureZero(u8, &conv_pw);
@@ -128,8 +127,9 @@ pub fn verify(p: Pam, pw: []const u8) bool {
     const cv = PamConv{ .conv = pamConv, .appdata_ptr = null };
     var h: ?*anyopaque = null;
     if (p.start(p.service, user.ptr, &cv, &h) != PAM_SUCCESS) return false;
-    var r = p.auth(h, 0);
-    if (r == PAM_SUCCESS) r = p.acct(h, 0);
+    // パスワードを確かめるだけ(pam_authenticate)。pam_acct_mgmt は呼ばない: ログインの時の確認(Arch の login →
+    // system-login の account の段など)は、ログイン中の一般ユーザーのプロセスからは通らないことがある(swaylock も呼ばない)
+    const r = p.auth(h, 0);
     _ = p.end(h, r);
     return r == PAM_SUCCESS;
 }

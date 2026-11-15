@@ -15,7 +15,23 @@ esac
 PREFIX_DIR=$(dirname "$SELF_DIR")
 export PATH="$SELF_DIR:$PATH"
 
-LOG="${HOME:-/tmp}/ame-greeter.log"
+# ログと状態の置き場: greeter のユーザーのホーム。ディストリによってはホームが無い・書けない(Arch の greeter など)ので、
+# そのときは XDG_RUNTIME_DIR、それも無ければ /tmp の自分だけのフォルダ(他人が先に作ったものは使わない)
+base="${HOME:-}"
+if [ -z "$base" ] || [ ! -d "$base" ] || [ ! -w "$base" ]; then
+    base="${XDG_RUNTIME_DIR:-}"
+    if [ -z "$base" ] || [ ! -w "$base" ]; then
+        base="${TMPDIR:-/tmp}/ame-greeter-$(id -u)"
+        (umask 077 && mkdir -p "$base") 2>/dev/null
+        # 自分の持ち物で 0700 のものだけ使う
+        if [ "$(ls -ldn "$base" 2>/dev/null | awk '{print $3}')" != "$(id -u)" ] || [ "$(ls -ld "$base" 2>/dev/null | awk '{print $1}')" != "drwx------" ]; then
+            base=""
+        fi
+    fi
+fi
+[ -n "$base" ] && export HOME="$base"
+LOG="${base:+$base/ame-greeter.log}"
+LOG="${LOG:-/dev/null}"
 if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 1048576 ]; then mv -f "$LOG" "$LOG.old"; fi
 log() { printf '%s [ame-greeter] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
 log "=== start (user $(id -un), pid $$) ==="

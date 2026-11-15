@@ -66,8 +66,22 @@ switch_dm() {
         # 有効にできたときだけ、もう一方をやめる(どちらも無い状態にしない)
         if [ -e "/etc/dinit.d/boot.d/$off" ]; then run rm -f "/etc/dinit.d/boot.d/$off"; info "$off: 次の起動から使いません"; fi
     elif command -v systemctl >/dev/null 2>&1; then
-        run systemctl disable "$off.service" >/dev/null 2>&1
-        run systemctl enable "$on.service" >/dev/null 2>&1 && info "$on: 次の起動から有効($off は無効)"
+        # ログイン画面は display-manager.service(別名)を 1 つだけ持てる。ほかの画面(sddm・gdm・lightdm など)が
+        # 持っていると enable が失敗するので、--force で付け替え、今の持ち主をやめる(失敗したら理由を出して止める)
+        cur=$(readlink /etc/systemd/system/display-manager.service 2>/dev/null)
+        cur=${cur##*/}
+        if [ "$DRY" = 1 ]; then
+            info "(dry-run) systemctl enable --force $on.service(今のログイン画面: ${cur:-なし})"
+        elif out=$(systemctl enable --force "$on.service" 2>&1); then
+            info "$on: 次の起動から有効"
+            for u in "$cur" "$off.service"; do
+                [ -n "$u" ] && [ "$u" != "$on.service" ] || continue
+                systemctl is-enabled "$u" >/dev/null 2>&1 && run systemctl disable "$u" >/dev/null 2>&1 && info "$u: 次の起動から使いません"
+            done
+        else
+            info "$on を有効にできませんでした: $out"
+            return 1
+        fi
     elif [ "$(uname -s)" = FreeBSD ]; then
         run sysrc "${off}_enable=NO" >/dev/null
         run sysrc "${on}_enable=YES" >/dev/null && info "$on: 次の起動から有効($off は無効)"
@@ -105,6 +119,16 @@ if [ -z "$GUSER" ] || [ "$GUSER" = root ]; then
     done
 fi
 [ -n "$GUSER" ] || GUSER=_greetd
+
+# greeter のユーザーのホームが無ければ作る(Arch の greeter など。ame-greeter はここにログと状態を書く。
+# 無い・書けないと ame-shell のログイン画面が起動できず、greetd が起動し直しを繰り返す)
+GHOME=$(awk -F: -v u="$GUSER" '$1 == u { print $6; exit }' /etc/passwd)
+if [ -n "$GHOME" ] && [ "$GHOME" != / ] && [ ! -d "$GHOME" ]; then
+    run mkdir -p "$GHOME"
+    run chown "$GUSER" "$GHOME"
+    run chmod 700 "$GHOME"
+    info "$GUSER のホーム $GHOME を作りました"
+fi
 
 # greeter のユーザーが画面(DRM)と入力を使えるように(logind が無い・seatd の環境や Arch で要ることがある)
 for g in video input _seatd; do
