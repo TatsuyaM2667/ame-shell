@@ -102,6 +102,14 @@ pub fn build(b: *std.Build) void {
 EOF
 }
 
+# copy_siblings <道具の .zig> <写し先>: 道具が import する src/cmd の共通のファイル(sysbus.zig・pam.zig など)を写す
+copy_siblings() {
+	for m in $(grep -o '@import("[a-z0-9_]*\.zig")' "$1" | sed 's/.*("\(.*\)")/\1/'); do
+		[ -f "$ROOT/src/cmd/$m" ] && cp "$ROOT/src/cmd/$m" "$2/$m"
+	done
+	return 0
+}
+
 gen_build_wayland() { # $1 = 名前 $2 = wayland / wayland-xkb $3 = プロトコルの XML("…", の並び)
 	x_link='
     exe.linkSystemLibrary("wayland-client");'
@@ -263,6 +271,7 @@ echo "$COMPONENTS" | while IFS='|' read -r name mods needs extra desc; do
 		[ "$name" = ame-clip ] || [ -f "$src" ] || { echo "$name: $src がありません" >&2; exit 1; }
 		mkdir -p "$dir/src" "$dir/protocol"
 		cp "$src" "$dir/src/main.zig"
+		copy_siblings "$src" "$dir/src"
 		plist=""
 		for m in $mods; do cp "$ROOT/protocol/$m.xml" "$dir/protocol/$m.xml"; plist="$plist \"protocol/$m.xml\","; done
 		gen_build_wayland "$name" "$extra" "$plist" > "$dir/build.zig"
@@ -275,8 +284,7 @@ echo "$COMPONENTS" | while IFS='|' read -r name mods needs extra desc; do
 	else
 		mkdir -p "$dir/src/lib"
 		cp "$ROOT/src/cmd/$name.zig" "$dir/src/main.zig"
-		# D-Bus の道具は共通の包み(sysbus.zig)も
-		if grep -q '@import("sysbus.zig")' "$ROOT/src/cmd/$name.zig"; then cp "$ROOT/src/cmd/sysbus.zig" "$dir/src/sysbus.zig"; fi
+		copy_siblings "$ROOT/src/cmd/$name.zig" "$dir/src"
 		# shellcheck disable=SC2086
 		for m in $mods; do cp "$ROOT/src/lib/$m.zig" "$dir/src/lib/$m.zig"; done
 		# shellcheck disable=SC2086

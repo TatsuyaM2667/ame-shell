@@ -24,6 +24,7 @@ test {
     _ = @import("frame/island.zig");
     _ = @import("frame/data.zig");
     _ = @import("media/audio.zig");
+    _ = @import("cmd/pam.zig");
     _ = @import("core/events.zig");
 }
 

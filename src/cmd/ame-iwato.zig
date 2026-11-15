@@ -15,11 +15,7 @@ const c = @cImport({
     @cInclude("wayland-client.h");
     @cInclude("ext-session-lock-v1-client-protocol.h");
     @cInclude("xkbcommon/xkbcommon.h");
-    @cInclude("pwd.h");
     @cInclude("unistd.h");
-    @cInclude("stdlib.h");
-    @cInclude("string.h");
-    @cInclude("dlfcn.h");
     @cInclude("sys/wait.h");
 });
 
@@ -30,110 +26,13 @@ fn die(comptime msg: []const u8, args: anytype) noreturn {
     std.process.exit(1);
 }
 
-// ---------------- 照合(PAM。ヘッダに頼らず ABI を自前で) ----------------
+// ---------------- 照合(PAM / FreeBSD の ame-auth。ame-shell の中のロック画面と共有: pam.zig) ----------------
 
-const PAM_SUCCESS = 0;
-const PAM_PROMPT_ECHO_OFF = 1;
-const PAM_PROMPT_ECHO_ON = 2;
-const PAM_CONV_ERR = 19;
-const PamMessage = extern struct { msg_style: c_int, msg: ?[*:0]const u8 };
-const PamResponse = extern struct { resp: ?[*:0]u8, resp_retcode: c_int };
-const ConvFn = *const fn (c_int, [*c][*c]const PamMessage, [*c][*c]PamResponse, ?*anyopaque) callconv(.C) c_int;
-const PamConv = extern struct { conv: ConvFn, appdata_ptr: ?*anyopaque };
-const PamStart = *const fn ([*:0]const u8, [*:0]const u8, *const PamConv, *?*anyopaque) callconv(.C) c_int;
-const PamAuth = *const fn (?*anyopaque, c_int) callconv(.C) c_int;
+const pam = @import("pam.zig");
 
+// 打っているパスワード
 var pw: [256]u8 = undefined;
 var pw_len: usize = 0;
-
-fn pamConv(num: c_int, msgs: [*c][*c]const PamMessage, resp: [*c][*c]PamResponse, _: ?*anyopaque) callconv(.C) c_int {
-    if (num <= 0) return PAM_CONV_ERR;
-    const n: usize = @intCast(num);
-    const arr: [*]PamResponse = @ptrCast(@alignCast(c.calloc(n, @sizeOf(PamResponse)) orelse return PAM_CONV_ERR));
-    for (0..n) |i| {
-        const m = msgs[i];
-        if (m.*.msg_style == PAM_PROMPT_ECHO_OFF or m.*.msg_style == PAM_PROMPT_ECHO_ON) {
-            pw[pw_len] = 0;
-            arr[i].resp = @ptrCast(c.strdup(@ptrCast(&pw)));
-        }
-    }
-    resp.* = @ptrCast(arr);
-    return PAM_SUCCESS;
-}
-
-/// 照合の方法(ロックする前に決めて、照合できない構成ならロックしない: 閉じ込め防止)
-const Auth = union(enum) { pam: struct { start: PamStart, auth: PamAuth, acct: PamAuth, end: PamAuth, service: [*:0]const u8 }, helper: [*:0]const u8 };
-
-fn exists(p: [*:0]const u8) bool {
-    return c.access(p, c.F_OK) == 0;
-}
-
-fn prepareAuth() Auth {
-    if (builtin.os.tag == .freebsd) {
-        // FreeBSD の pam_unix は root でないと照合できないので、setuid の ame-auth に頼む
-        for ([_][*:0]const u8{ "/usr/local/libexec/ame-shell/ame-auth", "/usr/libexec/ame-shell/ame-auth" }) |p| {
-            const st = std.posix.fstatatZ(std.posix.AT.FDCWD, p, 0) catch continue;
-            if (st.mode & std.posix.S.ISUID != 0 and st.uid == 0) return .{ .helper = p };
-        }
-        die("照合の補助 ame-auth(root の setuid)がありません。ame-shell の install-session.sh で入れてください", .{});
-    }
-    const h = c.dlopen("libpam.so.0", c.RTLD_NOW) orelse c.dlopen("libpam.so", c.RTLD_NOW) orelse die("libpam がありません", .{});
-    const service: [*:0]const u8 = if (exists("/etc/pam.d/ame-shell") or exists("/usr/lib/pam.d/ame-shell"))
-        "ame-shell"
-    else if (exists("/etc/pam.d/swaylock") or exists("/usr/lib/pam.d/swaylock"))
-        "swaylock"
-    else
-        die("PAM サービス ame-shell がありません(install-session.sh で入れてください)", .{});
-    return .{ .pam = .{
-        .start = @ptrCast(c.dlsym(h, "pam_start") orelse die("libpam が不完全です", .{})),
-        .auth = @ptrCast(c.dlsym(h, "pam_authenticate") orelse die("libpam が不完全です", .{})),
-        .acct = @ptrCast(c.dlsym(h, "pam_acct_mgmt") orelse die("libpam が不完全です", .{})),
-        .end = @ptrCast(c.dlsym(h, "pam_end") orelse die("libpam が不完全です", .{})),
-        .service = service,
-    } };
-}
-
-/// 子プロセスの中で照合する(PAM の失敗時の待ちで画面が止まらないように)
-fn check(auth: Auth) bool {
-    // 試験用: Debug ビルドの入れ子の試験セッション(AME_SESSION_NESTED=1)で AME_LOCK_FAKE=1 のときだけ "ame" で外せる。
-    // 入れる版(ReleaseFast など)では何をしても効かない
-    if (builtin.mode == .Debug and std.posix.getenv("AME_LOCK_FAKE") != null and std.mem.eql(u8, std.posix.getenv("AME_SESSION_NESTED") orelse "", "1"))
-        return std.mem.eql(u8, pw[0..pw_len], "ame");
-    switch (auth) {
-        .helper => |hp| {
-            var p: [2]c_int = undefined;
-            if (c.pipe(&p) != 0) return false;
-            const pid = c.fork();
-            if (pid < 0) return false;
-            if (pid == 0) {
-                _ = c.dup2(p[0], 0);
-                _ = c.close(p[0]);
-                _ = c.close(p[1]);
-                const argv = [_:null]?[*:0]const u8{ hp, null };
-                const envp = [_:null]?[*:0]const u8{null};
-                _ = c.execve(hp, @ptrCast(&argv), @ptrCast(&envp));
-                c._exit(2);
-            }
-            _ = c.close(p[0]);
-            _ = c.write(p[1], &pw, pw_len);
-            _ = c.close(p[1]);
-            var status: c_int = 0;
-            if (c.waitpid(pid, &status, 0) != pid) return false;
-            return c.WIFEXITED(status) and c.WEXITSTATUS(status) == 0;
-        },
-        .pam => |pam| {
-            // 名前は書き換えられる環境変数ではなく、実 UID から
-            const ent = c.getpwuid(c.getuid()) orelse return false;
-            const conv = PamConv{ .conv = pamConv, .appdata_ptr = null };
-            var h: ?*anyopaque = null;
-            if (pam.start(pam.service, ent.*.pw_name, &conv, &h) != PAM_SUCCESS) return false;
-            var r = pam.auth(h, 0);
-            if (r == PAM_SUCCESS) r = pam.acct(h, 0);
-            _ = pam.end(h, r);
-            return r == PAM_SUCCESS;
-        },
-    }
-}
 
 // ---------------- 画面 ----------------
 
@@ -366,7 +265,10 @@ pub fn main() u8 {
         }
     }
     // 照合できない構成ならロックしない(閉じ込め防止)
-    const auth = prepareAuth();
+    const auth = switch (pam.prepare()) {
+        .ok => |a| a,
+        .err => |why| die("{s}", .{why}),
+    };
     xkb_ctx = c.xkb_context_new(c.XKB_CONTEXT_NO_FLAGS) orelse die("xkbcommon を使えません", .{});
     const dpy = c.wl_display_connect(null) orelse die("画面(Wayland)につながりません", .{});
     const reg = c.wl_display_get_registry(dpy);
@@ -411,7 +313,7 @@ pub fn main() u8 {
             const pid = c.fork();
             if (pid == 0) {
                 _ = c.close(p[0]);
-                const b: u8 = if (check(auth)) 1 else 0;
+                const b: u8 = if (pam.check(auth, pw[0..pw_len])) 1 else 0;
                 _ = c.write(p[1], &b, 1);
                 c._exit(0);
             }

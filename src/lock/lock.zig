@@ -30,20 +30,8 @@ const musiccard = @import("../media/musiccard.zig");
 /// 顔認証が続けてこの回数だけ一致しなければ、パスワードで外すまで顔認証を使わない(他人が何度も試せないように)
 const MAX_FACE_FAILS = 3;
 
-// ---- PAM(ヘッダが無くても動くよう ABI を自前で定義し、dlopen で解決する) ----
-const PAM_SUCCESS = 0;
-const PAM_PROMPT_ECHO_OFF = 1;
-const PAM_PROMPT_ECHO_ON = 2;
-const PAM_CONV_ERR = 19;
-const PamMessage = extern struct { msg_style: c_int, msg: ?[*:0]const u8 };
-const PamResponse = extern struct { resp: ?[*:0]u8, resp_retcode: c_int };
-const ConvFn = *const fn (c_int, [*c][*c]const PamMessage, [*c][*c]PamResponse, ?*anyopaque) callconv(.C) c_int;
-const PamConv = extern struct { conv: ConvFn, appdata_ptr: ?*anyopaque };
-const PamStart = *const fn ([*:0]const u8, [*:0]const u8, *const PamConv, *?*anyopaque) callconv(.C) c_int;
-const PamAuth = *const fn (?*anyopaque, c_int) callconv(.C) c_int;
-const PamEnd = *const fn (?*anyopaque, c_int) callconv(.C) c_int;
-
-const Pam = struct { start: PamStart, auth: PamAuth, acct: PamAuth, end: PamEnd };
+// パスワードの照合(PAM / FreeBSD の ame-auth)は、単体のロック ame-iwato と共有する
+const pam = @import("../cmd/pam.zig");
 
 const MAX_OUT = 8;
 
@@ -67,10 +55,8 @@ pub const Lock = struct {
     ripple_started: bool = false,
     /// ログイン画面(greeter.zig)として動いている: 認証は greetd、成功したら ame-shell を終える
     greeter: bool = false,
-    pam: ?Pam = null,
-    service: [:0]const u8 = "ame-shell",
-    /// FreeBSD: パスワード照合の補助(root の setuid の ame-auth)
-    auth_helper: ?[:0]const u8 = null,
+    /// 照合の方法(preflight で決める。PAM か FreeBSD の ame-auth)
+    checker: ?pam.Auth = null,
     pw: [256]u8 = undefined,
     pw_len: usize = 0,
     // 認証の子プロセス
@@ -144,43 +130,15 @@ pub const Lock = struct {
         @memcpy(self.msg[0..self.msg_len], m[0..self.msg_len]);
     }
 
-    fn exists(path: [:0]const u8) bool {
-        return c.access(path.ptr, c.R_OK) == 0;
-    }
-
     /// ロックしてよい構成かを確認し、問題があれば理由を返す
     fn preflight(self: *Lock) ?[]const u8 {
         if (!self.app.cfg.lock_enabled) return "ロックは設定で無効になっています";
         if (self.app.lock_mgr == null) return "コンポジタが ext-session-lock-v1 に未対応のためロックできません";
-        // FreeBSD: pam_unix は root でないと照合できないので、setuid の ame-auth に照合してもらう
-        if (@import("builtin").os.tag == .freebsd) {
-            self.auth_helper = findAuthHelper() orelse return "ame-auth(照合の補助)が入っていません(sh install.sh で入れ直してください)";
-            if (!exists("/usr/local/etc/pam.d/ame-shell") and !exists("/etc/pam.d/ame-shell"))
-                return "PAM サービス ame-shell が未インストールです(sh install.sh で入れ直してください)";
-            return null;
+        // PAM が使えるか(FreeBSD は setuid の ame-auth)。照合できない構成ならロックしない
+        switch (pam.prepare()) {
+            .ok => |a| self.checker = a,
+            .err => |why| return why,
         }
-        if (self.pam == null) {
-            const h = c.dlopen("libpam.so.0", c.RTLD_NOW) orelse c.dlopen("libpam.so", c.RTLD_NOW) orelse return "libpam が見つからないためロックできません";
-            const s = c.dlsym(h, "pam_start") orelse return "libpam が不完全です";
-            const a = c.dlsym(h, "pam_authenticate") orelse return "libpam が不完全です";
-            const ac = c.dlsym(h, "pam_acct_mgmt") orelse return "libpam が不完全です";
-            const e = c.dlsym(h, "pam_end") orelse return "libpam が不完全です";
-            self.pam = .{ .start = @ptrCast(s), .auth = @ptrCast(a), .acct = @ptrCast(ac), .end = @ptrCast(e) };
-        }
-        // サービス設定: /etc/pam.d が優先、無ければ /usr/lib/pam.d(Chimera はこちら)
-        if (exists("/etc/pam.d/ame-shell") or exists("/usr/lib/pam.d/ame-shell")) {
-            self.service = "ame-shell";
-        } else if (exists("/etc/pam.d/swaylock") or exists("/usr/lib/pam.d/swaylock")) {
-            std.log.info("lock: PAM サービス ame-shell が未インストールのため swaylock の設定を使います", .{});
-            self.service = "swaylock";
-        } else return "PAM サービス ame-shell が未インストールです(install-session.sh を実行してください)";
-        // pam_unix はパスワード照合に setuid の unix_chkpwd を使う
-        var found = false;
-        for ([_][:0]const u8{ "/usr/bin/unix_chkpwd", "/usr/sbin/unix_chkpwd", "/sbin/unix_chkpwd" }) |p| {
-            const st = std.posix.fstatat(std.posix.AT.FDCWD, p, 0) catch continue;
-            if (st.mode & std.posix.S.ISUID != 0) found = true;
-        }
-        if (!found) return "unix_chkpwd(setuid)が無いため、一般ユーザーでは認証できません";
         return null;
     }
 
@@ -211,11 +169,6 @@ pub const Lock = struct {
     /// 通ったらロックを外して登録を始める。Esc でやめられる
     pub fn lockForEnroll(self: *Lock) []const u8 {
         if (self.locked) return "error: ロック中です";
-        if (@import("builtin").os.tag == .freebsd and findAuthHelper() == null) {
-            const why = "パスワードを確かめられないため、顔を登録できません(ame-auth を入れてください)";
-            self.app.osd.info(why);
-            return "error: ame-auth not found";
-        }
         if (self.preflight()) |why| {
             self.app.osd.info(why);
             return "error: パスワードを確かめられません";
@@ -430,11 +383,9 @@ pub const Lock = struct {
                 _ = c.write(fds[1], &out, 1 + ml);
                 c._exit(0);
             }
-            // 試験用: Debug ビルドの入れ子の試験セッション(AME_SESSION_NESTED=1)で AME_LOCK_FAKE=1 のときだけ、パスワード "ame" で解除できる。
-            // 入れる版(ReleaseFast など)では環境変数を何にしても効かない(ロックを無力化できないように)
-            const fake = @import("builtin").mode == .Debug and std.posix.getenv("AME_LOCK_FAKE") != null and
-                std.mem.eql(u8, std.posix.getenv("AME_SESSION_NESTED") orelse "", "1");
-            const ok = if (fake) std.mem.eql(u8, self.pw[0..self.pw_len], "ame") else if (self.auth_helper) |hp| self.helperCheck(hp) else self.pamCheck();
+            // 照合(Debug の試験用の口 AME_LOCK_FAKE も pam.check の中)
+            const ok = if (self.checker) |a| pam.check(a, self.pw[0..self.pw_len]) else false;
+            @memset(&self.pw, 0);
             const b: u8 = if (ok) 1 else 0;
             _ = c.write(fds[1], &b, 1);
             c._exit(0);
@@ -452,45 +403,6 @@ pub const Lock = struct {
             self.setMsg("確認できませんでした。もう一度入力してください");
         };
         self.scheduleAll();
-    }
-
-    /// FreeBSD: setuid の ame-auth にパスワードを標準入力で渡して照合してもらう(認証の子プロセスの中で呼ぶ)
-    fn helperCheck(self: *Lock, helper: [:0]const u8) bool {
-        // ame-shell は SIGCHLD を無視している。待てるように既定に戻す(この子プロセスの中だけ)
-        @import("../platform/sys.zig").childDefaults();
-        var p: [2]c_int = undefined;
-        if (c.pipe(&p) != 0) return false;
-        const pid = c.fork();
-        if (pid < 0) return false;
-        if (pid == 0) {
-            _ = c.dup2(p[0], 0);
-            _ = c.close(p[0]);
-            _ = c.close(p[1]);
-            const argv = [_:null]?[*:0]const u8{ helper.ptr, null };
-            const envp = [_:null]?[*:0]const u8{null};
-            _ = c.execve(helper.ptr, @ptrCast(&argv), @ptrCast(&envp));
-            c._exit(2);
-        }
-        _ = c.close(p[0]);
-        _ = c.write(p[1], &self.pw, self.pw_len);
-        _ = c.close(p[1]);
-        @memset(&self.pw, 0);
-        var status: c_int = 0;
-        if (c.waitpid(pid, &status, 0) != pid) return false;
-        return c.WIFEXITED(status) and c.WEXITSTATUS(status) == 0;
-    }
-
-    fn pamCheck(self: *Lock) bool {
-        const pam = self.pam orelse return false;
-        var user_buf: [64]u8 = undefined;
-        const user = currentUser(&user_buf) orelse return false;
-        const conv = PamConv{ .conv = pamConv, .appdata_ptr = self };
-        var h: ?*anyopaque = null;
-        if (pam.start(self.service.ptr, user.ptr, &conv, &h) != PAM_SUCCESS) return false;
-        var r = pam.auth(h, 0);
-        if (r == PAM_SUCCESS) r = pam.acct(h, 0);
-        _ = pam.end(h, r);
-        return r == PAM_SUCCESS;
     }
 
     /// 顔認証を始める(ロック画面を触った・入力画面をクリックした)。ロック画面は ame-shell の中で、
@@ -888,43 +800,9 @@ pub const Lock = struct {
     }
 };
 
-/// FreeBSD: root が持ち主で setuid の ame-auth を探す(install-session.sh が libexec に入れる)
-fn findAuthHelper() ?[:0]const u8 {
-    for ([_][:0]const u8{ "/usr/local/libexec/ame-shell/ame-auth", "/usr/libexec/ame-shell/ame-auth" }) |p| {
-        const st = std.posix.fstatat(std.posix.AT.FDCWD, p, 0) catch continue;
-        if (st.mode & std.posix.S.ISUID != 0 and st.uid == 0) return p;
-    }
-    return null;
-}
-
-/// 今のユーザー名(無ければ空)
+/// 今のユーザー名(無ければ空。実 UID から。pam.zig)
 pub fn currentUserName(buf: []u8) []const u8 {
-    return currentUser(buf) orelse "";
-}
-
-/// 今のユーザーの名前。PAM で照合する相手なので、書き換えられる環境変数(USER・LOGNAME)ではなく実 UID から取る
-fn currentUser(buf: []u8) ?[:0]const u8 {
-    const pw = c.getpwuid(c.getuid()) orelse return null;
-    const name = std.mem.sliceTo(pw.*.pw_name orelse return null, 0);
-    if (name.len == 0) return null;
-    return std.fmt.bufPrintZ(buf, "{s}", .{name}) catch null;
-}
-
-/// PAM の会話関数: パスワード入力を求められたら(子プロセス内の)バッファを渡す
-fn pamConv(num: c_int, msgs: [*c][*c]const PamMessage, resp: [*c][*c]PamResponse, data: ?*anyopaque) callconv(.C) c_int {
-    const self: *Lock = @ptrCast(@alignCast(data orelse return PAM_CONV_ERR));
-    if (num <= 0) return PAM_CONV_ERR;
-    const n: usize = @intCast(num);
-    const arr: [*]PamResponse = @ptrCast(@alignCast(c.calloc(n, @sizeOf(PamResponse)) orelse return PAM_CONV_ERR));
-    for (0..n) |i| {
-        const m = msgs[i];
-        if (m.*.msg_style == PAM_PROMPT_ECHO_OFF or m.*.msg_style == PAM_PROMPT_ECHO_ON) {
-            self.pw[self.pw_len] = 0;
-            arr[i].resp = @ptrCast(c.strdup(@ptrCast(&self.pw)));
-        }
-    }
-    resp.* = @ptrCast(arr);
-    return PAM_SUCCESS;
+    return pam.currentUser(buf) orelse "";
 }
 
 fn onLocked(_: ?*anyopaque, _: ?*c.struct_ext_session_lock_v1) callconv(.C) void {
