@@ -1,6 +1,8 @@
 // ame-rec: 画面を動画に録る(wf-recorder の代わり)。
 //
-//   ame-rec -f 保存先.mp4 [-o 出力の名前] [-r 1 秒のコマ数] [--no-audio] [--cpu]
+//   ame-rec -f 保存先.mp4 [-g "x,y wxh"] [-o 出力の名前] [-r 1 秒のコマ数] [--no-audio] [--cpu]
+//   ame-rec -f 保存先.gif [-g "x,y wxh"]   GIF で(音なし。15 コマ/秒、その動画だけの 256 色)
+//     -g は録る範囲(撮った画素の座標。slurp・wf-recorder と同じ書き方)
 //
 // 撮るのは自分(ext-image-copy-capture-v1。画面が変わったときだけ 1 コマ)、動画にするのは ffmpeg(標準入力に生の画素を流す)。
 // 音は既定の出力で鳴っている音(PulseAudio の口の @DEFAULT_MONITOR@)。
@@ -36,7 +38,7 @@ fn die(comptime msg: []const u8, args: anytype) noreturn {
 }
 
 fn usage() noreturn {
-    std.io.getStdErr().writeAll("使い方: ame-rec -f 保存先.mp4 [-o 出力の名前] [-r 1 秒のコマ数] [--no-audio] [--cpu]\n") catch {};
+    std.io.getStdErr().writeAll("使い方: ame-rec -f 保存先.mp4|.gif [-g \"x,y wxh\"] [-o 出力の名前] [-r 1 秒のコマ数] [--no-audio] [--cpu]\n") catch {};
     std.process.exit(2);
 }
 
@@ -163,23 +165,63 @@ fn requestFrame() void {
 
 // ---------------- ffmpeg ----------------
 
-const Opts = struct { path: []const u8 = "", output: ?[]const u8 = null, fps: u32 = 30, audio: bool = true, cpu: bool = false };
+const Opts = struct {
+    path: []const u8 = "",
+    output: ?[]const u8 = null,
+    fps: u32 = 30,
+    audio: bool = true,
+    cpu: bool = false,
+    /// -g "x,y wxh": この範囲だけ(撮った画素の座標。slurp・wf-recorder と同じ書き方)
+    geom: ?[4]u32 = null,
 
-/// ffmpeg の引数(標準入力 = 生の画素)。gpu なら VAAPI で h264、でなければ libx264
+    /// .gif で保存する(音なし・CPU で、色の表を作って変換する)
+    fn gif(o: Opts) bool {
+        return std.ascii.endsWithIgnoreCase(o.path, ".gif");
+    }
+};
+
+/// "x,y wxh" を読む
+fn parseGeom(s: []const u8) ?[4]u32 {
+    var it = std.mem.tokenizeAny(u8, s, ", x");
+    var g: [4]u32 = undefined;
+    for (&g) |*v| v.* = std.fmt.parseInt(u32, it.next() orelse return null, 10) catch return null;
+    if (it.next() != null or g[2] == 0 or g[3] == 0) return null;
+    return g;
+}
+
+/// 範囲を画面の中に収め、幅と高さを偶数にする(動画の形式 yuv420 の決まり)。小さすぎれば null
+fn cropRect(g: [4]u32, w: u32, h: u32) ?[4]u32 {
+    if (g[0] >= w or g[1] >= h) return null;
+    const cw = @min(g[2], w - g[0]) & ~@as(u32, 1);
+    const ch = @min(g[3], h - g[1]) & ~@as(u32, 1);
+    if (cw < 2 or ch < 2) return null;
+    return .{ g[0], g[1], cw, ch };
+}
+
+/// ffmpeg の引数(標準入力 = 生の画素)。gpu なら VAAPI で h264、でなければ libx264。.gif なら GIF
 fn ffmpegArgs(a: std.mem.Allocator, o: Opts, pix: []const u8, w: u32, h: u32, gpu: bool) ![]const []const u8 {
     var v = std.ArrayList([]const u8).init(a);
     try v.appendSlice(&.{ "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-thread_queue_size", "64", "-f", "rawvideo", "-pix_fmt", pix, "-s", try std.fmt.allocPrint(a, "{d}x{d}", .{ w, h }), "-use_wallclock_as_timestamps", "1", "-i", "-" });
-    if (o.audio) try v.appendSlice(&.{ "-thread_queue_size", "1024", "-f", "pulse", "-i", "@DEFAULT_MONITOR@" });
-    if (gpu) {
-        try v.appendSlice(&.{ "-vaapi_device", "/dev/dri/renderD128", "-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi", "-qp", "22" });
+    const audio = o.audio and !o.gif();
+    if (audio) try v.appendSlice(&.{ "-thread_queue_size", "1024", "-f", "pulse", "-i", "@DEFAULT_MONITOR@" });
+    // 範囲を切り出す(指定が無ければ全体)
+    const crop = if (o.geom) |g| (if (cropRect(g, w, h)) |r| try std.fmt.allocPrint(a, "crop={d}:{d}:{d}:{d},", .{ r[2], r[3], r[0], r[1] }) else "") else "";
+    if (o.gif()) {
+        // 15 コマ/秒にそろえ、その動画だけの 256 色の表を作ってから GIF に(色がにじまない)
+        try v.appendSlice(&.{ "-vf", try std.fmt.allocPrint(a, "{s}fps=15,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4", .{crop}), "-loop", "0" });
+    } else if (gpu) {
+        try v.appendSlice(&.{ "-vaapi_device", "/dev/dri/renderD128", "-vf", try std.fmt.allocPrint(a, "{s}format=nv12,hwupload", .{crop}), "-c:v", "h264_vaapi", "-qp", "22" });
     } else {
+        if (crop.len > 0) try v.appendSlice(&.{ "-vf", crop[0 .. crop.len - 1] });
         try v.appendSlice(&.{ "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p" });
     }
-    if (o.audio) try v.appendSlice(&.{ "-c:a", "aac", "-b:a", "192k" });
+    if (audio) try v.appendSlice(&.{ "-c:a", "aac", "-b:a", "192k" });
     // 画面が止まっている間はコマを送らないので、届いた時刻のまま書く(passthrough。vfr だと 25 コマ/秒に並べ直されて短くなる)
     // - で始まる保存先は ffmpeg がオプションとして読むので、./ を付ける
     const out = if (std.mem.startsWith(u8, o.path, "-")) try std.fmt.allocPrint(a, "./{s}", .{o.path}) else o.path;
-    try v.appendSlice(&.{ "-fps_mode", "passthrough", "-movflags", "+faststart", out });
+    if (o.gif()) {
+        try v.append(out);
+    } else try v.appendSlice(&.{ "-fps_mode", "passthrough", "-movflags", "+faststart", out });
     return v.items;
 }
 
@@ -197,13 +239,14 @@ fn parse(args: []const []const u8) Opts {
             o.audio = false;
         } else if (std.mem.eql(u8, s, "--cpu")) {
             o.cpu = true;
-        } else if (std.mem.eql(u8, s, "-f") or std.mem.eql(u8, s, "-o") or std.mem.eql(u8, s, "-r")) {
+        } else if (std.mem.eql(u8, s, "-f") or std.mem.eql(u8, s, "-o") or std.mem.eql(u8, s, "-r") or std.mem.eql(u8, s, "-g")) {
             i += 1;
             if (i >= args.len) usage();
             const v = args[i];
             switch (s[1]) {
                 'f' => o.path = v,
                 'o' => o.output = v,
+                'g' => o.geom = parseGeom(v) orelse usage(),
                 else => {
                     o.fps = std.fmt.parseInt(u32, v, 10) catch usage();
                     if (o.fps == 0 or o.fps > 240) usage();
@@ -341,4 +384,23 @@ test "- で始まる保存先" {
     defer ar.deinit();
     const args = try ffmpegArgs(ar.allocator(), .{ .path = "-x.mp4", .audio = false }, "bgr0", 4, 4, false);
     try std.testing.expectEqualStrings("./-x.mp4", args[args.len - 1]);
+}
+
+test "範囲" {
+    try std.testing.expectEqual([4]u32{ 10, 20, 300, 200 }, parseGeom("10,20 300x200").?);
+    try std.testing.expect(parseGeom("10,20") == null);
+    try std.testing.expect(parseGeom("1,2 0x5") == null);
+    // 画面の外ははみ出さない・幅と高さは偶数
+    try std.testing.expectEqual([4]u32{ 10, 20, 90, 80 }, cropRect(.{ 10, 20, 301, 81 }, 100, 100).?);
+    try std.testing.expect(cropRect(.{ 200, 0, 10, 10 }, 100, 100) == null);
+}
+
+test "GIF の引数" {
+    var ar = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer ar.deinit();
+    const args = try ffmpegArgs(ar.allocator(), .{ .path = "a.gif", .geom = .{ 0, 0, 64, 64 } }, "bgr0", 128, 128, true);
+    try std.testing.expectEqualStrings("a.gif", args[args.len - 1]);
+    var has_pulse = false;
+    for (args) |x| has_pulse = has_pulse or std.mem.eql(u8, x, "pulse");
+    try std.testing.expect(!has_pulse); // GIF は音なし
 }

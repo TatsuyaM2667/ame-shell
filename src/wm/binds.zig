@@ -70,6 +70,9 @@ const fixed = [_]Bind{
     .{ .keysym = c.XKB_KEY_Print, .mods = NONE, .action = .{ .ame = "screenshot region" } },
     .{ .keysym = c.XKB_KEY_Print, .mods = SHIFT, .action = .{ .ame = "screenshot full" } },
     .{ .keysym = c.XKB_KEY_Print, .mods = SUPER, .action = .{ .ame = "screenshot clip" } },
+    // 録画: Ctrl+Print で範囲を選んで録る、Ctrl+Shift+Print で GIF に(録画中にもう一度押すと止める)
+    .{ .keysym = c.XKB_KEY_Print, .mods = CTRL, .action = .{ .ame = "record region" } },
+    .{ .keysym = c.XKB_KEY_Print, .mods = CTRL | SHIFT, .action = .{ .ame = "record gif" } },
     // メディアキー(OSD 付き)
     .{ .keysym = c.XKB_KEY_XF86AudioRaiseVolume, .mods = NONE, .action = .{ .ame = "volume up" } },
     .{ .keysym = c.XKB_KEY_XF86AudioLowerVolume, .mods = NONE, .action = .{ .ame = "volume down" } },

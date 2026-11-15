@@ -507,13 +507,22 @@ fn toggleRecord(f: *Frame) void {
         f.sidev.recording = !f.sidev.recording;
         return;
     }
-    if (f.sidev.recording) {
-        // ame-rec は SIGINT で ffmpeg にファイルを仕上げさせてから終わる
-        sys.spawnDetached("pkill -INT -x ame-rec");
-        f.sidev.recording = false;
-        f.app.notifs.post("ame-shell", "録画を保存しました", f.sidev.rec_path[0..f.sidev.rec_len], 0);
-        return;
-    }
+    if (f.sidev.recording) return stopRecording(f);
+    startRecording(f, null, null, false);
+}
+
+/// 録画を止める(ame-rec は SIGINT で ffmpeg にファイルを仕上げさせてから終わる)
+pub fn stopRecording(f: *Frame) void {
+    if (!f.sidev.recording) return;
+    sys.spawnDetached("pkill -INT -x ame-rec");
+    f.sidev.recording = false;
+    f.app.notifs.post("ame-shell", "録画を保存しました", f.sidev.rec_path[0..f.sidev.rec_len], 0);
+}
+
+/// 録画を始める。output = 録る画面(null なら ame-rec の既定)、rect = 範囲(撮った画素の座標。null なら全体)、
+/// gif = GIF で(音なし)。範囲はスクショの範囲選択(desktop/shot.zig)から来る
+pub fn startRecording(f: *Frame, output: ?[]const u8, rect: ?[4]u32, gif: bool) void {
+    if (f.sidev.recording) return;
     // ame-rec は ext-image-copy-capture で撮る(River 0.4 / 0.5。River 0.3 には無い)
     if (f.app.icc_mgr == null) {
         theme.flashError(f.app);
@@ -526,7 +535,8 @@ fn toggleRecord(f: *Frame) void {
         f.app.notifs.post("ame-shell", "録画できません", hint, 0);
         return;
     }
-    // ~/Videos/rec_YYYYmmdd_HHMMSS.mp4
+    // ~/Videos/rec_YYYYmmdd_HHMMSS.mp4(.gif)
+    const home = std.posix.getenv("HOME") orelse return;
     var tm: c.struct_tm = undefined;
     var t = c.time(null);
     _ = c.localtime_r(&t, &tm);
@@ -535,11 +545,20 @@ fn toggleRecord(f: *Frame) void {
     var dir: [512]u8 = undefined;
     const dirz = std.fmt.bufPrintZ(&dir, "{s}/Videos", .{home}) catch return;
     _ = c.mkdir(dirz.ptr, 0o755);
-    const path = std.fmt.bufPrint(&f.sidev.rec_path, "{s}/rec_{s}.mp4", .{ dirz, stamp[0..n] }) catch return;
+    const path = std.fmt.bufPrint(&f.sidev.rec_path, "{s}/rec_{s}.{s}", .{ dirz, stamp[0..n], if (gif) "gif" else "mp4" }) catch return;
     f.sidev.rec_len = path.len;
-    // 音も録る(既定の出力で鳴っている音。ame-rec が @DEFAULT_MONITOR@ から)。保存先は文に埋め込まず引数で渡す
+    // 保存先・画面・範囲は文に埋め込まず引数で渡す($1 $2 $3)。範囲を選んだときは、選ぶ画面が消えるのを待ってから録る
     var pz: [520]u8 = undefined;
-    sys.spawnDetachedArgs("exec ame-rec -f \"$1\" >/dev/null 2>&1", &.{(std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return).ptr});
+    var oz: [96]u8 = undefined;
+    var gz: [64]u8 = undefined;
+    const pathz = std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return;
+    const outz = std.fmt.bufPrintZ(&oz, "{s}", .{output orelse ""}) catch return;
+    const geomz = if (rect) |r| (std.fmt.bufPrintZ(&gz, "{d},{d} {d}x{d}", .{ r[0], r[1], r[2], r[3] }) catch return) else std.fmt.bufPrintZ(&gz, "", .{}) catch return;
+    sys.spawnDetachedArgs(
+        \\[ -n "$3" ] && sleep 0.4
+        \\set -- -f "$1" ${2:+-o "$2"} ${3:+-g "$3"}
+        \\exec ame-rec "$@" >/dev/null 2>&1
+    , &.{ pathz.ptr, outz.ptr, geomz.ptr });
     f.sidev.recording = true;
-    f.app.notifs.post("ame-shell", "録画を開始しました(もう一度押すと停止)", path, 0);
+    f.app.notifs.post("ame-shell", if (gif) "GIF の録画を開始しました(もう一度押すと停止)" else "録画を開始しました(もう一度押すと停止)", path, 0);
 }

@@ -202,6 +202,7 @@ const help =
     \\  workspace <1-9>        (ワークスペース切替)
     \\  window close|fullscreen|float|focus-next|focus-prev|swap-next|swap-prev
     \\  screenshot region|full|clip   (範囲 / 全体を ~/Pictures/Screenshots に保存してコピー / 全体をコピーだけ)
+    \\  record toggle|region|gif|stop  (録画: 全体を録る・止める / 範囲を選んで録る / 範囲を選んで GIF に。~/Videos に保存)
     \\  avatar pick           (ユーザーの写真をファイル選択の画面から選ぶ)
     \\  media play-pause|next|previous   (再生中の曲の操作)
     \\  net wifi|saved|radio|ssid|bt|bt-devices   (Wi-Fi・Bluetooth の状態。NetworkManager / BlueZ に D-Bus で聞く)
@@ -421,8 +422,21 @@ fn handle(app: *App, line: []const u8, out: []u8) []const u8 {
         if (eq(u8, arg, "play-pause") or eq(u8, arg, "toggle")) app.media.toggle() else if (eq(u8, arg, "next")) app.media.next() else if (eq(u8, arg, "previous") or eq(u8, arg, "prev")) app.media.prev() else return "error: media play-pause|next|previous";
     } else if (eq(u8, cmd, "net")) {
         return "error: net は ame-ctl から(答えは裏で聞く: Client.run)";
+    } else if (eq(u8, cmd, "record")) {
+        // 録画: toggle(全体を録る / 止める)・region(範囲を選んで録る)・gif(範囲を選んで GIF)・stop
+        const f = app.activeFrame() orelse return "error: no frame";
+        const side = @import("../frame/side.zig");
+        const shot = @import("../desktop/shot.zig");
+        if (arg.len == 0 or eq(u8, arg, "toggle")) {
+            if (f.sidev.recording) side.stopRecording(f) else side.startRecording(f, null, null, false);
+        } else if (eq(u8, arg, "stop")) {
+            side.stopRecording(f);
+        } else if (eq(u8, arg, "region") or eq(u8, arg, "gif")) {
+            if (f.sidev.recording) side.stopRecording(f) else shot.take(app, if (eq(u8, arg, "gif")) .gif else .record, 0);
+        } else return "error: record toggle|region|gif|stop";
     } else if (eq(u8, cmd, "screenshot")) {
         const k = @import("../desktop/shot.zig").Kind.parse(if (arg.len > 0) arg else "region") orelse return "error: screenshot region|full|clip";
+        if (k == .record or k == .gif) return "error: screenshot region|full|clip(録画は record)";
         @import("../desktop/shot.zig").take(app, k, 0);
     } else if (eq(u8, cmd, "hand")) {
         // ハンド操作(カメラで手の動きを見て、カーソルと窓を操作する)

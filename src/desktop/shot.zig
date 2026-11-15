@@ -34,6 +34,10 @@ pub const Kind = enum {
     full,
     /// 画面全体をコピーだけ
     clip,
+    /// 範囲を選んで録画(ame-rec。mp4)
+    record,
+    /// 範囲を選んで GIF に録る
+    gif,
 
     pub fn parse(s: []const u8) ?Kind {
         return std.meta.stringToEnum(Kind, s);
@@ -241,7 +245,7 @@ fn fReady(data: ?*anyopaque, _: ?*c.struct_ext_image_copy_capture_frame_v1) call
     s.px_h = s.buf_h;
     releaseCapture(s);
     switch (s.kind) {
-        .region => openOverlay(s),
+        .region, .record, .gif => openOverlay(s),
         .full, .clip => startEncode(s, 0, 0, s.px_w, s.px_h),
     }
 }
@@ -401,6 +405,14 @@ fn confirm(s: *Shot, r: [4]f32) void {
     const y1: u32 = @intFromFloat(std.math.clamp(@round((r[1] + r[3]) * fy), 0, @as(f32, @floatFromInt(s.px_h))));
     sf.schedule();
     if (x1 <= x0 or y1 <= y0) return cancel(s);
+    if (s.kind == .record or s.kind == .gif) {
+        // 録画: 選ぶ画面を閉じ、選んだ範囲を ame-rec に渡す(画素は撮った画面の座標のまま)
+        cancel(s);
+        const f = s.app.activeFrame() orelse return;
+        const out_name = if (s.out) |o| o.name.get() else null;
+        @import("../frame/side.zig").startRecording(f, out_name, .{ x0, y0, x1 - x0, y1 - y0 }, s.kind == .gif);
+        return;
+    }
     startEncode(s, x0, y0, x1 - x0, y1 - y0);
 }
 
@@ -718,6 +730,8 @@ fn takeExternal(app: *App, kind: Kind, delay_ms: u32) void {
     const need: []const []const u8 = switch (kind) {
         .region => &.{ "grim", "slurp", "wl-copy" },
         .full, .clip => &.{ "grim", "wl-copy" },
+        // 録画は ext-image-copy-capture のあるコンポジタだけ(side.startRecording が知らせる)
+        .record, .gif => return if (app.activeFrame()) |f| @import("../frame/side.zig").startRecording(f, null, null, kind == .gif),
     };
     if (!deps.require(app, "スクリーンショットを撮れません", need)) return;
 
@@ -741,6 +755,7 @@ fn takeExternal(app: *App, kind: Kind, delay_ms: u32) void {
         .region => std.fmt.bufPrintZ(&cmd_buf, "{s}D=\"$1\"; G=$(slurp) || exit 0; F={s}; grim -g \"$G\" \"$F\" && wl-copy < \"$F\"", .{ delay, file }),
         .full => std.fmt.bufPrintZ(&cmd_buf, "{s}D=\"$1\"; F={s}; grim \"$F\" && wl-copy < \"$F\"", .{ delay, file }),
         .clip => std.fmt.bufPrintZ(&cmd_buf, "{s}grim - | wl-copy", .{delay}),
+        .record, .gif => unreachable, // 上で返している
     } catch return;
     var db: [520]u8 = undefined;
     const dirz = std.fmt.bufPrintZ(&db, "{s}", .{dir}) catch return;
