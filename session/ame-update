@@ -5,6 +5,7 @@
 #   ame-update --check     更新があるかを表示するだけ(何も変えない)
 #   ame-update --no-pkg    パッケージは更新しない
 #   ame-update --no-self   ame-shell は更新しない
+#   ame-update --no-apps   ame のアプリ(ame-filemanager・kuraokami・seoritsu)は更新しない
 #   ame-update --force     ame-shell に新しいコミットが無くても作り直す
 #   ame-update --debug     デバッグ情報つきでビルド(--debug で入れた場合の更新はこちら)
 #   ame-update --yes       確認しない
@@ -16,6 +17,7 @@ set -u
 CHECK=0
 DO_PKG=1
 DO_SELF=1
+DO_APPS=1
 FORCE=0
 ASSUME_YES=0
 BUILD_OPTS="-Doptimize=ReleaseFast"
@@ -24,10 +26,11 @@ for a in "$@"; do
         --check) CHECK=1 ;;
         --no-pkg) DO_PKG=0 ;;
         --no-self) DO_SELF=0 ;;
+        --no-apps) DO_APPS=0 ;;
         --force) FORCE=1 ;;
         --debug) BUILD_OPTS="-Doptimize=ReleaseSafe -Dstrip=false" ;;
         --yes|-y) ASSUME_YES=1 ;;
-        -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
         *) echo "unknown option: $a" >&2; exit 2 ;;
     esac
 done
@@ -166,6 +169,23 @@ if [ "$DO_SELF" = 1 ]; then
     [ "$CHECK" = 0 ] && [ -f "$SRC/scripts/fetch-wallpapers.sh" ] && sh "$SRC/scripts/fetch-wallpapers.sh"
     # FreeBSD: foot・fastfetch の設定を ame-shell のものに(元のファイルは *.ame-bak に残る)
     [ "$CHECK" = 0 ] && [ "$OS" = FreeBSD ] && [ -f "$SRC/scripts/app-config.sh" ] && sh "$SRC/scripts/app-config.sh"
+fi
+
+# ame のアプリ: ame-shell が決めた版(scripts/pins.sh)に合わせる。同じ版が入っていれば何もしない。自分で入れたものは触らない
+if [ "$DO_APPS" = 1 ] && [ -f "$SRC/scripts/install-apps.sh" ]; then
+    say "ame のアプリ"
+    if [ "$CHECK" = 1 ]; then
+        (. "$SRC/scripts/pins.sh"
+         for n in ame-filemanager kuraokami seoritsu; do
+             m="$HOME/.local/share/ame-shell/apps/$n"
+             eval "want=\${APP_COMMIT_$(echo "$n" | tr - _)}"
+             if [ ! -f "$m" ]; then info "$n: (この ame-update では入れていない)"
+             else case "$want" in "$(cat "$m")"*) info "$n: 最新です" ;; *) info "$n: 更新があります($(cat "$m") → $(printf %.7s "$want"))" ;; esac; fi
+         done)
+    else
+        odin_bin=$(command -v odin 2>/dev/null || ls "$HOME"/.cache/ame-shell/toolchain/odin-*/odin 2>/dev/null | head -n 1)
+        ODIN="${odin_bin:-odin}" sh "$SRC/scripts/install-apps.sh" || info "(作れなかったアプリがあります)"
+    fi
 fi
 
 # FreeBSD: タッチパッド・Bluetooth のドライバ(後から追加した設定。まだなら root で設定する。反映は再起動後)

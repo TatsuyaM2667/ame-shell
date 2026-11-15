@@ -59,12 +59,15 @@ zig17() {
     echo "$d/zig"
 }
 
+# pins.sh で決めたアプリのコミット(名前の - は _ に)
+pinned() { eval "echo \"\${APP_COMMIT_$(echo "$1" | tr - _):-}\""; }
+
 # 取ってくる。既定は pins.sh で決めたコミット(確かめる)、--latest なら最新。浅い clone で十分
 get() { # get <名前> <リポジトリ>
     dir="$SRC/$1"
     mkdir -p "$SRC"
     if [ "$LATEST" = 0 ]; then
-        eval "commit=\${APP_COMMIT_$(echo "$1" | tr - _):-}"
+        commit=$(pinned "$1")
         [ -n "$commit" ] || { say "$1: 決めた版が pins.sh にありません"; return 1; }
         git_at "$OWNER/$2.git" "" "$commit" "$dir"
     elif [ -d "$dir/.git" ]; then
@@ -107,6 +110,10 @@ echo "$APPS" | {
         if { [ -e "$bin" ] || [ -L "$bin" ]; } && [ ! -f "$MARK/$name" ]; then
             say "$name: 自分で入れたもの($bin)があるので、そのまま使います"
             continue
+        fi
+        # 決めた版がもう入っていれば作り直さない(ame-update から毎回呼ばれるので)
+        if [ "$LATEST" = 0 ] && [ -x "$bin" ] && [ -s "$MARK/$name" ]; then
+            case "$(pinned "$name")" in "$(cat "$MARK/$name")"*) say "$name: 最新です($(cat "$MARK/$name"))"; continue ;; esac
         fi
         say "$name: 取ってきてビルドします"
         if ! get "$name" "$repo"; then failed="$failed $name"; say "$name: 取ってこられませんでした"; continue; fi
