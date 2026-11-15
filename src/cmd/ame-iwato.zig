@@ -17,6 +17,7 @@ const c = @cImport({
     @cInclude("xkbcommon/xkbcommon.h");
     @cInclude("unistd.h");
     @cInclude("sys/wait.h");
+    @cInclude("time.h");
 });
 
 extern "c" fn memfd_create(name: [*:0]const u8, flags: c_uint) c_int;
@@ -116,6 +117,130 @@ fn paint(px: []u32, w: u32, h: u32) void {
             }
             row[x] = rgb(bg[0] + (col[0] - bg[0]) * a, bg[1] + (col[1] - bg[1]) * a, bg[2] + (col[2] - bg[2]) * a);
         }
+    }
+    // 輪の上に時計、下に電池(文字は使わず、図形だけで描く)
+    const ink = [3]f32{ 0.86, 0.92, 1.0 };
+    const dh = r * 0.9; // 数字の高さ
+    drawClock(px, w, h, cx, cy - r - thick * 4 - dh * 1.25, dh, ink);
+    if (batteryLevel()) |b| drawBattery(px, w, h, cx, cy + r + thick * 3 + r * 0.25, r * 0.5, b);
+}
+
+// ---------------- 時計と電池(図形で) ----------------
+
+/// 角の丸い四角を、下の色に a の濃さで重ねる(端はなめらかに)
+fn fillRound(px: []u32, w: u32, h: u32, x0: f32, y0: f32, rw: f32, rh: f32, rad: f32, col: [3]f32, a: f32) void {
+    const xa: usize = @intFromFloat(@max(0, @floor(x0)));
+    const ya: usize = @intFromFloat(@max(0, @floor(y0)));
+    const xb: usize = @intFromFloat(@min(@as(f32, @floatFromInt(w)), @ceil(x0 + rw)));
+    const yb: usize = @intFromFloat(@min(@as(f32, @floatFromInt(h)), @ceil(y0 + rh)));
+    if (xa >= xb or ya >= yb) return;
+    const hx = rw / 2;
+    const hy = rh / 2;
+    const r_ = @min(rad, @min(hx, hy));
+    for (ya..yb) |y| {
+        for (xa..xb) |x| {
+            // 角の丸い四角までの距離(中は負)
+            const qx = @abs(@as(f32, @floatFromInt(x)) + 0.5 - (x0 + hx)) - (hx - r_);
+            const qy = @abs(@as(f32, @floatFromInt(y)) + 0.5 - (y0 + hy)) - (hy - r_);
+            const out = @sqrt(@max(qx, 0) * @max(qx, 0) + @max(qy, 0) * @max(qy, 0)) + @min(@max(qx, qy), 0) - r_;
+            const k = std.math.clamp(0.5 - out, 0, 1) * a;
+            if (k <= 0) continue;
+            const p = &px[y * w + x];
+            const old = [3]f32{ @floatFromInt((p.* >> 16) & 0xff), @floatFromInt((p.* >> 8) & 0xff), @floatFromInt(p.* & 0xff) };
+            p.* = rgb((old[0] / 255) * (1 - k) + col[0] * k, (old[1] / 255) * (1 - k) + col[1] * k, (old[2] / 255) * (1 - k) + col[2] * k);
+        }
+    }
+}
+
+/// 7 つの棒(a 上・b 右上・c 右下・d 下・e 左下・f 左上・g 真ん中)で数字を描く
+const SEGS = [10]u7{ 0b0111111, 0b0000110, 0b1011011, 0b1001111, 0b1100110, 0b1101101, 0b1111101, 0b0000111, 0b1111111, 0b1101111 };
+
+fn drawDigit(px: []u32, w: u32, h: u32, x0: f32, y0: f32, dh: f32, d: u4, col: [3]f32) void {
+    const dw = dh * 0.55;
+    const t = dh * 0.11; // 棒の太さ
+    const half = (dh - t) / 2;
+    const bars = [7][4]f32{
+        .{ x0 + t, y0, dw - 2 * t, t }, // a
+        .{ x0 + dw - t, y0 + t * 0.6, t, half - t * 0.2 }, // b
+        .{ x0 + dw - t, y0 + half + t * 0.6, t, half - t * 0.2 }, // c
+        .{ x0 + t, y0 + dh - t, dw - 2 * t, t }, // d
+        .{ x0, y0 + half + t * 0.6, t, half - t * 0.2 }, // e
+        .{ x0, y0 + t * 0.6, t, half - t * 0.2 }, // f
+        .{ x0 + t, y0 + half, dw - 2 * t, t }, // g
+    };
+    for (bars, 0..) |b, i| {
+        if (SEGS[d] & (@as(u7, 1) << @intCast(i)) != 0) fillRound(px, w, h, b[0], b[1], b[2], b[3], t / 2, col, 0.9);
+    }
+}
+
+/// 今の時刻(時:分)。真ん中が cx、上が y0
+fn drawClock(px: []u32, w: u32, h: u32, cx: f32, y0: f32, dh: f32, col: [3]f32) void {
+    var now: c.time_t = c.time(null);
+    var tm: c.struct_tm = undefined;
+    if (c.localtime_r(&now, &tm) == null) return;
+    const hh: u8 = @intCast(tm.tm_hour);
+    const mm: u8 = @intCast(tm.tm_min);
+    const dw = dh * 0.55;
+    const gap = dh * 0.16;
+    const colon = dh * 0.3;
+    const total = 4 * dw + 2 * gap + colon + 2 * gap;
+    var x = cx - total / 2;
+    for ([_]u8{ hh / 10, hh % 10 }) |d| {
+        drawDigit(px, w, h, x, y0, dh, @intCast(d), col);
+        x += dw + gap;
+    }
+    const dot = dh * 0.11;
+    fillRound(px, w, h, x + colon / 2 - dot / 2, y0 + dh * 0.28, dot, dot, dot / 2, col, 0.9);
+    fillRound(px, w, h, x + colon / 2 - dot / 2, y0 + dh * 0.64, dot, dot, dot / 2, col, 0.9);
+    x += colon + gap;
+    for ([_]u8{ mm / 10, mm % 10 }) |d| {
+        drawDigit(px, w, h, x, y0, dh, @intCast(d), col);
+        x += dw + gap;
+    }
+}
+
+const Battery = struct { pct: u8, charging: bool };
+
+/// PC の電池(/sys/class/power_supply の type=Battery。つないだ機器の電池 scope=Device は除く)。無ければ null
+fn batteryLevel() ?Battery {
+    var dir = std.fs.cwd().openDir("/sys/class/power_supply", .{ .iterate = true }) catch return null;
+    defer dir.close();
+    var it = dir.iterate();
+    var buf: [32]u8 = undefined;
+    var pb: [128]u8 = undefined;
+    while (it.next() catch null) |e| {
+        const ty = dir.readFile(std.fmt.bufPrint(&pb, "{s}/type", .{e.name}) catch continue, &buf) catch continue;
+        if (!std.mem.eql(u8, std.mem.trim(u8, ty, "\n"), "Battery")) continue;
+        const sc = dir.readFile(std.fmt.bufPrint(&pb, "{s}/scope", .{e.name}) catch continue, &buf) catch "";
+        if (std.mem.eql(u8, std.mem.trim(u8, sc, "\n"), "Device")) continue;
+        const cap = dir.readFile(std.fmt.bufPrint(&pb, "{s}/capacity", .{e.name}) catch continue, &buf) catch continue;
+        const pct = std.fmt.parseInt(u8, std.mem.trim(u8, cap, "\n"), 10) catch continue;
+        var sb: [32]u8 = undefined;
+        const st = dir.readFile(std.fmt.bufPrint(&pb, "{s}/status", .{e.name}) catch continue, &sb) catch "";
+        return .{ .pct = @min(pct, 100), .charging = std.mem.startsWith(u8, st, "Charging") or std.mem.startsWith(u8, st, "Full") };
+    }
+    return null;
+}
+
+/// 電池の形(枠・中身・端子)。少ないと橙、充電中は中身の上に稲妻の代わりの「+」
+fn drawBattery(px: []u32, w: u32, h: u32, cx: f32, y0: f32, bh: f32, b: Battery) void {
+    const bw = bh * 2.0;
+    const x0 = cx - bw / 2;
+    const line = @max(1.5, bh * 0.1);
+    const frame = [3]f32{ 0.62, 0.70, 0.84 };
+    fillRound(px, w, h, x0, y0, bw, bh, bh * 0.22, frame, 0.85);
+    fillRound(px, w, h, x0 + line, y0 + line, bw - 2 * line, bh - 2 * line, bh * 0.15, .{ 0.05, 0.09, 0.16 }, 1);
+    fillRound(px, w, h, x0 + bw, y0 + bh * 0.3, bh * 0.14, bh * 0.4, bh * 0.07, frame, 0.85);
+    const fill = [3]f32{ 1.0, 0.70, 0.36 };
+    const ok = [3]f32{ 0.48, 0.85, 0.62 };
+    const inner = bw - 4 * line;
+    const fw = inner * @as(f32, @floatFromInt(b.pct)) / 100;
+    if (fw > 0.5) fillRound(px, w, h, x0 + 2 * line, y0 + 2 * line, fw, bh - 4 * line, bh * 0.1, if (b.pct <= 20) fill else ok, 0.95);
+    if (b.charging) {
+        const s = bh * 0.42;
+        const t = s * 0.28;
+        fillRound(px, w, h, cx - s / 2, y0 + bh / 2 - t / 2, s, t, t / 2, .{ 1, 1, 1 }, 0.9);
+        fillRound(px, w, h, cx - t / 2, y0 + bh / 2 - s / 2, t, s, t / 2, .{ 1, 1, 1 }, 0.9);
     }
 }
 
@@ -304,7 +429,13 @@ pub fn main() u8 {
             .{ .fd = fd, .events = std.posix.POLL.IN, .revents = 0 },
             .{ .fd = auth_fd, .events = std.posix.POLL.IN, .revents = 0 },
         };
-        _ = std.posix.poll(pfd[0..if (auth_fd >= 0) 2 else 1], -1) catch continue;
+        // 時計のために、次の「分」の境目で起きる(ポーリングしない: 1 分に 1 回だけ)
+        const ms_left: i32 = @intCast(60_000 - @mod(std.time.milliTimestamp(), 60_000) + 20);
+        const ready = std.posix.poll(pfd[0..if (auth_fd >= 0) 2 else 1], ms_left) catch continue;
+        if (ready == 0) {
+            redrawAll();
+            continue;
+        }
         if (pfd[0].revents != 0 and c.wl_display_dispatch(dpy) < 0) die("画面とのつながりが切れました(ロックは残ります。もう一度 ame-iwato を)", .{});
         if (submit and auth_fd < 0) {
             submit = false;
