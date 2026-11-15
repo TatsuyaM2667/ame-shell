@@ -47,7 +47,7 @@ pub fn main() !void {
     }
     var ub: [256]u8 = undefined;
     const u = weather.url(place, lang, &ub) orelse usage();
-    const r = std.process.Child.run(.{ .allocator = a, .argv = &.{ "ame-yatagarasu", "-s", "--max-time", "8", u }, .max_output_bytes = 4096 }) catch {
+    const r = std.process.Child.run(.{ .allocator = a, .argv = &.{ "ame-yatagarasu", "-s", "--compressed", "--max-time", "8", u }, .max_output_bytes = 4096 }) catch {
         std.io.getStdErr().writeAll("ame-weather: ame-yatagarasu を起動できません\n") catch {};
         std.process.exit(2);
     };

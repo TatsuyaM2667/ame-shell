@@ -9,6 +9,7 @@
 //     -A 名前 / -H "名前: 値" / -X メソッド
 //     -d / --data-binary 文字 | @ファイル / --data-urlencode 名前=中身   本文を送る(既定のメソッドは POST。2 つ目からは & でつなぐ)
 //     -G                     本文を URL の ? の後ろに付けて GET で送る
+//     --compressed           gzip で送ってもらい、展開して書く(curl と同じ)
 //     -w 書式                 最後に書く(%{http_code} を状態コードに置き換える)
 //     -K -                    設定を標準入力から(url / header / data-binary / user-agent / request = "値")
 //     --max-time 秒 / --connect-timeout 秒 / --max-filesize バイト
@@ -79,6 +80,8 @@ const Opts = struct {
     max_time: u32 = 0,
     connect_timeout: u32 = 0,
     max_filesize: u64 = 0,
+    /// --compressed: gzip で送ってもらい、展開して書く
+    compressed: bool = false,
     /// -G: 本文を URL の ? の後ろに付けて GET で送る
     get: bool = false,
 };
@@ -194,6 +197,10 @@ fn parseArgs(a: std.mem.Allocator, args: []const []const u8) Opts {
             }
             if (std.mem.eql(u8, name, "get")) {
                 o.get = true;
+                continue;
+            }
+            if (std.mem.eql(u8, name, "compressed")) {
+                o.compressed = true;
                 continue;
             }
             i += 1;
@@ -417,40 +424,71 @@ const Sink = struct {
     }
 };
 
-/// 本文を sink へ(chunked / Content-Length / 閉じるまで)
-fn body(r: *Reader, sink: *Sink, chunked: bool, length: ?u64) void {
-    if (chunked) {
-        var lb: [256]u8 = undefined;
-        while (true) {
-            const l = r.line(&lb) orelse die(56, "chunked の区切りが読めません", .{});
+/// 本文を読む(chunked / Content-Length / 閉じるまで)。届いた分からすぐ返す(SSE を止めない)
+const Body = struct {
+    r: *Reader,
+    chunked: bool,
+    /// Content-Length の残り、chunked なら今のチャンクの残り。null = 閉じるまで
+    left: ?u64,
+    done: bool = false,
+
+    fn read(self: *Body, buf: []u8) error{}!usize {
+        if (self.done or buf.len == 0) return 0;
+        if (self.chunked and self.left.? == 0) {
+            var lb: [256]u8 = undefined;
+            const l = self.r.line(&lb) orelse die(56, "chunked の区切りが読めません", .{});
             const hex = std.mem.trim(u8, l[0 .. std.mem.indexOfScalar(u8, l, ';') orelse l.len], " ");
-            var left = std.fmt.parseInt(u64, hex, 16) catch die(56, "chunked の長さが読めません", .{});
-            if (left == 0) break;
-            while (left > 0) {
-                const d = r.some(@intCast(@min(left, 1 << 20)));
-                if (d.len == 0) die(56, "途中で切れました", .{});
-                sink.put(d);
-                left -= d.len;
+            self.left = std.fmt.parseInt(u64, hex, 16) catch die(56, "chunked の長さが読めません", .{});
+            if (self.left.? == 0) {
+                self.done = true;
+                return 0;
             }
-            _ = r.line(&lb); // チャンクの後ろの \r\n
         }
-        return;
+        const want: usize = if (self.left) |n| @intCast(@min(n, buf.len)) else buf.len;
+        if (want == 0) {
+            self.done = true;
+            return 0;
+        }
+        const d = self.r.some(want);
+        if (d.len == 0) {
+            if (self.left != null) die(if (self.chunked) 56 else 18, "途中で切れました", .{});
+            self.done = true;
+            return 0;
+        }
+        @memcpy(buf[0..d.len], d);
+        if (self.left) |*n| {
+            n.* -= d.len;
+            if (self.chunked and n.* == 0) {
+                var lb: [8]u8 = undefined;
+                _ = self.r.line(&lb); // チャンクの後ろの \r\n
+            }
+        }
+        return d.len;
     }
-    if (length) |len| {
-        if (sink.max > 0 and len > sink.max) die(63, "--max-filesize を超えました", .{});
-        var left = len;
-        while (left > 0) {
-            const d = r.some(@intCast(@min(left, 1 << 20)));
-            if (d.len == 0) die(18, "途中で切れました", .{});
-            sink.put(d);
-            left -= d.len;
+
+    fn reader(self: *Body) std.io.GenericReader(*Body, error{}, read) {
+        return .{ .context = self };
+    }
+};
+
+/// 本文を sink へ。gzip(--compressed で頼み、サーバが Content-Encoding: gzip で返したとき)なら展開しながら
+fn body(r: *Reader, sink: *Sink, chunked: bool, length: ?u64, gzip: bool) void {
+    if (length) |len| if (!gzip and sink.max > 0 and len > sink.max) die(63, "--max-filesize を超えました", .{});
+    var b = Body{ .r = r, .chunked = chunked, .left = if (chunked) 0 else length };
+    var buf: [65536]u8 = undefined;
+    if (gzip) {
+        var dec = std.compress.gzip.decompressor(b.reader());
+        while (true) {
+            const n = dec.reader().read(&buf) catch die(61, "圧縮された中身を展開できません", .{});
+            if (n == 0) break;
+            sink.put(buf[0..n]);
         }
         return;
     }
     while (true) {
-        const d = r.some(1 << 20);
-        if (d.len == 0) break;
-        sink.put(d);
+        const n = b.read(&buf) catch unreachable;
+        if (n == 0) break;
+        sink.put(buf[0..n]);
     }
 }
 
@@ -506,6 +544,7 @@ pub fn main() u8 {
         w.print("{s} {s} HTTP/1.1\r\nHost: {s}{s}{s}", .{ method, u.path, if (v6) "[" else "", u.host, if (v6) "]" else "" }) catch {};
         if (u.port != (if (u.https) @as(u16, 443) else 80)) w.print(":{d}", .{u.port}) catch {};
         w.print("\r\nUser-Agent: {s}\r\nAccept: */*\r\nConnection: close\r\n", .{o.ua}) catch {};
+        if (o.compressed) w.writeAll("Accept-Encoding: gzip\r\n") catch {};
         if (same_origin) for (o.headers.items) |h| w.print("{s}\r\n", .{h}) catch {};
         if (send_body) |b| {
             var has_type = false;
@@ -523,6 +562,7 @@ pub fn main() u8 {
         var chunked = false;
         var length: ?u64 = null;
         var location: ?[]const u8 = null;
+        var gzip = false;
         // 1xx(100 Continue など)は飛ばす
         while (true) {
             const status = r.line(&lb) orelse die(52, "返事がありません", .{});
@@ -532,6 +572,7 @@ pub fn main() u8 {
             chunked = false;
             length = null;
             location = null;
+            gzip = false;
             while (true) {
                 const h = r.line(&lb) orelse die(56, "ヘッダが途中で切れました", .{});
                 if (h.len == 0) break;
@@ -541,6 +582,7 @@ pub fn main() u8 {
                 if (std.ascii.eqlIgnoreCase(name, "transfer-encoding")) chunked = std.ascii.indexOfIgnoreCase(val, "chunked") != null;
                 if (std.ascii.eqlIgnoreCase(name, "content-length")) length = std.fmt.parseInt(u64, val, 10) catch null;
                 if (std.ascii.eqlIgnoreCase(name, "location")) location = a.dupe(u8, val) catch null;
+                if (std.ascii.eqlIgnoreCase(name, "content-encoding")) gzip = o.compressed and std.ascii.indexOfIgnoreCase(val, "gzip") != null;
             }
             if (code >= 200 or code < 100) break;
         }
@@ -562,7 +604,7 @@ pub fn main() u8 {
             .file = if (o.out) |p| (std.fs.cwd().createFile(p, .{}) catch die(23, "書けません: {s}", .{p})) else std.io.getStdOut(),
             .max = o.max_filesize,
         };
-        body(&r, &sink, chunked, length);
+        body(&r, &sink, chunked, length, gzip);
         if (o.out != null) sink.file.close();
         if (o.write_out) |f| writeOut(f, code);
         return 0;
