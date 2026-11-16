@@ -54,7 +54,7 @@
             rm -f $out/share/ame-shell/installed-files $out/share/ame-shell/source
             # ログイン画面(greetd・SDDM など)の一覧に出すセッション
             mkdir -p $out/share/wayland-sessions
-            sed -e "s|@PREFIX@|$out|g" -e 's|^Name=.*|Name=Ame Shell|' -e 's|^Name\[ja\]=.*|Name[ja]=Ame Shell(雨)|' \
+            sed -e "s|@PREFIX@|$out|g" -e 's|^Name=.*|Name=SeoritsuOS|' -e 's|^Name\[ja\]=.*|Name[ja]=SeoritsuOS|' \
               session/ame-shell-river5.desktop > $out/share/wayland-sessions/ame-shell.desktop
             runHook postInstall
           '';

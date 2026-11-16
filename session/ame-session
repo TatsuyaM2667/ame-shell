@@ -1,5 +1,5 @@
 #!/bin/sh
-# ame-session: SDDM から起動される Ame Shell セッション(POSIX sh。bash/GNU 拡張に依存しない)
+# ame-session: SDDM から起動される SeoritsuOS セッション(POSIX sh。bash/GNU 拡張に依存しない)
 #
 #   ame-session          River 0.3 があれば River 0.3 + ame-shell、無ければ --river5 と同じ
 #   ame-session --river5 River 0.5(ame-shell がウィンドウマネージャを兼ねる。窓のアニメーション付き)

@@ -29,7 +29,7 @@ NixOS には `/usr` が無く、`/etc` も設定から作られるので、`inst
 
 - ame-shell と小さな道具(ame-ctl・amaterasu・ame-uzume・ame-iwato など)
 - River(0.5)・foot・ffmpeg・mpv
-- ログイン画面の一覧に出る「Ame Shell」のセッション
+- ログイン画面の一覧に出る「SeoritsuOS」のセッション
 - ロック画面用の PAM のサービス `ame-shell`
 - upower・power-profiles-daemon・NetworkManager・Bluetooth・PipeWire
 - xdg-desktop-portal(wlr・gtk)

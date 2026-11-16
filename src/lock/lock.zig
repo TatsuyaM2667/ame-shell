@@ -158,7 +158,7 @@ pub const Lock = struct {
         if (self.preflight()) |why| {
             std.log.warn("lock: {s}", .{why});
             self.app.osd.info(why);
-            self.app.notifs.post("ame-shell", "画面をロックできません", why, 0);
+            self.app.notifs.post("SeoritsuOS", "画面をロックできません", why, 0);
             return "error: lock unavailable (see notification)";
         }
         if (!self.startSession()) return "error: lock request failed";

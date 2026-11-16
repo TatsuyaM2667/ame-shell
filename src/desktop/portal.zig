@@ -204,7 +204,7 @@ fn fail(app: *App, why: []const u8) void {
     var b: [384]u8 = undefined;
     const body = std.fmt.bufPrint(&b, "{s}。入れてください: {s} xdg-desktop-portal xdg-desktop-portal-gtk", .{ why, deps.installCmd() }) catch why;
     std.log.warn("portal: {s}", .{body});
-    app.notifs.post("ame-shell", "ファイル選択の画面を開けません", body, 0);
+    app.notifs.post("SeoritsuOS", "ファイル選択の画面を開けません", body, 0);
 }
 
 /// "file:///a/b%20c.png" → "/a/b c.png"(file: 以外は null)

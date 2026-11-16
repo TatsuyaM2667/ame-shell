@@ -3,7 +3,7 @@
 //
 // 見た目と操作はロック画面と同じ(lock.zig / lockui.zig)。違うのは:
 //   - 認証は PAM ではなく greetd に頼む(GREETD_SOCK の UNIX ソケット、長さ 4 バイト + JSON)。
-//     成功したら start_session でセッション(既定は「Ame Shell」)を始めてもらい、ame-shell は終わる
+//     成功したら start_session でセッション(既定は「SeoritsuOS」)を始めてもらい、ame-shell は終わる
 //   - ユーザーを選べる(/etc/passwd の UID 1000 以上でログインできる人)。最後にログインした人が最初
 //   - 背景・写真はユーザーごとの置き場(/var/lib/ame-shell/greeter/<ユーザー>。sddmshare.zig が書く)から:
 //     wallmode がオーロラ・雨ならそれを描き、画像・動画なら wallpaper.bmp(その人の壁紙)を表示する
@@ -156,7 +156,7 @@ fn loadSessions() void {
             }
             if (hidden or s.exec_len == 0 or s.name.len == 0) continue;
             st.sessions[st.n_sessions] = s;
-            // 既定は ame-shell(River 0.5 の「Ame Shell」→ 通常の「Ame Shell」の順)
+            // 既定は ame-shell(River 0.5 の「SeoritsuOS」→ 通常の「SeoritsuOS」の順)
             if (std.mem.eql(u8, ent.name, "ame-shell-river5.desktop")) st.session = st.n_sessions;
             if (std.mem.eql(u8, ent.name, "ame-shell.desktop") and !std.mem.eql(u8, st.sessions[st.session].file.get(), "ame-shell-river5.desktop")) st.session = st.n_sessions;
             st.n_sessions += 1;

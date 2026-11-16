@@ -90,8 +90,27 @@ build() { # build <名前>
         # shellcheck disable=SC2086
         (cd "$dir" && "$ODIN" build src/gui -out:zig-out/bin/ame-filemanager -o:speed $link) >&2 && echo "$dir/zig-out/bin/ame-filemanager" ;;
     kuraokami)
-        # build.sh は odin root と zig cc を使う
-        (cd "$dir" && PATH="$(dirname "$ODIN"):$PATH" ZIG="$ZIG" sh build.sh) >&2 && echo "$dir/kuraokami" ;;
+        # build.sh は odin root と zig cc を使う。文字の整形の部品(kb_text_shape.a)を Odin の置き場の中に作るので、
+        # 書けない Odin(Arch の pacman・root がビルドした FreeBSD の Odin など)では自分用の置き場を作る
+        root=$("$ODIN" root 2>/dev/null | tr -d "\n")
+        kroot="$root"
+        if [ -n "$root" ] && [ ! -f "$root/vendor/kb_text_shape/lib/kb_text_shape.a" ] && [ ! -w "$root/vendor/kb_text_shape" ]; then
+            kroot="$CACHE/odin-root"
+            if [ ! -d "$kroot/vendor/kb_text_shape" ]; then
+                rm -rf "${kroot:?}"
+                mkdir -p "$kroot/vendor"
+                # 中身はリンク。kb_text_shape だけ写す(そこに部品を作る)
+                for e in "$root"/*; do [ "${e##*/}" = vendor ] || ln -s "$e" "$kroot/"; done
+                for e in "$root"/vendor/*; do [ "${e##*/}" = kb_text_shape ] || ln -s "$e" "$kroot/vendor/"; done
+                cp -R "$root/vendor/kb_text_shape" "$kroot/vendor/"
+            fi
+        fi
+        # FreeBSD: SDL3・freetype・fontconfig は /usr/local/lib(build.sh は Linux の場所しか見ないので、lib に並べる)
+        if [ "$OS" = FreeBSD ]; then
+            mkdir -p "$dir/lib"
+            for l in SDL3 freetype fontconfig; do [ -e "/usr/local/lib/lib$l.so" ] && ln -sf "/usr/local/lib/lib$l.so" "$dir/lib/lib$l.so"; done
+        fi
+        (cd "$dir" && ODIN_ROOT="$kroot" PATH="$(dirname "$ODIN"):$PATH" ZIG="$ZIG" sh build.sh) >&2 && echo "$dir/kuraokami" ;;
     seoritsu)
         z=$(zig17) || { say "seoritsu: Zig $ZIG17_VER を用意できません" >&2; return 1; }
         (cd "$dir" && ZIG="$z" ODIN="$ODIN" sh build.sh) >&2 && echo "$dir/seoritsu" ;;
@@ -108,8 +127,17 @@ echo "$APPS" | {
         fi
         bin="$PREFIX/bin/$name"
         if { [ -e "$bin" ] || [ -L "$bin" ]; } && [ ! -f "$MARK/$name" ]; then
-            say "$name: 自分で入れたもの($bin)があるので、そのまま使います"
-            continue
+            # 開発中の置き場へのリンクは触らない。--latest(ame-update)なら、ふつうのファイルは最新に入れ替える
+            if [ "$LATEST" = 0 ] || [ -L "$bin" ]; then
+                say "$name: 自分で入れたもの($bin)があるので、そのまま使います"
+                continue
+            fi
+            say "$name: 自分で入れたもの($bin)を最新に入れ替えます"
+        fi
+        # --latest: GitHub の最新がもう入っていれば作り直さない
+        if [ "$LATEST" = 1 ] && [ -x "$bin" ] && [ -s "$MARK/$name" ]; then
+            head=$(git ls-remote "$OWNER/$repo.git" HEAD 2>/dev/null | cut -c1-40)
+            case "$head" in "$(cat "$MARK/$name")"*) say "$name: 最新です($(cat "$MARK/$name"))"; continue ;; esac
         fi
         # 決めた版がもう入っていれば作り直さない(ame-update から毎回呼ばれるので)
         if [ "$LATEST" = 0 ] && [ -x "$bin" ] && [ -s "$MARK/$name" ]; then

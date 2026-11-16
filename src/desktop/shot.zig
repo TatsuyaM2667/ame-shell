@@ -285,7 +285,7 @@ fn fail(s: *Shot, msg: []const u8) void {
     releaseCapture(s);
     freePixels(s);
     s.state = .idle;
-    s.app.notifs.post("ame-shell", "スクリーンショットを撮れません", msg, 0);
+    s.app.notifs.post("SeoritsuOS", "スクリーンショットを撮れません", msg, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -610,7 +610,7 @@ fn onJobDone(ctx: *anyopaque, fd: c_int, _: u32) void {
         if (job.png) |p| ca.free(p);
         var mb: [128]u8 = undefined;
         const msg = std.fmt.bufPrint(&mb, "保存できませんでした({s})", .{@errorName(e)}) catch "保存できませんでした";
-        s.app.notifs.post("ame-shell", "スクリーンショット", msg, 0);
+        s.app.notifs.post("SeoritsuOS", "スクリーンショット", msg, 0);
         return;
     }
     const png = job.png orelse return;
@@ -618,9 +618,9 @@ fn onJobDone(ctx: *anyopaque, fd: c_int, _: u32) void {
     const path = job.path[0..job.path_len];
     if (job.save) {
         const name = std.fs.path.basename(path);
-        s.app.notifs.post("ame-shell", if (copied) "スクリーンショットを保存してコピーしました" else "スクリーンショットを保存しました", name, 0);
+        s.app.notifs.post("SeoritsuOS", if (copied) "スクリーンショットを保存してコピーしました" else "スクリーンショットを保存しました", name, 0);
     } else {
-        s.app.notifs.post("ame-shell", if (copied) "スクリーンショットをコピーしました" else "クリップボードに入れられません", "", 0);
+        s.app.notifs.post("SeoritsuOS", if (copied) "スクリーンショットをコピーしました" else "クリップボードに入れられません", "", 0);
     }
 }
 
@@ -742,7 +742,7 @@ fn takeExternal(app: *App, kind: Kind, delay_ms: u32) void {
         var b: [640]u8 = undefined;
         const msg = std.fmt.bufPrint(&b, "{s} を作れません({s})", .{ dir, @errorName(e) }) catch "保存先を作れません";
         std.log.warn("screenshot: {s}", .{msg});
-        app.notifs.post("ame-shell", "スクリーンショットを撮れません", msg, 0);
+        app.notifs.post("SeoritsuOS", "スクリーンショットを撮れません", msg, 0);
         return;
     };
 

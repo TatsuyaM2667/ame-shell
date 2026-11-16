@@ -124,7 +124,7 @@ UHOME=$(eval echo "~$U")
 
 # システムの river が 0.4 以降か(FreeBSD の river パッケージなど)。
 # River 0.3 が無ければ(0.4 以降しか無い・Chimera のように river パッケージが無い)、River 0.3 用の
-# セッションは動かないので、内蔵ウィンドウマネージャで動くセッションだけを「Ame Shell」として入れる
+# セッションは動かないので、内蔵ウィンドウマネージャで動くセッションだけを「SeoritsuOS」として入れる
 NEW_RIVER=0
 HAVE_RIVER03=0
 if command -v river >/dev/null 2>&1; then
@@ -321,14 +321,14 @@ if [ "$USER_MODE" = 0 ]; then
     if [ "$HAVE_RIVER03" = 1 ]; then
         DESKTOPS="ame-shell ame-shell-river5"
     else
-        # River 0.3 が無い: 内蔵 WM のセッションだけを「Ame Shell」として入れる
+        # River 0.3 が無い: 内蔵 WM のセッションだけを「SeoritsuOS」として入れる
         DESKTOPS="ame-shell-river5"
         retire "$SESS_DIR/ame-shell.desktop"
     fi
     for d in $DESKTOPS; do
         tmp=$(mktemp "${TMPDIR:-/tmp}/ame-desktop.XXXXXX") || exit 1
         if [ "$HAVE_RIVER03" = 0 ]; then
-            sed -e "s|@PREFIX@|$PREFIX|g" -e 's|^Name=.*|Name=Ame Shell|' -e 's|^Name\[ja\]=.*|Name[ja]=Ame Shell(雨)|' "$HERE/$d.desktop" > "$tmp"
+            sed -e "s|@PREFIX@|$PREFIX|g" -e 's|^Name=.*|Name=SeoritsuOS|' -e 's|^Name\[ja\]=.*|Name[ja]=SeoritsuOS|' "$HERE/$d.desktop" > "$tmp"
         else
             sed "s|@PREFIX@|$PREFIX|g" "$HERE/$d.desktop" > "$tmp"
         fi
@@ -671,10 +671,10 @@ else
         if grep -q ame-greeter /etc/greetd/config.toml 2>/dev/null; then
             say "$(m "インストール完了(警告 $WARN 件)。再起動すると ame-shell のログイン画面が出ます。" "Installed ($WARN warning(s)). Reboot to get the ame-shell login screen.")"
         else
-            say "$(m "インストール完了(警告 $WARN 件)。ログイン画面で \"Ame Shell\" を選んでください。" "Installed ($WARN warning(s)). Choose \"Ame Shell\" on the login screen.")"
+            say "$(m "インストール完了(警告 $WARN 件)。ログイン画面で \"SeoritsuOS\" を選んでください。" "Installed ($WARN warning(s)). Choose \"SeoritsuOS\" on the login screen.")"
         fi
     else
-        say "$(m "インストール完了(警告 $WARN 件)。SDDM で \"Ame Shell\"(River 0.3)か \"Ame Shell (River 0.5)\" を選んでください。" "Installed ($WARN warning(s)). Choose \"Ame Shell\" (River 0.3) or \"Ame Shell (River 0.5)\" in SDDM.")"
+        say "$(m "インストール完了(警告 $WARN 件)。SDDM で \"SeoritsuOS\"(River 0.3)か \"SeoritsuOS (River 0.5)\" を選んでください。" "Installed ($WARN warning(s)). Choose \"SeoritsuOS\" (River 0.3) or \"SeoritsuOS (River 0.5)\" in SDDM.")"
     fi
     say "$(m "元に戻す" "Uninstall"): sh $0 --uninstall"
 fi

@@ -8,7 +8,7 @@
 #   2. GPU のドライバ(drm-kmod の amdgpu / i915kms、NVIDIA は nvidia-drm)を入れて起動時に読み込む
 #   3. dbus / seatd / sddm を有効にし、ユーザーを video グループへ
 #   4. Zig 0.13.0 と Odin(dev-2026-08)をソースからビルド(FreeBSD 向けの配布物が無いため。数十分かかる)
-#   5. ame-shell をビルドして /usr/local にインストール(SDDM に「Ame Shell」が出る)
+#   5. ame-shell をビルドして /usr/local にインストール(SDDM に「SeoritsuOS」が出る)
 # FreeBSD の river パッケージは 0.4 以降(ウィンドウマネージャを別に必要とする版)なので、
 # ame-shell がウィンドウマネージャを兼ねて動く。
 #
@@ -339,7 +339,7 @@ fi
 cat <<EOF
 
 完了しました。再起動すると SDDM が起動します:  shutdown -r now
-SDDM のセッション一覧から「Ame Shell」を選んでログインしてください。
+SDDM のセッション一覧から「SeoritsuOS」を選んでログインしてください。
   - ログ: $UHOME/.local/state/ame-shell/session.log
   - キーボード配列は、ログイン前に環境変数 XKB_DEFAULT_LAYOUT(例: jp)で指定できます
   - 元に戻す: sh $REPO/session/install-session.sh --uninstall

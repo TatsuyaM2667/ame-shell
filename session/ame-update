@@ -187,20 +187,23 @@ if [ "$DO_SELF" = 1 ]; then
     [ "$CHECK" = 0 ] && [ "$OS" = FreeBSD ] && [ -f "$SRC/scripts/app-config.sh" ] && sh "$SRC/scripts/app-config.sh"
 fi
 
-# ame のアプリ: ame-shell が決めた版(scripts/pins.sh)に合わせる。同じ版が入っていれば何もしない。自分で入れたものは触らない
+# ame のアプリ: GitHub の最新に合わせる(install-apps.sh --latest)。同じ版が入っていれば作り直さない。
+# 開発中の置き場へのリンクは触らない
 if [ "$DO_APPS" = 1 ] && [ -f "$SRC/scripts/install-apps.sh" ]; then
     say "ame のアプリ"
     if [ "$CHECK" = 1 ]; then
-        (. "$SRC/scripts/pins.sh"
-         for n in ame-filemanager kuraokami seoritsu; do
-             m="$HOME/.local/share/ame-shell/apps/$n"
-             eval "want=\${APP_COMMIT_$(echo "$n" | tr - _)}"
-             if [ ! -f "$m" ]; then info "$n: (この ame-update では入れていない)"
-             else case "$want" in "$(cat "$m")"*) info "$n: 最新です" ;; *) info "$n: 更新があります($(cat "$m") → $(printf %.7s "$want"))" ;; esac; fi
-         done)
+        for pair in ame-filemanager:ame-Filemanager kuraokami:kuraokami seoritsu:seoritsu; do
+            n=${pair%%:*}
+            m="$HOME/.local/share/ame-shell/apps/$n"
+            head=$(git ls-remote "https://github.com/TatsuyaM2667/${pair#*:}.git" HEAD 2>/dev/null | cut -c1-7)
+            if [ ! -f "$m" ]; then info "$n: (ame-update では入れていない。ame-update で最新にします)"
+            elif [ -z "$head" ]; then info "$n: (GitHub を確かめられませんでした)"
+            else case "$head" in "$(cut -c1-7 "$m")") info "$n: 最新です" ;; *) info "$n: 更新があります($(cat "$m") → $head)" ;; esac; fi
+        done
     else
-        odin_bin=$(command -v odin 2>/dev/null || ls "$HOME"/.cache/ame-shell/toolchain/odin-*/odin 2>/dev/null | head -n 1)
-        ODIN="${odin_bin:-odin}" sh "$SRC/scripts/install-apps.sh" || info "(作れなかったアプリがあります)"
+        odin_bin=$(command -v odin 2>/dev/null || ls "$HOME"/.cache/ame-shell/toolchain/odin-*/odin /usr/local/ame-toolchain/odin-*/odin 2>/dev/null | head -n 1)
+        zig_bin=$(ls "$HOME"/.cache/ame-shell/toolchain/zig-linux-*-0.13.0/zig /usr/local/ame-toolchain/zig-0.13.0/bin/zig 2>/dev/null | head -n 1)
+        ODIN="${odin_bin:-odin}" ZIG="${zig_bin:-zig}" sh "$SRC/scripts/install-apps.sh" --latest || info "(作れなかったアプリがあります)"
     fi
 fi
 

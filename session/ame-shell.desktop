@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=Ame Shell
-Name[ja]=Ame Shell(雨)
+Name=SeoritsuOS
+Name[ja]=SeoritsuOS
 Comment=River + ame-shell (animated glass desktop shell)
 Comment[ja]=River 上のアニメーション重視ガラス調デスクトップシェル
 Exec=@PREFIX@/bin/ame-session

@@ -11,6 +11,7 @@ pub const aap = @import("aap.zig");
 pub const secretstore = @import("secretstore.zig");
 pub const paths = @import("paths.zig");
 pub const pixels = @import("pixels.zig");
+pub const dwindle = @import("dwindle.zig");
 
 test {
     _ = lrc;
@@ -24,4 +25,5 @@ test {
     _ = secretstore;
     _ = paths;
     _ = pixels;
+    _ = dwindle;
 }

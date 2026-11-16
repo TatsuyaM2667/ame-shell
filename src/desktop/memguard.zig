@@ -78,7 +78,7 @@ pub const Guard = struct {
                 var bb: [160]u8 = undefined;
                 const summary = std.fmt.bufPrint(&sb, "メモリが残りわずかです(残り {d} MB)", .{mi.avail_kb / 1024}) catch "メモリが残りわずかです";
                 const body = if (top.pid > 0) std.fmt.bufPrint(&bb, "いちばん使っているのは {s}({d} MB)", .{ top.name(), top.rss_kb / 1024 }) catch "" else "";
-                self.app.notifs.post("ame-shell", summary, body, 0);
+                self.app.notifs.post("SeoritsuOS", summary, body, 0);
             },
             .critical => {
                 if (!self.app.cfg.memory_guard) return;
@@ -90,7 +90,7 @@ pub const Guard = struct {
                 log.warn("空き {d} MB: {s}(pid {d}, {d} MB)を止めました", .{ mi.avail_kb / 1024, v.name(), v.pid, v.rss_kb / 1024 });
                 var sb: [128]u8 = undefined;
                 const summary = std.fmt.bufPrint(&sb, "メモリが尽きそうだったので {s} を止めました", .{v.name()}) catch "メモリが尽きそうだったのでアプリを止めました";
-                self.app.notifs.post("ame-shell", summary, "固まるのを防ぐため、いちばんメモリを使っていたものを止めました(shell { memory-guard false } で止めなくなります)", 0);
+                self.app.notifs.post("SeoritsuOS", summary, "固まるのを防ぐため、いちばんメモリを使っていたものを止めました(shell { memory-guard false } で止めなくなります)", 0);
             },
         }
     }

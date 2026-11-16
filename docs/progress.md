@@ -73,7 +73,7 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
   - アニメーション(スプリング): 開く=提案した大きさで描かれるまで隠し、中心から clip box を広げる / 位置の変化=滑らかに移動 / ワークスペース切替=横スライド / Super+Q=中心へ縮めてから close(閉じなかったら元に戻す)。動いている間だけ manage_dirty を毎フレーム送る(止まっていれば通信 0)。
   - キー: 今の ~/.config/river/init と同じ割り当て(src/wm/binds.zig、92 個)。Super+ドラッグで移動・大きさ変更(浮かせる)、Super+中クリックで浮かせる。フォーカスはマウスに追従(窓の方がカーソルの下に来ただけでは移さない)、ワークスペースに戻ると最後に使っていた窓へ。
   - 層シェル: river-layer-shell-v1 を使い、ランチャー等がキーボードを持っている間は窓へフォーカスを返さない。
-- セッション: `ame-session --river5` / `ame-river5-init` / `ame-shell-river5.desktop`(「Ame Shell (River 0.5)」)。キーボード配列は ~/.config/river/init の keyboard-layout を読んで XKB_DEFAULT_LAYOUT に渡す。ame-shell が 30 秒以内に 3 回落ちたらセッションを終えて SDDM に戻す(WM 無しでは操作できないため)。
+- セッション: `ame-session --river5` / `ame-river5-init` / `ame-shell-river5.desktop`(「SeoritsuOS (River 0.5)」)。キーボード配列は ~/.config/river/init の keyboard-layout を読んで XKB_DEFAULT_LAYOUT に渡す。ame-shell が 30 秒以内に 3 回落ちたらセッションを終えて SDDM に戻す(WM 無しでは操作できないため)。
 - 注意: River 0.5 は "riverctl" という文字列を含む init を起動拒否する(コメントでも)。
 - 試験: 仮想キーボード `tools/vkbd.zig` を追加。ヘッドレスの River 0.5 で ame-session --river5 を丸ごと起動し、キー操作(起動・ワークスペース・フォーカス・入れ替え・閉じる・終了)、ランチャーの入力、開く/切替/閉じるの途中フレームをスクリーンショットで確認。
 - 直した不具合: 枠線の色の変換で f32 の精度により整数変換が範囲外(f64 で計算)。キーボード/マウスの capability が一度消えて戻ると古い wl_keyboard を使い続けてキー入力が届かなかった(作り直す)。
@@ -102,7 +102,7 @@ River 0.3.5 上で、Zig・Odin・C・WebAssembly だけで書いたガラス調
 
 ## 2026-10-27(追記 7)インストーラと FreeBSD
 - `install.sh`: 依存パッケージ(apk は自動)・Zig 0.13(公式配布物を ~/.cache へ)・Odin(無ければ dev-2026-08 をソースから)・River(無ければ 0.5 をソースから)・ビルド・インストールを全自動。全ユーザー用は doas / sudo で自動昇格、無ければ `--user`(~/.local)。
-- `session/install-session.sh`: `--user` モード、自動昇格、FreeBSD のパス(/usr/local/etc の sddm.conf、/usr/local/share/wayland-sessions)、River 0.4 以降しか無ければ内蔵 WM のセッションだけを「Ame Shell」として入れる、自分でビルドした River 0.5 を /usr/local/opt にコピー(全ユーザーが使える)。
+- `session/install-session.sh`: `--user` モード、自動昇格、FreeBSD のパス(/usr/local/etc の sddm.conf、/usr/local/share/wayland-sessions)、River 0.4 以降しか無ければ内蔵 WM のセッションだけを「SeoritsuOS」として入れる、自分でビルドした River 0.5 を /usr/local/opt にコピー(全ユーザーが使える)。
 - `scripts/install-freebsd.sh`: pkg・GPU ドライバ(pciconf で判別)・dbus/seatd/sddm・video グループ・入力デバイスの devfs 規則・Zig 0.13 と Odin のソースビルド(LLVM 18)・ビルドとインストールを全自動。
 - FreeBSD 対応のコード: platform/bsd.zig、statvfs の並び、EVIOCGBIT の ioctl 番号(FreeBSD は IOC_OUT = 1<<30)、ioctl の request の型、ロックは swaylock(pam_unix が root 必須のため)、nmcli / bluetoothctl / pactl が無いときはパネルに表示。
 - 検証: FreeBSD 14.5 の base.txz と pkg のパッケージ(wayland・mesa・libglvnd・xkbcommon・freetype・harfbuzz・fontconfig・dbus・libepoll-shim・libinotify と依存)で sysroot を作り、x86_64-freebsd 向けにビルド・リンクが通ることを確認(ELF FreeBSD 14.5、必要なライブラリは libepoll-shim / libinotify を含めて解決)。FreeBSD の実機での実行は未確認。

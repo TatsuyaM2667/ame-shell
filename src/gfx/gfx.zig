@@ -179,7 +179,7 @@ const ui_fs =
     \\}
 ;
 
-const fs_vs =
+pub const fs_vs =
     \\#version 300 es
     \\out vec2 v_uv;
     \\void main(){

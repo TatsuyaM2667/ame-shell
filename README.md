@@ -1,6 +1,7 @@
-# ame-shell(雨)
+# SeoritsuOS
 
 [River](https://isaacfreund.com/software/river/)(Wayland コンポジタ)の上で動く、アニメーション重視のガラス調デスクトップシェル。
+旧名は ame-shell(雨)です。コマンド名(`ame-shell`・`ame-ctl`・`ame-*` の道具)とリポジトリ名は、入れてある環境を壊さないよう、そのままにしています。
 caelestia-shell・end-4・ilyamiro の雰囲気を目指しつつ、Quickshell / QML / Qt / Python / C++ を使わず **Zig・Odin・C・WebAssembly** だけで書いています。
 Chimera Linux(musl + dinit)向け。SDDM から選べるセッションつき。
 
@@ -35,8 +36,10 @@ Chimera Linux(musl + dinit)向け。SDDM から選べるセッションつき。
 
 ### River 0.5 では本物のウィンドウアニメーション
 River 0.5 は「描画は River、配置はウィンドウマネージャ」という分担です。ame-shell がそのウィンドウマネージャを兼ねます(`src/wm/`)。
-- Hyprland の **dwindle** 配置、ワークスペース 1〜9、新しい窓はフォーカス中の窓の次へ
-- **開く**: 中心から広がる / **移動・並べ替え**: なめらかに動く / **ワークスペース切替**: 横にスライド / **閉じる**: 縮んでから閉じる(すべてスプリング)
+- Hyprland の **dwindle** 配置。ワークスペースごとに分け目の木を持ち、ワークスペースは 1〜9
+  - 新しい窓は、カーソルの下の窓の場所を 2 つに分け、カーソルの反対側に入る。左半分の窓の上で開けば、左半分がさらに分かれる
+- **フォーカスは常にカーソルの下の窓**。新しく開いた窓はフォーカスを取らない(ダイアログだけは取る)
+- **開く**: 窓の真ん中から水の波紋が広がって現れる(ロック解除と同じ波紋)。`AME_OPEN_RIPPLE=0` にすると、中心から広がるふつうの開き方になる / **移動・並べ替え**: なめらかに動く / **ワークスペース切替**: 横にスライド / **閉じる**: 縮んでから閉じる(すべてスプリング)
 - 動いているときだけ毎フレーム更新し、止まっていれば River との通信も 0
 - ame-shell を再起動しても窓のワークスペースは保たれる
 - **浮いた窓は紙のようにたわむ**: つかんで動かすと、つかんだ所だけがカーソルに付いて行き、遠い所ほど遅れて付いてくる(窓の絵を ext-image-copy-capture で撮り、16×12 の網目で描く)。離すとすーっと元の形に戻る
@@ -98,7 +101,7 @@ sh install.sh --uninstall [--user]
 
 ### Chimera Linux(新規インストールから)
 
-Chimera のリポジトリには River 0.3 が無いので、`install.sh` が River 0.5 をソースからビルドし、ame-shell がウィンドウマネージャを兼ねるセッション(「Ame Shell」)だけを入れます。
+Chimera のリポジトリには River 0.3 が無いので、`install.sh` が River 0.5 をソースからビルドし、ame-shell がウィンドウマネージャを兼ねるセッション(「SeoritsuOS」)だけを入れます。
 
 1. 一般ユーザー(wheel グループ、doas が使える)でログインし、ソースを取ってくる
    ```sh
@@ -187,7 +190,7 @@ NixOS(`/etc/nixos/flake.nix`):
 - **Bluetooth(FreeBSD)**: インストーラと ame-update が、内蔵アダプタのファームウェア(Realtek: rtlbt-firmware / Intel: iwmbt-firmware)・ng_ubt・hcsecd / sdpd / bthidd を設定します。後からは `doas sh scripts/freebsd-bluetooth.sh`、確認は `--check`。機器のペアリングは今のところ端末で `doas bluetooth-config scan`(マウス・キーボード)。
 - **無線のブロック解除**: Linux ではセッションの開始時に `rfkill unblock all`(と `bluetoothctl power on`)。ログイン直後は `/dev/rfkill` の権限がまだ付いていないことがあるので、裏で数秒おきに試します。Bluetooth の電源を設定パネル・サイドバーから入れるときも、先にブロックを外します。
 - **ログイン画面**: ame-shell 自身が描く(greetd + `ame-greeter`、`src/lock/greeter.zig`)。**ロック画面と同じ見た目と動き**で、SDDM は要りません。
-  - greetd が greeter 用のユーザー(Chimera: `_greetd`)で River 0.5 + ame-shell をログイン画面のモードで起動し、パスワードが合うと greetd がセッション(既定は「Ame Shell」)を始めます
+  - greetd が greeter 用のユーザー(Chimera: `_greetd`)で River 0.5 + ame-shell をログイン画面のモードで起動し、パスワードが合うと greetd がセッション(既定は「SeoritsuOS」)を始めます
   - 写真の左右の ‹ › でユーザー、左下でセッションを切り替え、右下に再起動・電源オフ。最後にログインした人が最初に出ます
   - 背景と写真は、ユーザーごとの置き場 `/var/lib/ame-shell/greeter/<ユーザー>`(FreeBSD は `/var/db/…`)から。ame-shell が起動したとき・壁紙を変えたとき・ロックしたときに、壁紙(画像なら絵、オーロラ・雨なら種類だけ)・ぼかした背景・写真・アクセント色をそこへ書きます(root は要りません。この置き場は誰でも読めます)
   - 入れ方: `sh install.sh`(インストール後の設定で確認)、または `doas sh scripts/greeter-setup.sh`(`--dry-run` で内容だけ表示)。`/etc/greetd/config.toml` を書き換え(元は `.ame-bak`)、次の起動から sddm の代わりに greetd を使います
@@ -208,7 +211,7 @@ NixOS(`/etc/nixos/flake.nix`):
 ame-update            # OS のパッケージ(FreeBSD は pkg、Chimera は apk)→ ame-shell(git pull → ビルド → インストール)→ 再起動
 ame-update --check    # 更新があるかを見るだけ
 ame-update --no-pkg   # ame-shell だけ(--no-self でパッケージだけ)
-ame-update --no-apps  # ame のアプリ(ame-filemanager・kuraokami・seoritsu)は更新しない(既定では、ame-shell が決めた版に合わせる)
+ame-update --no-apps  # ame のアプリ(ame-filemanager・kuraokami・seoritsu)は更新しない(既定では GitHub の最新にする。最新が入っていれば作り直さない)
 ```
 
 ランチャーで `>` → 「アップデート」からも実行できます(端末が開きます)。root が必要な作業は doas → sudo → su の順に使える方で行います。
@@ -222,7 +225,7 @@ sh install.sh            # = sh scripts/install-freebsd.sh(完全自動)
 ```
 
 パッケージ(River・SDDM・Xorg・Wayland・フォント・日本語入力)、GPU ドライバ(amdgpu / i915kms / nvidia-drm を自動判別)、dbus / seatd / sddm の有効化、video グループ、
-Zig 0.13 と Odin のソースからのビルド(FreeBSD 向けの配布物が無いため、30 分〜1 時間ほど)、ame-shell のビルドとインストールまで行います。終わったら再起動すると SDDM に「Ame Shell」が出ます。
+Zig 0.13 と Odin のソースからのビルド(FreeBSD 向けの配布物が無いため、30 分〜1 時間ほど)、ame-shell のビルドとインストールまで行います。終わったら再起動すると SDDM に「SeoritsuOS」が出ます。
 オプション: `--no-gpu`・`--no-ja`・`--no-super-tap`・`--jobs N`・`--yes`(`sh scripts/install-freebsd.sh --help`)。
 
 FreeBSD での違い:
@@ -254,11 +257,11 @@ SDDM に追加されるセッション:
 
 | セッション | 内容 |
 |---|---|
-| **Ame Shell (River 0.5)** | ame-shell がウィンドウマネージャを兼ねる。ウィンドウアニメーションあり。River 0.5(`/usr/local/opt/river-0.5`・`~/.local/opt/river-0.5`・PATH の River 0.4 以降)|
-| **Ame Shell** | River 0.3 + ame-shell(River 0.3 が入っているときだけ)|
+| **SeoritsuOS (River 0.5)** | ame-shell がウィンドウマネージャを兼ねる。ウィンドウアニメーションあり。River 0.5(`/usr/local/opt/river-0.5`・`~/.local/opt/river-0.5`・PATH の River 0.4 以降)|
+| **SeoritsuOS** | River 0.3 + ame-shell(River 0.3 が入っているときだけ)|
 
-River 0.3 が無いシステム(Chimera Linux・FreeBSD など)では、River 0.5 のセッションだけが「Ame Shell」という名前で入ります。
-セーフモード(River 0.3 + foot だけ)は廃止しました。以前の版で入れた「Ame Shell (Safe Mode)」は、入れ直すと消えます。
+River 0.3 が無いシステム(Chimera Linux・FreeBSD など)では、River 0.5 のセッションだけが「SeoritsuOS」という名前で入ります。
+セーフモード(River 0.3 + foot だけ)は廃止しました。以前の版で入れた「SeoritsuOS (Safe Mode)」は、入れ直すと消えます。
 `ame-session` は、頼まれた River が無ければもう一方(0.3 ⇔ 0.5)で起動します。
 
 入るものは `/usr/local/share/ame-shell/installed-files`(自分用は `~/.local/share/ame-shell/installed-files`)に記録され、`sh install.sh --uninstall` で元に戻せます。
@@ -290,12 +293,13 @@ PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5
 | Super+Shift+W | 壁紙ピッカー |
 | Super+E | ファイルマネージャ(ame-filemanager。無ければ Thunar、それも無ければフォルダを開く既定のアプリ)|
 | Super+Q / Super+F / Super+Space | 閉じる / 全画面 / フロート |
-| Super+J・K / Super+Shift+J・K | フォーカス / 入れ替え |
-| Super+Ctrl+H・L | 左右の比率 |
+| Super+J・K / Super+Shift+J・K | フォーカス / 入れ替え(並び順)|
+| Super+矢印 / Super+Shift+矢印 | その向きの窓へフォーカス / その向きの窓と入れ替え(Hyprland の movefocus・movewindow)|
+| Super+Ctrl+H・L / Super+Ctrl+J | フォーカス中の窓のいる分け目の比率 / 分け目の向きを逆に(左右 ⇔ 上下)|
 | Super+1〜9 / Super+Shift+1〜9 / Super+Alt+1〜9 | ワークスペース切替 / 窓を移動 / 窓を移動して自分も移る |
 | Super+Ctrl+1〜9 | ワークスペースの表示を足す |
 | Super+P / Super+Shift+P | スクラッチパッド |
-| Super+ドラッグ(左 / 右)/ Super+中クリック | 移動 / 大きさ変更 / フロート |
+| Super+ドラッグ(左 / 右)/ Super+中クリック | 移動 / 大きさ変更(タイルの窓はタイルのまま、近い辺の分け目を動かす)/ フロート |
 | Super+Alt+ドラッグ | タイルのまま移動(重ねたタイルと入れ替え・別の画面へ) |
 | タイトルバーをドラッグ | 窓をタイルから外して浮かせる(ひと回り小さくなる)。浮いた窓は、つかんで動かすと紙のようにたわみ、離すとすーっと元の形に戻る(AME_WOBBLE=0 で無効)。浮いた窓は縁をドラッグで大きさを変更。縁(窓のすぐ外側)かタイトルバーのダブルクリック・画面の上の端へドラッグ・Super+Space でタイルに戻す |
 | Print / Shift+Print / Super+Print | 範囲 / 全画面のスクリーンショット(~/Pictures/Screenshots + クリップボード)/ 全画面をクリップボードだけ。ame-shell が自前で撮る(止めた画面の上でドラッグ、Enter で全体、Esc でやめる)。ext-image-copy-capture の無い River 0.3 などでは grim・slurp・wl-copy を使う |
@@ -381,7 +385,7 @@ ame-ctl watch                            (出来事を 1 行 1 つの JSON で�
 
 ## 既知の問題
 
-- River 0.3 系のセッション(「Ame Shell」の River 0.3 版)は Chimera Linux では使えない(リポジトリに river 0.3 が無い)。Chimera では River 0.5 のセッションだけが入る。FreeBSD も同じ(river パッケージが 0.4 以降)。
+- River 0.3 系のセッション(「SeoritsuOS」の River 0.3 版)は Chimera Linux では使えない(リポジトリに river 0.3 が無い)。Chimera では River 0.5 のセッションだけが入る。FreeBSD も同じ(river パッケージが 0.4 以降)。
 - ウィンドウの開閉アニメーションは River 0.5 セッションのみ(River 0.3 には外から窓を動かす手段が無い)。ウィンドウ越しのガラスは未対応。
 - ユーザーの写真を選ぶ画面は xdg-desktop-portal の実装(xdg-desktop-portal-gtk)が出すので、見た目は GTK のもの。
 - River 0.3 では、ワークスペースごとのアプリ名は推測(River 0.3 は窓とタグの対応を外に出さない)。
@@ -402,7 +406,7 @@ ame-shell と同じ考え方(ツールキットを使わず GPU / ソフトウ�
 
 ```sh
 sh scripts/install-apps.sh                 # 3 つとも、ame-shell が決めた版(scripts/pins.sh)で入れる(名前を並べるとそれだけ)
-sh scripts/install-apps.sh --latest        # 決めた版ではなく最新を入れる
+sh scripts/install-apps.sh --latest        # 決めた版ではなく最新を入れる(ame-update はこちら。自分で入れたふつうのファイルも最新に入れ替える。開発中の置き場へのリンクは触らない)
 sh scripts/install-apps.sh --uninstall     # この script が入れたものだけ外す
 ```
 

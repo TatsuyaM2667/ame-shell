@@ -516,7 +516,7 @@ pub fn stopRecording(f: *Frame) void {
     if (!f.sidev.recording) return;
     sys.spawnDetached("pkill -INT -x ame-rec");
     f.sidev.recording = false;
-    f.app.notifs.post("ame-shell", "録画を保存しました", f.sidev.rec_path[0..f.sidev.rec_len], 0);
+    f.app.notifs.post("SeoritsuOS", "録画を保存しました", f.sidev.rec_path[0..f.sidev.rec_len], 0);
 }
 
 /// 録画を始める。output = 録る画面(null なら ame-rec の既定)、rect = 範囲(撮った画素の座標。null なら全体)、
@@ -526,13 +526,13 @@ pub fn startRecording(f: *Frame, output: ?[]const u8, rect: ?[4]u32, gif: bool) 
     // ame-rec は ext-image-copy-capture で撮る(River 0.4 / 0.5。River 0.3 には無い)
     if (f.app.icc_mgr == null) {
         theme.flashError(f.app);
-        f.app.notifs.post("ame-shell", "録画できません", "このコンポジタは画面の撮影(ext-image-copy-capture)に対応していません(River 0.5 のセッションで使えます)", 0);
+        f.app.notifs.post("SeoritsuOS", "録画できません", "このコンポジタは画面の撮影(ext-image-copy-capture)に対応していません(River 0.5 のセッションで使えます)", 0);
         return;
     }
     if (!sys.hasCommand("ame-rec") or !sys.hasCommand("ffmpeg")) {
         theme.flashError(f.app);
         const hint = if (!sys.hasCommand("ffmpeg")) "ffmpeg がありません。パッケージを入れてください" else "ame-rec がありません(ame-shell を入れ直してください)";
-        f.app.notifs.post("ame-shell", "録画できません", hint, 0);
+        f.app.notifs.post("SeoritsuOS", "録画できません", hint, 0);
         return;
     }
     // ~/Videos/rec_YYYYmmdd_HHMMSS.mp4(.gif)
@@ -560,5 +560,5 @@ pub fn startRecording(f: *Frame, output: ?[]const u8, rect: ?[4]u32, gif: bool) 
         \\exec ame-rec "$@" >/dev/null 2>&1
     , &.{ pathz.ptr, outz.ptr, geomz.ptr });
     f.sidev.recording = true;
-    f.app.notifs.post("ame-shell", if (gif) "GIF の録画を開始しました(もう一度押すと停止)" else "録画を開始しました(もう一度押すと停止)", path, 0);
+    f.app.notifs.post("SeoritsuOS", if (gif) "GIF の録画を開始しました(もう一度押すと停止)" else "録画を開始しました(もう一度押すと停止)", path, 0);
 }

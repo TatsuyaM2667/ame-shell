@@ -2,14 +2,14 @@
 
 <p class="file">対象: session/ame-session(222 行)・ame-river5-init(95)・ame-update(181)・install-session.sh / install.sh / scripts/install-freebsd.sh・install-arch.sh・sddm-theme.sh ほか(すべて POSIX sh)</p>
 
-ログイン画面で「Ame Shell」を選んでから、デスクトップが出るまでの流れです。
+ログイン画面で「SeoritsuOS」を選んでから、デスクトップが出るまでの流れです。
 
 ```
 SDDM → ame-session --river5(環境を整える)→ River 0.5 → ame-river5-init(監督)→ ame-shell
 ```
 
 :::easy このページを読む前に
-ログイン画面で「Ame Shell」を選んでから画面が出るまでには、何段階かの準備があります。環境変数を整え、D-Bus や画面を使う権限を用意し、River を起動し、その上で ame-shell を起動します。
+ログイン画面で「SeoritsuOS」を選んでから画面が出るまでには、何段階かの準備があります。環境変数を整え、D-Bus や画面を使う権限を用意し、River を起動し、その上で ame-shell を起動します。
 
 ame-shell が万一落ちても、見張り役のスクリプトがすぐに起動し直します。何度も続けて落ちるときは、黒い画面に閉じ込めないよう、ログイン画面に戻します。インストーラは、入れたファイルを全部記録するので、いつでも元に戻せます。
 :::

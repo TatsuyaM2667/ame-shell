@@ -1,5 +1,5 @@
 #!/bin/sh
-# ame-river-init: Ame Shell 用の River 0.3 初期化スクリプト(riverctl で設定)。
+# ame-river-init: SeoritsuOS 用の River 0.3 初期化スクリプト(riverctl で設定)。
 # ユーザーの ~/.config/river/init は読まず、触りもしない。
 # 追加設定は ~/.config/ame-shell/river-extra.sh があれば最後に読み込む。
 

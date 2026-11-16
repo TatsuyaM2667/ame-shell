@@ -1,9 +1,7 @@
 // 浮いた窓をドラッグしたときの「紙・液体のようにぺらっとたわむ」動き。
 //
 // River の WM は窓の位置と切り抜きしか決められず、窓そのものを変形できない。そこで:
-//   1. ドラッグを始めたら、その窓の中身を 1 枚の絵として写す
-//      (ext-foreign-toplevel-list の窓と river_window_v1 は同じ identifier を持つ →
-//       ext_foreign_toplevel_image_capture_source で、その窓だけを ext-image-copy-capture で撮る)
+//   1. ドラッグを始めたら、その窓の中身を 1 枚の絵として写す(wincap.zig)
 //   2. 全面のオーバーレイに、その絵を 16×12 の網目にして描く。つかんだ所はカーソルにぴったり付いて行き、
 //      遠い所ほど柔らかいばね(臨界減衰)ですーっと遅れて付いてくる。隣の点との長さを保つので、伸びずに紙のように曲がる
 //   3. 本物の窓は、オーバーレイが描けている間だけ 1 画素に切り抜いて隠す(wm.zig の render)。
@@ -18,6 +16,7 @@ const App = appmod.App;
 const Output = appmod.Output;
 const surface = @import("../core/surface.zig");
 const Surface = surface.Surface;
+const wincap = @import("wincap.zig");
 
 const log = std.log.scoped(.wobble);
 const ca = std.heap.c_allocator;
@@ -26,39 +25,19 @@ const GX = 16;
 const GY = 12;
 const N = GX * GY;
 
-const FMT_ARGB8888: u32 = 0;
-const FMT_XRGB8888: u32 = 1;
-const FMT_ABGR8888: u32 = 0x34324241;
-const FMT_XBGR8888: u32 = 0x34324258;
-
-const Handle = struct {
-    h: ?*c.struct_ext_foreign_toplevel_handle_v1 = null,
-    id: [64]u8 = undefined,
-    id_len: usize = 0,
-};
-
 const Node = struct { p: [2]f32 = .{ 0, 0 }, v: [2]f32 = .{ 0, 0 }, k: f32 = 0 };
 
 const Phase = enum { idle, capturing, active };
 
 const State = struct {
     app: ?*App = null,
-    list: ?*c.struct_ext_foreign_toplevel_list_v1 = null,
-    src_mgr: ?*c.struct_ext_foreign_toplevel_image_capture_source_manager_v1 = null,
-    handles: [96]Handle = [_]Handle{.{}} ** 96,
-
     phase: Phase = .idle,
     win: ?*const anyopaque = null,
     // 撮影
-    source: ?*c.struct_ext_image_capture_source_v1 = null,
-    session: ?*c.struct_ext_image_copy_capture_session_v1 = null,
-    frame: ?*c.struct_ext_image_copy_capture_frame_v1 = null,
-    buffer: ?*c.struct_wl_buffer = null,
-    map: ?[]align(std.mem.page_size) u8 = null,
+    cap: wincap.Capture = .{ .ctx = undefined, .done = onCaptured },
+    px: ?[]u8 = null,
     buf_w: u32 = 0,
     buf_h: u32 = 0,
-    format: ?u32 = null,
-    px: ?[]u8 = null,
     tex: c.GLuint = 0,
     // オーバーレイ
     surf: ?*Surface = null,
@@ -66,8 +45,6 @@ const State = struct {
     ox: f32 = 0,
     oy: f32 = 0,
     drawn: bool = false,
-    /// 半透明の窓(Thunar・ghostty・foot)。River の窓の撮影は透明度を持たない形式しか無いので、暗い背景を透明度に戻す
-    glassy: bool = false,
     // 形
     rest_w: f32 = 0,
     rest_h: f32 = 0,
@@ -84,74 +61,23 @@ const State = struct {
 var st: State = .{};
 
 // ---------------------------------------------------------------------------
-// 窓の一覧(identifier → handle)
-// ---------------------------------------------------------------------------
-
-pub fn bindList(app: *App, list: *c.struct_ext_foreign_toplevel_list_v1) void {
-    st.app = app;
-    st.list = list;
-    _ = c.ext_foreign_toplevel_list_v1_add_listener(list, &list_listener, null);
-}
-
-pub fn bindSourceManager(app: *App, mgr: *c.struct_ext_foreign_toplevel_image_capture_source_manager_v1) void {
-    st.app = app;
-    st.src_mgr = mgr;
-}
-
-fn lToplevel(_: ?*anyopaque, _: ?*c.struct_ext_foreign_toplevel_list_v1, h: ?*c.struct_ext_foreign_toplevel_handle_v1) callconv(.C) void {
-    const hh = h orelse return;
-    for (&st.handles) |*slot| if (slot.h == null) {
-        slot.* = .{ .h = hh };
-        _ = c.ext_foreign_toplevel_handle_v1_add_listener(hh, &handle_listener, slot);
-        return;
-    };
-    c.ext_foreign_toplevel_handle_v1_destroy(hh); // 一覧がいっぱい(窓が 96 個以上)
-}
-fn lFinished(_: ?*anyopaque, _: ?*c.struct_ext_foreign_toplevel_list_v1) callconv(.C) void {}
-const list_listener = c.struct_ext_foreign_toplevel_list_v1_listener{ .toplevel = lToplevel, .finished = lFinished };
-
-fn hClosed(data: ?*anyopaque, h: ?*c.struct_ext_foreign_toplevel_handle_v1) callconv(.C) void {
-    const slot: *Handle = @ptrCast(@alignCast(data.?));
-    c.ext_foreign_toplevel_handle_v1_destroy(h);
-    slot.* = .{};
-}
-fn hDone(_: ?*anyopaque, _: ?*c.struct_ext_foreign_toplevel_handle_v1) callconv(.C) void {}
-fn hTitle(_: ?*anyopaque, _: ?*c.struct_ext_foreign_toplevel_handle_v1, _: [*c]const u8) callconv(.C) void {}
-fn hAppId(_: ?*anyopaque, _: ?*c.struct_ext_foreign_toplevel_handle_v1, _: [*c]const u8) callconv(.C) void {}
-fn hIdent(data: ?*anyopaque, _: ?*c.struct_ext_foreign_toplevel_handle_v1, id: [*c]const u8) callconv(.C) void {
-    const slot: *Handle = @ptrCast(@alignCast(data.?));
-    const s = if (id != null) std.mem.sliceTo(id, 0) else "";
-    slot.id_len = @min(s.len, slot.id.len);
-    @memcpy(slot.id[0..slot.id_len], s[0..slot.id_len]);
-}
-const handle_listener = c.struct_ext_foreign_toplevel_handle_v1_listener{ .closed = hClosed, .done = hDone, .title = hTitle, .app_id = hAppId, .identifier = hIdent };
-
-fn findHandle(ident: []const u8) ?*c.struct_ext_foreign_toplevel_handle_v1 {
-    if (ident.len == 0) return null;
-    for (st.handles) |slot| if (slot.h != null and std.mem.eql(u8, slot.id[0..slot.id_len], ident)) return slot.h;
-    return null;
-}
-
-// ---------------------------------------------------------------------------
 // wm.zig から
 // ---------------------------------------------------------------------------
 
 /// ドラッグを始めた。rect = 窓の中身の矩形(グローバル)、ptr = カーソル(グローバル)
 pub fn begin(win: *const anyopaque, ident: []const u8, rect: [4]f32, ptr: [2]f32, out: *Output, out_xy: [2]f32, glassy: bool) void {
-    const app = st.app orelse return;
+    const app = out.app;
     if (st.phase != .idle) return;
     // AME_WOBBLE=0 で使わない
     if (std.posix.getenv("AME_WOBBLE")) |v| if (std.mem.eql(u8, v, "0")) return;
-    if (app.shm == null or app.icc_mgr == null) return;
-    const mgr = st.src_mgr orelse return;
-    const h = findHandle(ident) orelse return;
     if (rect[2] < 40 or rect[3] < 40) return;
+    if (!st.cap.start(ident, glassy)) return;
+    st.app = app;
     st.win = win;
     st.phase = .capturing;
     st.released = false;
     st.finished = false;
     st.drawn = false;
-    st.glassy = glassy;
     st.out = out;
     st.ox = out_xy[0];
     st.oy = out_xy[1];
@@ -168,13 +94,6 @@ pub fn begin(win: *const anyopaque, ident: []const u8, rect: [4]f32, ptr: [2]f32
         const e = t * t * (3 - 2 * t);
         st.nodes[gy * GX + gx] = .{ .p = .{ rect[0] + r[0], rect[1] + r[1] }, .v = .{ 0, 0 }, .k = 900 * (1 - e) + 38 * e };
     };
-    st.format = null;
-    st.buf_w = 0;
-    st.buf_h = 0;
-    st.source = c.ext_foreign_toplevel_image_capture_source_manager_v1_create_source(mgr, h);
-    st.session = c.ext_image_copy_capture_manager_v1_create_session(app.icc_mgr, st.source, 0);
-    if (st.session == null) return abort();
-    _ = c.ext_image_copy_capture_session_v1_add_listener(st.session, &session_listener, null);
 }
 
 /// ドラッグ中: 窓の左上の目標(グローバル)
@@ -207,7 +126,7 @@ fn rest(gx: usize, gy: usize) [2]f32 {
 }
 
 fn abort() void {
-    releaseCapture();
+    st.cap.cancel();
     if (st.px) |p| ca.free(p);
     st.px = null;
     st.finished = true;
@@ -219,105 +138,14 @@ fn abort() void {
     }
 }
 
-fn releaseCapture() void {
-    if (st.frame) |f| c.ext_image_copy_capture_frame_v1_destroy(f);
-    if (st.session) |x| c.ext_image_copy_capture_session_v1_destroy(x);
-    if (st.source) |x| c.ext_image_capture_source_v1_destroy(x);
-    if (st.buffer) |b| c.wl_buffer_destroy(b);
-    if (st.map) |m| std.posix.munmap(m);
-    st.frame = null;
-    st.session = null;
-    st.source = null;
-    st.buffer = null;
-    st.map = null;
-}
-
-// ---------------------------------------------------------------------------
-// 窓の撮影(ext-image-copy-capture。shot.zig と同じ流れ)
-// ---------------------------------------------------------------------------
-
-fn sBufferSize(_: ?*anyopaque, _: ?*c.struct_ext_image_copy_capture_session_v1, w: u32, h: u32) callconv(.C) void {
-    st.buf_w = w;
-    st.buf_h = h;
-}
-fn sShmFormat(_: ?*anyopaque, _: ?*c.struct_ext_image_copy_capture_session_v1, fmt: u32) callconv(.C) void {
-    // 透明度を持つ形式を優先(半透明の窓も透けたまま): ARGB > ABGR > XRGB > XBGR
-    const rank = struct {
-        fn f(x: u32) u8 {
-            return switch (x) {
-                FMT_ARGB8888 => 4,
-                FMT_ABGR8888 => 3,
-                FMT_XRGB8888 => 2,
-                FMT_XBGR8888 => 1,
-                else => 0,
-            };
-        }
-    }.f;
-    if (rank(fmt) > 0 and (st.format == null or rank(fmt) > rank(st.format.?))) st.format = fmt;
-}
-fn sDmabufDevice(_: ?*anyopaque, _: ?*c.struct_ext_image_copy_capture_session_v1, _: ?*c.struct_wl_array) callconv(.C) void {}
-fn sDmabufFormat(_: ?*anyopaque, _: ?*c.struct_ext_image_copy_capture_session_v1, _: u32, _: ?*c.struct_wl_array) callconv(.C) void {}
-fn sDone(_: ?*anyopaque, sess: ?*c.struct_ext_image_copy_capture_session_v1) callconv(.C) void {
-    const app = st.app orelse return;
-    if (st.frame != null or st.phase != .capturing) return;
-    const fmt = st.format orelse return abort();
-    if (st.buf_w == 0 or st.buf_h == 0) return abort();
-    const stride = st.buf_w * 4;
-    const size: usize = @as(usize, stride) * st.buf_h;
-    const fd: c_int = c.memfd_create("ame-wobble", c.MFD_CLOEXEC);
-    if (fd < 0) return abort();
-    defer std.posix.close(fd);
-    std.posix.ftruncate(fd, size) catch return abort();
-    st.map = std.posix.mmap(null, size, std.posix.PROT.READ | std.posix.PROT.WRITE, .{ .TYPE = .SHARED }, fd, 0) catch return abort();
-    const pool = c.wl_shm_create_pool(app.shm, fd, @intCast(size));
-    st.buffer = c.wl_shm_pool_create_buffer(pool, 0, @intCast(st.buf_w), @intCast(st.buf_h), @intCast(stride), fmt);
-    c.wl_shm_pool_destroy(pool);
-    st.frame = c.ext_image_copy_capture_session_v1_create_frame(sess);
-    _ = c.ext_image_copy_capture_frame_v1_add_listener(st.frame, &frame_listener, null);
-    c.ext_image_copy_capture_frame_v1_attach_buffer(st.frame, st.buffer);
-    c.ext_image_copy_capture_frame_v1_damage_buffer(st.frame, 0, 0, @intCast(st.buf_w), @intCast(st.buf_h));
-    c.ext_image_copy_capture_frame_v1_capture(st.frame);
-}
-fn sStopped(_: ?*anyopaque, _: ?*c.struct_ext_image_copy_capture_session_v1) callconv(.C) void {
-    if (st.phase == .capturing) abort();
-}
-const session_listener = c.struct_ext_image_copy_capture_session_v1_listener{
-    .buffer_size = sBufferSize,
-    .shm_format = sShmFormat,
-    .dmabuf_device = sDmabufDevice,
-    .dmabuf_format = sDmabufFormat,
-    .done = sDone,
-    .stopped = sStopped,
-};
-
-fn fTransform(_: ?*anyopaque, _: ?*c.struct_ext_image_copy_capture_frame_v1, _: u32) callconv(.C) void {}
-fn fDamage(_: ?*anyopaque, _: ?*c.struct_ext_image_copy_capture_frame_v1, _: i32, _: i32, _: i32, _: i32) callconv(.C) void {}
-fn fTime(_: ?*anyopaque, _: ?*c.struct_ext_image_copy_capture_frame_v1, _: u32, _: u32, _: u32) callconv(.C) void {}
-fn fReady(_: ?*anyopaque, _: ?*c.struct_ext_image_copy_capture_frame_v1) callconv(.C) void {
-    const app = st.app orelse return;
-    const map = st.map orelse return abort();
-    const n: usize = @as(usize, st.buf_w) * st.buf_h;
-    const px = ca.alloc(u8, n * 4) catch return abort();
-    const bgr = st.format.? == FMT_XRGB8888 or st.format.? == FMT_ARGB8888;
-    const opaque_ = st.format.? == FMT_XRGB8888 or st.format.? == FMT_XBGR8888;
-    var i: usize = 0;
-    while (i < n) : (i += 1) {
-        const p = map[i * 4 ..][0..4];
-        const q = px[i * 4 ..][0..4];
-        // 乗算済みアルファのまま(半透明の端末も透けたまま)
-        var a: u8 = if (opaque_) 255 else p[3];
-        if (opaque_ and st.glassy) {
-            // 黒の上に重ねた半透明の背景(66%)の色は暗い → その所は透明度 0.66 に、明るい文字・アイコンは不透明に
-            const mx: f32 = @as(f32, @floatFromInt(@max(p[0], @max(p[1], p[2])))) / 255.0;
-            const t = std.math.clamp((mx - 0.05) / 0.2, 0, 1);
-            a = @intFromFloat(255.0 * (0.66 + 0.34 * t * t * (3 - 2 * t)));
-        }
-        q.* = if (bgr) .{ p[2], p[1], p[0], a } else .{ p[0], p[1], p[2], a };
-    }
-    st.px = px;
-    releaseCapture();
+/// 撮れた(wincap.zig): 全面のオーバーレイ(入力は透過)を出す
+fn onCaptured(_: *anyopaque, got: ?wincap.Pixels) void {
+    const px = got orelse return abort();
+    st.px = px.px;
+    st.buf_w = px.w;
+    st.buf_h = px.h;
     if (st.released) return abort(); // 撮れる前に離した
-    // 全面のオーバーレイ(入力は透過)
+    const app = st.app orelse return abort();
     const out = st.out orelse return abort();
     st.surf = Surface.createLayer(app, .{ .ctx = &st, .draw = draw }, .{
         .layer = c.ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY,
@@ -331,16 +159,6 @@ fn fReady(_: ?*anyopaque, _: ?*c.struct_ext_image_copy_capture_frame_v1) callcon
     st.surf.?.schedule();
     st.phase = .active;
 }
-fn fFailed(_: ?*anyopaque, _: ?*c.struct_ext_image_copy_capture_frame_v1, _: u32) callconv(.C) void {
-    abort();
-}
-const frame_listener = c.struct_ext_image_copy_capture_frame_v1_listener{
-    .transform = fTransform,
-    .damage = fDamage,
-    .presentation_time = fTime,
-    .ready = fReady,
-    .failed = fFailed,
-};
 
 // ---------------------------------------------------------------------------
 // ばねと描画

@@ -347,7 +347,7 @@ pub const Wallpaper = struct {
         var body: [700]u8 = undefined;
         const reason = if (video.isVideoPath(path)) video.last_error else "画像を読めません";
         const msg = std.fmt.bufPrint(&body, "{s}\n{s}", .{ reason, std.fs.path.basename(path) }) catch reason;
-        self.app.notifs.post("ame-shell", "壁紙を変えられませんでした", msg, 0);
+        self.app.notifs.post("SeoritsuOS", "壁紙を変えられませんでした", msg, 0);
     }
 
     fn loadImage(self: *Wallpaper, path_in: []const u8) void {

@@ -7,7 +7,7 @@ git clone https://github.com/TatsuyaM2667/ame-shell && cd ame-shell
 sh install.sh
 ```
 
-`install.sh` が OS を見て、必要なものを判断します。依存パッケージ、ツールチェイン(Zig 0.13・Odin)、River、**ame のアプリ**(ファイルマネージャ ame-filemanager・端末 kuraokami・コードエディタ seoritsu)、ame-shell のビルド、インストール、ログイン画面のセッションまで、すべて自動です。終わったら、ログイン画面のセッション一覧から **「Ame Shell (River 0.5)」** を選んでください。
+`install.sh` が OS を見て、必要なものを判断します。依存パッケージ、ツールチェイン(Zig 0.13・Odin)、River、**ame のアプリ**(ファイルマネージャ ame-filemanager・端末 kuraokami・コードエディタ seoritsu)、ame-shell のビルド、インストール、ログイン画面のセッションまで、すべて自動です。終わったら、ログイン画面のセッション一覧から **「SeoritsuOS (River 0.5)」** を選んでください。
 
 | OS | 依存パッケージ | River 0.5 | 備考 |
 |---|---|---|---|

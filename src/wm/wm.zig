@@ -31,6 +31,8 @@ const sys = @import("../platform/sys.zig");
 const theme = @import("../gfx/theme.zig");
 const binds = @import("binds.zig");
 const wobble = @import("wobble.zig");
+const openfx = @import("openfx.zig");
+const dwindle = @import("ame_lib").dwindle;
 
 const BTN_LEFT = 0x110;
 const BTN_RIGHT = 0x111;
@@ -114,6 +116,10 @@ pub const Window = struct {
     close_sent_ms: u64 = 0,
     /// ワークスペース切替で画面外へ出ていく途中(終わったら hide)
     leaving: bool = false,
+    /// 並べ方の木(ワークスペースごと)のどれに入っているか
+    tree_key: ?TreeKey = null,
+    /// 親を持つ窓(ダイアログ)。開いたらフォーカスする(ほかの新しい窓はフォーカスを取らない)
+    has_parent: bool = false,
 
     fn titleStr(self: *const Window) []const u8 {
         return self.title[0..self.title_len];
@@ -141,7 +147,10 @@ pub const WOut = struct {
     ame: ?*appmod.Output = null,
 };
 
-const Op = enum { none, move, resize, tile_move };
+const Op = enum { none, move, resize, tile_move, tile_resize };
+
+/// 並べ方の木の鍵: 出力とワークスペース(タグの一番下のビット)
+pub const TreeKey = struct { out: *WOut, tag: u32 };
 
 pub const WSeat = struct {
     wm: *Wm,
@@ -189,6 +198,10 @@ pub const Action = union(enum) {
     swap_next,
     swap_prev,
     ratio: f32,
+    toggle_split,
+    /// 0 左・1 右・2 上・3 下
+    focus_dir: u2,
+    move_dir: u2,
     tags: u32,
     toggle_tags: u32,
     move_tags: u32,
@@ -255,6 +268,11 @@ pub const Wm = struct {
     locked: bool = false,
     focus_counter: u64 = 0,
     theme_fading: bool = false,
+    /// ワークスペースごとの並べ方の木(Hyprland の dwindle)
+    trees: std.AutoHashMap(TreeKey, dwindle.Tree),
+    lay_items: std.ArrayList(dwindle.Item),
+    /// 窓が開いた・閉じた・入れ替わった: 次の manage で、カーソルの下の窓へフォーカスを合わせ直す
+    pointer_refocus: bool = false,
 
     pub fn create(app: *App, mgr: *c.struct_river_window_manager_v1) !*Wm {
         const self = try app.alloc.create(Wm);
@@ -267,6 +285,8 @@ pub const Wm = struct {
             .keybinds = std.ArrayList(*KeyBind).init(app.alloc),
             .ptrbinds = std.ArrayList(*PtrBind).init(app.alloc),
             .queue = std.ArrayList(Action).init(app.alloc),
+            .trees = std.AutoHashMap(TreeKey, dwindle.Tree).init(app.alloc),
+            .lay_items = std.ArrayList(dwindle.Item).init(app.alloc),
             .anim_timer = try loop.Timer.init(),
         };
         _ = c.river_window_manager_v1_add_listener(mgr, &mgr_listener, self);
@@ -425,10 +445,12 @@ pub const Wm = struct {
             w.shown = false;
             // 並び: フォーカス中の窓の直後へ
             self.moveAfterFocused(w);
-            if (s) |ss| {
+            // フォーカスはカーソルのある窓のまま(新しい窓は取らない)。ダイアログだけは開いた所で使うのでフォーカスする
+            if (s) |ss| if (w.has_parent) {
                 ss.focused = w;
                 ss.force_focus = true;
-            }
+            };
+            self.pointer_refocus = true;
             // 大きさの決まっている小窓(ダイアログ等)は浮かせる
             if (w.max_w > 0 and w.max_w == w.min_w and w.max_h > 0 and w.max_h == w.min_h) w.floating = true;
         }
@@ -480,7 +502,8 @@ pub const Wm = struct {
             }
         }
 
-        // 6. 配置
+        // 6. 配置(先に、窓を並べ方の木へ入れる・外す)
+        self.syncTrees();
         for (self.outputs.items) |o| {
             self.layout(o);
             if (o.ame) |ao| if (ao.wall) |wl| wl.setCovered(self.covered(o));
@@ -495,6 +518,11 @@ pub const Wm = struct {
             }
             ss.enter_pending = false;
             ss.ptr_moved = false;
+            // 窓が開いた・閉じた・入れ替わった: フォーカスは常にカーソルの下の窓(カーソルが窓の上に無ければそのまま)
+            if (self.pointer_refocus and ss.op == .none and ss.layer_focus == .none) {
+                if (self.windowAt(ss.ptr_x, ss.ptr_y)) |pw| ss.focused = pw;
+            }
+            self.pointer_refocus = false;
             if (ss.op_end_pending) {
                 c.river_seat_v1_op_end(ss.obj);
                 ss.op_end_pending = false;
@@ -592,11 +620,19 @@ pub const Wm = struct {
                 const idx = std.mem.indexOfScalar(*Window, list, w) orelse return;
                 if (list.len < 2) return;
                 const other = list[if (a == .swap_next) (idx + 1) % list.len else (idx + list.len - 1) % list.len];
-                const ia = std.mem.indexOfScalar(*Window, self.windows.items, w).?;
-                const ib = std.mem.indexOfScalar(*Window, self.windows.items, other).?;
-                std.mem.swap(*Window, &self.windows.items[ia], &self.windows.items[ib]);
+                self.swapWindows(w, other);
             },
-            .ratio => |d| self.ratio = std.math.clamp(self.ratio + d, 0.15, 0.85),
+            // 分け目の比率(Hyprland の splitratio)。木に入っていない(複数のワークスペースを並べて見ている)ときは最初の分け目
+            .ratio => |d| if (fw) |w| {
+                if (self.treeOf(w)) |t| t.splitRatio(@intFromPtr(w), d) else self.ratio = std.math.clamp(self.ratio + d, 0.15, 0.85);
+            },
+            .toggle_split => if (fw) |w| if (self.treeOf(w)) |t| t.toggleSplit(@intFromPtr(w)),
+            // 向きでフォーカス・入れ替え(Hyprland の movefocus・movewindow)
+            .focus_dir => |d| if (s) |ss| if (fw) |w| if (self.neighbor(w, d)) |n| {
+                ss.focused = n;
+                ss.force_focus = true;
+            },
+            .move_dir => |d| if (fw) |w| if (!w.floating) if (self.neighbor(w, d)) |n| if (!n.floating) self.swapWindows(w, n),
             .tags => |m| if (o) |oo| self.setTags(oo, m),
             .toggle_tags => |m| if (o) |oo| {
                 const nt = oo.tags ^ m;
@@ -652,6 +688,19 @@ pub const Wm = struct {
                 const is_move = a != .op_resize;
                 const w = ss.pointer_window orelse return;
                 if (w.fullscreen) return;
+                // タイルの窓の大きさ(Super+右ドラッグ): 浮かせずに、カーソルに近い辺の分け目を動かす(Hyprland と同じ)
+                if (a == .op_resize and !w.floating and self.treeOf(w) != null) {
+                    const px: f32 = @floatFromInt(ss.ptr_x);
+                    const py: f32 = @floatFromInt(ss.ptr_y);
+                    ss.op = .tile_resize;
+                    ss.op_window = w;
+                    ss.op_dx = 0;
+                    ss.op_dy = 0;
+                    ss.op_edges = (if (px < w.tx + w.tw / 2) @as(u32, 4) else 8) | (if (py < w.ty + w.th / 2) @as(u32, 1) else 2);
+                    ss.focused = w;
+                    c.river_seat_v1_op_start_pointer(ss.obj);
+                    return;
+                }
                 const was_float = w.floating;
                 if (!w.floating) {
                     w.floating = true;
@@ -942,9 +991,7 @@ pub const Wm = struct {
         const fy: f32 = @floatFromInt(y);
         for (self.visibleList(o, true)) |other| {
             if (other == w or fx < other.tx or fx >= other.tx + other.tw or fy < other.ty or fy >= other.ty + other.th) continue;
-            const ia = std.mem.indexOfScalar(*Window, self.windows.items, w) orelse return;
-            const ib = std.mem.indexOfScalar(*Window, self.windows.items, other) orelse return;
-            std.mem.swap(*Window, &self.windows.items[ia], &self.windows.items[ib]);
+            self.swapWindows(w, other);
             self.requestManage();
             return;
         }
@@ -978,11 +1025,143 @@ pub const Wm = struct {
         return S.buf[0..n];
     }
 
-    /// dwindle: 残りの領域を長い辺で分け、i 番目の窓は前半、残りは後半へ
+    // ---------------------------------------------------------------------
+    // 並べ方の木(src/lib/dwindle.zig)。ワークスペース(出力 × タグ)ごとに 1 本
+    // ---------------------------------------------------------------------
+
+    fn keyOf(w: *const Window) ?TreeKey {
+        const o = w.out orelse return null;
+        if (w.tags == 0) return null;
+        return .{ .out = o, .tag = w.tags & (~w.tags +% 1) };
+    }
+
+    pub fn treeOf(self: *Wm, w: *const Window) ?*dwindle.Tree {
+        const k = w.tree_key orelse return null;
+        return self.trees.getPtr(k);
+    }
+
+    fn untree(self: *Wm, w: *Window) void {
+        const k = w.tree_key orelse return;
+        w.tree_key = null;
+        if (self.trees.getPtr(k)) |t| {
+            t.remove(@intFromPtr(w));
+            if (t.empty()) _ = self.trees.remove(k);
+        }
+    }
+
+    /// 窓を木へ入れる・外す。タイルの窓(浮いていない・閉じる途中でない)は、自分のワークスペースの木に 1 回だけ入る。
+    /// 新しく入る窓は、フォーカス中(= カーソルの下)の窓の場所を分け、カーソルの反対側に入る
+    fn syncTrees(self: *Wm) void {
+        for (self.windows.items) |w| {
+            const want = if (w.floating or w.closing or w.is_new) null else keyOf(w);
+            if (w.tree_key) |k| {
+                if (want != null and std.meta.eql(k, want.?)) continue;
+                self.untree(w);
+            }
+            const k = want orelse continue;
+            const gop = self.trees.getOrPut(k) catch continue;
+            if (!gop.found_existing) gop.value_ptr.* = .{ .alloc = self.app.alloc };
+            var target: ?*Window = null;
+            var first = false;
+            if (self.seat()) |ss| {
+                const f = ss.focused;
+                target = if (f != null and f.? != w and f.?.tree_key != null and std.meta.eql(f.?.tree_key.?, k)) f else null;
+                if (target == null) if (self.windowAt(ss.ptr_x, ss.ptr_y)) |pw| {
+                    if (pw != w and pw.tree_key != null and std.meta.eql(pw.tree_key.?, k)) target = pw;
+                };
+                if (target) |t| {
+                    const px: f32 = @floatFromInt(ss.ptr_x);
+                    const py: f32 = @floatFromInt(ss.ptr_y);
+                    if (px >= t.tx and px < t.tx + t.tw and py >= t.ty and py < t.ty + t.th) {
+                        // 分けた後の向きは、狙った窓の形で決まる(横長なら左右)。新しい窓はカーソルの反対側に入れる:
+                        // カーソルは元の窓の上に残るので、フォーカスも元の窓のまま(新しい窓がフォーカスを取らない)
+                        first = if (t.tw > t.th) px >= t.tx + t.tw / 2 else py >= t.ty + t.th / 2;
+                    }
+                }
+            }
+            gop.value_ptr.insert(@intFromPtr(w), if (target) |t| @intFromPtr(t) else null, first) catch continue;
+            w.tree_key = k;
+        }
+    }
+
+    /// 2 つの窓の場所を入れ替える(同じ木なら木の中で。並び順も入れ替える)
+    fn swapWindows(self: *Wm, a: *Window, b: *Window) void {
+        if (a.tree_key != null and b.tree_key != null and std.meta.eql(a.tree_key.?, b.tree_key.?)) {
+            if (self.treeOf(a)) |t| t.swap(@intFromPtr(a), @intFromPtr(b));
+        }
+        const ia = std.mem.indexOfScalar(*Window, self.windows.items, a) orelse return;
+        const ib = std.mem.indexOfScalar(*Window, self.windows.items, b) orelse return;
+        std.mem.swap(*Window, &self.windows.items[ia], &self.windows.items[ib]);
+        self.pointer_refocus = true;
+    }
+
+    /// カーソル(グローバル)の下の見えている窓。上に重なっているもの(浮いている窓)から
+    fn windowAt(self: *Wm, x: i32, y: i32) ?*Window {
+        if (x == 0 and y == 0) return null; // まだカーソルの位置を知らない
+        const fx: f32 = @floatFromInt(x);
+        const fy: f32 = @floatFromInt(y);
+        var hit: ?*Window = null;
+        for (self.windows.items) |w| {
+            if (!w.visible() or w.closing or w.is_new) continue;
+            if (fx < w.tx or fx >= w.tx + w.tw or fy < w.ty or fy >= w.ty + w.th) continue;
+            if (w.fullscreen) return w;
+            if (hit == null or (w.floating and !hit.?.floating)) hit = w;
+        }
+        return hit;
+    }
+
+    /// w から見て d の向き(0 左・1 右・2 上・3 下)にある、いちばん近い見えている窓
+    fn neighbor(self: *Wm, w: *Window, d: u2) ?*Window {
+        const cx = w.tx + w.tw / 2;
+        const cy = w.ty + w.th / 2;
+        var best: ?*Window = null;
+        var best_score: f32 = std.math.inf(f32);
+        for (self.windows.items) |o| {
+            if (o == w or o.out != w.out or !o.visible() or o.closing) continue;
+            const ox = o.tx + o.tw / 2;
+            const oy = o.ty + o.th / 2;
+            // 向きの軸の距離(その向きに無ければ候補にしない)と、横ずれ(重なっていれば 0)
+            const along = switch (d) {
+                0 => w.tx - (o.tx + o.tw),
+                1 => o.tx - (w.tx + w.tw),
+                2 => w.ty - (o.ty + o.th),
+                3 => o.ty - (w.ty + w.th),
+            };
+            const ahead = switch (d) {
+                0 => ox < cx,
+                1 => ox > cx,
+                2 => oy < cy,
+                3 => oy > cy,
+            };
+            if (!ahead) continue;
+            const across = if (d < 2) @max(0, @max(o.ty - (w.ty + w.th), w.ty - (o.ty + o.th))) else @max(0, @max(o.tx - (w.tx + w.tw), w.tx - (o.tx + o.tw)));
+            const score = @max(along, 0) + across * 4;
+            if (score < best_score) {
+                best_score = score;
+                best = o;
+            }
+        }
+        return best;
+    }
+
+    /// 並べる。1 つのワークスペースを見ているときは、その木(Hyprland の dwindle)。
+    /// 複数のワークスペースを一度に見ているとき(Super+0 など)は、並び順に残りの領域を長い辺で分けていく
     fn layout(self: *Wm, o: *WOut) void {
         var area: [4]f32 = if (o.area) |a| .{ @floatFromInt(a[0]), @floatFromInt(a[1]), @floatFromInt(a[2]), @floatFromInt(a[3]) } else .{ @floatFromInt(o.x), @floatFromInt(o.y), @floatFromInt(o.w), @floatFromInt(o.h) };
         const g = self.gap_out;
         area = .{ area[0] + g, area[1] + g, area[2] - g * 2, area[3] - g * 2 };
+        if (@popCount(o.tags) == 1) {
+            if (self.trees.getPtr(.{ .out = o, .tag = o.tags })) |t| {
+                self.lay_items.clearRetainingCapacity();
+                t.layout(area, self.gap_in, &self.lay_items);
+                for (self.lay_items.items) |it| {
+                    const w: *Window = @ptrFromInt(it.id);
+                    if (!w.fullscreen) self.place(w, it.rect);
+                }
+            }
+            self.layoutFloating(o, area);
+            return;
+        }
         var tiled: [128]*Window = undefined;
         var n: usize = 0;
         for (self.windows.items) |w| {
@@ -1010,7 +1189,10 @@ pub const Wm = struct {
             }
             self.place(w, cell);
         }
-        // 浮いている窓
+        self.layoutFloating(o, area);
+    }
+
+    fn layoutFloating(self: *Wm, o: *WOut, area: [4]f32) void {
         for (self.windows.items) |w| {
             if (w.out != o or !w.visible() or !w.floating or w.fullscreen) continue;
             if (w.float_rect[2] <= 0) {
@@ -1091,17 +1273,23 @@ pub const Wm = struct {
                 }
                 @import("../frame/island.zig").windowEvent(self.app, self.outputs.items, @intFromFloat(w.tx + w.tw / 2), @intFromFloat(w.ty + w.th / 2), true);
                 @import("../core/events.zig").emit(.{ .event = "window", .action = "open", .app_id = w.app_id[0..w.app_id_len] });
-                // 初めて表示: その場で「中心から広がる」(Hyprland の popin)
+                // 初めて表示: 窓の真ん中から水の波紋が広がって現れる(openfx.zig。ロック解除と同じ波紋)。
+                // 撮れないときは、その場で中心から広がる
                 w.placed = true;
                 w.px.snap(w.tx);
                 w.py.snap(w.ty);
                 w.cw.snap(@floatFromInt(w.w));
                 w.ch.snap(@floatFromInt(w.h));
-                w.reveal.snap(0.3);
-                w.reveal.set(1);
-                w.pop.snap(40);
-                w.pop.set(0);
+                const fx_ok = if (w.out) |wo| if (wo.ame) |ao|
+                    openfx.begin(w, w.ident[0..w.ident_len], .{ w.tx, w.ty, @floatFromInt(w.w), @floatFromInt(w.h) }, ao, .{ @floatFromInt(wo.x), @floatFromInt(wo.y) }, isGlassy(w.app_id[0..w.app_id_len]), popInCb)
+                else
+                    false else false;
+                if (fx_ok) {
+                    w.reveal.snap(1);
+                    w.pop.snap(0);
+                } else popIn(w);
             }
+            if (openfx.hides(w)) moving = true; // 撮れるのを待つ・波紋の間も render を回す(終わったら本物を見せる)
             // 大きくなったときは前の大きさから clip を広げていく(縮むときは即時)
             const fw: f32 = @floatFromInt(w.w);
             const fh: f32 = @floatFromInt(w.h);
@@ -1141,8 +1329,8 @@ pub const Wm = struct {
             c.river_node_v1_set_position(node, @intFromFloat(@round(x)), @intFromFloat(@round(y)));
             self.updateGrip(w, w.floating and !w.closing);
             const full = sc >= 0.999 and vw >= fw - 0.5 and vh >= fh - 0.5;
-            if (wobble.hides(w)) {
-                // たわむ絵が代わりに描かれている間は、本物を 1 画素に切り抜いて隠す
+            if (wobble.hides(w) or openfx.hides(w)) {
+                // たわむ絵・開くときの波紋が代わりに描かれている間は、本物を 1 画素に切り抜いて隠す
                 c.river_window_v1_set_clip_box(w.obj, 0, 0, 1, 1);
             } else if (full) {
                 c.river_window_v1_set_clip_box(w.obj, 0, 0, 0, 0);
@@ -1474,8 +1662,11 @@ fn wClosed(data: ?*anyopaque, obj: ?*c.struct_river_window_v1) callconv(.C) void
             s.op = .none;
         }
     }
+    self.untree(w);
+    self.pointer_refocus = true;
     if (self.grip_hover == w) self.gripLeave();
     wobble.forget(w);
+    openfx.forget(w);
     dropGrip(w);
     if (std.mem.indexOfScalar(*Window, self.windows.items, w)) |i| _ = self.windows.orderedRemove(i);
     if (w.node) |n| c.river_node_v1_destroy(n);
@@ -1516,6 +1707,7 @@ fn wParent(data: ?*anyopaque, _: ?*c.struct_river_window_v1, parent: ?*c.struct_
     // 親を持つ窓(ダイアログ)は浮かせる
     const w: *Window = @ptrCast(@alignCast(data.?));
     if (parent != null) w.floating = true;
+    w.has_parent = parent != null;
 }
 fn wDecoHint(_: ?*anyopaque, _: ?*c.struct_river_window_v1, _: u32) callconv(.C) void {}
 fn wMoveReq(data: ?*anyopaque, _: ?*c.struct_river_window_v1, _: ?*c.struct_river_seat_v1) callconv(.C) void {
@@ -1590,6 +1782,8 @@ fn oRemoved(data: ?*anyopaque, obj: ?*c.struct_river_output_v1) callconv(.C) voi
     const other: ?*WOut = for (self.outputs.items) |x| {
         if (x != o) break x;
     } else null;
+    // この出力の木は捨てる(窓は残りの出力の木へ、次の manage で入り直す)
+    for (self.windows.items) |w| if (w.tree_key) |k| if (k.out == o) self.untree(w);
     for (self.windows.items) |w| if (w.out == o) {
         w.out = other;
         if (other) |ot| w.tags = ot.tags;
@@ -1683,8 +1877,14 @@ fn opDelta(s: *WSeat, dx: i32, dy: i32) void {
     // River は manage のたびに同じ値を送り直す。変わっていなければ何もしない
     // (毎回 manage を頼むと、manage → op_delta → manage … と回り続けて、River がカーソルの動きを処理できなくなる)
     if (dx == s.op_dx and dy == s.op_dy and (dx != 0 or dy != 0)) return;
+    const ddx: f32 = @floatFromInt(dx - s.op_dx);
+    const ddy: f32 = @floatFromInt(dy - s.op_dy);
     s.op_dx = dx;
     s.op_dy = dy;
+    if (s.op == .tile_resize) {
+        if (s.wm.treeOf(w)) |t| t.resize(@intFromPtr(w), ddx, ddy, s.op_edges);
+        return s.wm.requestManage();
+    }
     if (s.op == .tile_move) {
         wobble.moveTo(w, s.op_start[0] + @as(f32, @floatFromInt(dx)), s.op_start[1] + @as(f32, @floatFromInt(dy)));
         return s.wm.tileMoveTo(w, s.op_px + dx, s.op_py + dy);
@@ -1792,6 +1992,20 @@ fn pbPressed(data: ?*anyopaque, _: ?*c.struct_river_pointer_binding_v1) callconv
 }
 fn pbReleased(_: ?*anyopaque, _: ?*c.struct_river_pointer_binding_v1) callconv(.C) void {}
 const ptr_listener = c.struct_river_pointer_binding_v1_listener{ .pressed = pbPressed, .released = pbReleased };
+
+/// 開くときのふつうの動き: その場で中心から広がり、下から少しせり上がる(波紋を出せないとき)
+fn popIn(w: *Window) void {
+    w.reveal.response = 0.42; // 角張って見えないよう、ゆっくりめに
+    w.reveal.snap(0.55);
+    w.reveal.set(1);
+    w.pop.snap(24);
+    w.pop.set(0);
+}
+fn popInCb(win: *const anyopaque) void {
+    const w: *Window = @constCast(@ptrCast(@alignCast(win)));
+    popIn(w);
+    w.wm.kick();
+}
 
 /// 浮いた窓の縁のつまみの幅(窓の外側)
 const GRIP: i32 = 10;

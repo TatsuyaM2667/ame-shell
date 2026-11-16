@@ -175,9 +175,9 @@ export fn render_page(i: u32) u32 {
             raw(name);
             raw("</span><span>");
             raw(switch (p.sec) {
-                .ref => "ame-shell 関数リファレンス",
-                .tech => "ame-shell 技術解説",
-                else => "ame-shell マニュアル",
+                .ref => "SeoritsuOS 関数リファレンス",
+                .tech => "SeoritsuOS 技術解説",
+                else => "SeoritsuOS マニュアル",
             });
             raw("</span><span>");
             raw(name);
@@ -212,7 +212,7 @@ export fn render_toc(i: u32) u32 {
     const p = pages[i];
     switch (p.sec) {
         .wiki => {
-            raw("<div class=\"wlogo\"><a href=\"#/wiki\"><b>ame-shell</b><span>Wiki</span></a><small>ame-shell の用語集</small></div>");
+            raw("<div class=\"wlogo\"><a href=\"#/wiki\"><b>SeoritsuOS</b><span>Wiki</span></a><small>SeoritsuOS の用語集</small></div>");
             raw("<div class=\"chap\"><p>案内</p><a href=\"#/wiki\">メインページ</a><a href=\"#/wiki#index\">すべての項目</a><a href=\"#/tech\">技術解説</a><a href=\"#/ref\">関数リファレンス</a></div>");
             raw("<div class=\"chap\"><p>カテゴリ</p>");
             var seen: [32][]const u8 = undefined;
@@ -818,11 +818,11 @@ fn renderDoc(src: []const u8, page: Page) void {
                 raw(tag);
                 raw(">");
                 if (lvl <= 1) {
-                    if (page.sec == .wiki and !std.mem.eql(u8, page.slug, "wiki")) raw("<p class=\"wsub\">出典: ame-shell Wiki — ame-shell の用語集</p>");
+                    if (page.sec == .wiki and !std.mem.eql(u8, page.slug, "wiki")) raw("<p class=\"wsub\">出典: SeoritsuOS Wiki — SeoritsuOS の用語集</p>");
                     if (page.sec == .blog and page.meta.len > 0) {
                         raw("<p class=\"post-meta\"><time>");
                         raw(page.meta);
-                        raw("</time> · ame-shell 開発ブログ</p>");
+                        raw("</time> · SeoritsuOS 開発ブログ</p>");
                     }
                 }
             }

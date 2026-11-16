@@ -380,6 +380,7 @@ pub const App = struct {
                 @import("../desktop/shot.zig").reap(self);
                 @import("../gfx/ripple.zig").reap(self);
                 @import("../wm/wobble.zig").reap(self);
+                @import("../wm/openfx.zig").reap(self);
             }
         }
         // カメラのスレッドを止めてから終わる
@@ -915,10 +916,10 @@ fn onGlobal(data: ?*anyopaque, reg: ?*c.struct_wl_registry, name: u32, interface
     } else if (iface(interface, &c.ext_foreign_toplevel_list_v1_interface)) {
         // 浮いた窓をたわませるために、窓の絵を撮る(wm/wobble.zig)
         const l: *c.struct_ext_foreign_toplevel_list_v1 = @ptrCast(bind(reg, name, &c.ext_foreign_toplevel_list_v1_interface, ver, 1) orelse return);
-        @import("../wm/wobble.zig").bindList(app, l);
+        @import("../wm/wincap.zig").bindList(app, l);
     } else if (iface(interface, &c.ext_foreign_toplevel_image_capture_source_manager_v1_interface)) {
         const m: *c.struct_ext_foreign_toplevel_image_capture_source_manager_v1 = @ptrCast(bind(reg, name, &c.ext_foreign_toplevel_image_capture_source_manager_v1_interface, ver, 1) orelse return);
-        @import("../wm/wobble.zig").bindSourceManager(app, m);
+        @import("../wm/wincap.zig").bindSourceManager(app, m);
     } else if (iface(interface, &c.wp_viewporter_interface)) {
         app.viewporter = @ptrCast(bind(reg, name, &c.wp_viewporter_interface, ver, 1));
     } else if (iface(interface, &c.wp_single_pixel_buffer_manager_v1_interface)) {
@@ -978,6 +979,7 @@ fn onGlobalRemove(data: ?*anyopaque, _: ?*c.struct_wl_registry, name: u32) callc
         @import("../desktop/shot.zig").outputRemoved(app, o);
         @import("../gfx/ripple.zig").outputRemoved(app, o);
         @import("../wm/wobble.zig").outputRemoved(o);
+        @import("../wm/openfx.zig").outputRemoved(o);
         @import("../hand/hand.zig").outputRemoved(o);
         if (app.wm) |w| w.outputRemoved(o);
         c.wl_output_release(o.wl);

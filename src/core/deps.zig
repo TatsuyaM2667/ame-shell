@@ -49,6 +49,6 @@ pub fn require(app: *App, summary: []const u8, cmds: []const []const u8) bool {
     var body: [384]u8 = undefined;
     const b = std.fmt.bufPrint(&body, "{s} が見つかりません。入れてください: {s}{s}", .{ miss, installCmd(), pb[0..pw.pos] }) catch "必要なコマンドが見つかりません";
     std.log.warn("{s}: {s}", .{ summary, b });
-    app.notifs.post("ame-shell", summary, b, 0);
+    app.notifs.post("SeoritsuOS", summary, b, 0);
     return false;
 }
