@@ -73,7 +73,7 @@ gen_build() { # $1 = 名前 $2 = ほかに要るもの
 		;;
 	esac
 	cat <<EOF
-// ame-shell(https://github.com/$OWNER/ame-shell)の src/cmd/$1.zig から生成。直すときは ame-shell の方を直す
+// SeoritsuOS(https://github.com/$OWNER/SeoritsuOS)の src/cmd/$1.zig から生成。直すときは SeoritsuOS の方を直す
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
@@ -124,7 +124,7 @@ gen_build_wayland() { # $1 = 名前 $2 = wayland / wayland-xkb $3 = プロトコ
             b.getInstallStep().dependOn(&b.addInstallBinFile(exe.getEmittedBin(), "ame-paste").step);'
 	fi
 	cat <<EOF
-// ame-shell(https://github.com/$OWNER/ame-shell)の src/cmd/$1.zig から生成。直すときは ame-shell の方を直す
+// SeoritsuOS(https://github.com/$OWNER/SeoritsuOS)の src/cmd/$1.zig から生成。直すときは SeoritsuOS の方を直す
 const std = @import("std");
 
 const protocols = [_][]const u8{$3 };
@@ -195,7 +195,7 @@ gen_readme() { # $1 名前 $2 説明 $3 外部コマンド $4 ほかに要るも
 	echo
 	echo "$2。"
 	echo
-	echo "[ame-shell](https://github.com/$OWNER/ame-shell)(Wayland のデスクトップシェル)の一部を、単独で使えるように切り出したものです。"
+	echo "[SeoritsuOS](https://github.com/$OWNER/SeoritsuOS)(Wayland のデスクトップシェル。旧名 ame-shell)の一部を、単独で使えるように切り出したものです。"
 	echo "ame-shell は画面の要らない仕事を、1 つのことをして標準入出力でやりとりする小さなコマンドに分けています。これはその 1 つです。"
 	echo
 	echo "## 使い方"
@@ -226,7 +226,7 @@ gen_readme() { # $1 名前 $2 説明 $3 外部コマンド $4 ほかに要るも
 	echo
 	echo "## このリポジトリについて"
 	echo
-	echo "正本は ame-shell の \`${5#"$ROOT"/}\` です。このリポジトリは \`scripts/split-repos.sh\` が生成して同期しています。"
+	echo "正本は SeoritsuOS の \`${5#"$ROOT"/}\` です。このリポジトリは \`scripts/split-repos.sh\` が生成して同期しています。"
 	echo "直したいところがあれば ame-shell の方へお願いします。"
 	echo
 	echo "ライセンス: GPL-3.0(ame-shell と同じ)"
@@ -315,7 +315,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 		continue
 	fi
 	if [ "$exists" = 0 ]; then
-		gh repo create "$OWNER/$name" --public --description "$desc(ame-shell から切り出し)" --source "$dir" --push
+		gh repo create "$OWNER/$name" --public --description "$desc(SeoritsuOS から切り出し)" --source "$dir" --push
 	else
 		git -C "$dir" push -q origin HEAD:master
 	fi

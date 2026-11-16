@@ -3,7 +3,7 @@
 <p class="eyebrow">Wayland デスクトップシェル + ウィンドウマネージャ</p>
 <h1 class="hero-title">Seoritsu<span>OS</span></h1>
 <p class="hero-lead">すべてが<strong>ばねの物理</strong>で動く、ガラスのデスクトップ。<br>バー・ランチャー・ダッシュボード・通知・ロック画面・壁紙・ウィンドウ管理までを、<strong>Zig と Odin で書いた 1 つのプロセス</strong>にまとめました。Qt も GTK も Electron も使いません。</p>
-<p class="hero-cta"><a class="btn primary" href="#/install">インストール</a><a class="btn" href="#/animation">アニメーションを試す</a><a class="btn ghost" href="https://github.com/TatsuyaM2667/ame-shell" target="_blank" rel="noopener">GitHub</a></p>
+<p class="hero-cta"><a class="btn primary" href="#/install">インストール</a><a class="btn" href="#/animation">アニメーションを試す</a><a class="btn ghost" href="https://github.com/TatsuyaM2667/SeoritsuOS" target="_blank" rel="noopener">GitHub</a></p>
 </div>
 <figure class="hero-video"><video src="media/windows.mp4" poster="media/windows.jpg" muted loop playsinline autoplay></video></figure>
 </section>
@@ -61,7 +61,7 @@ ame-shell(雨シェル)は、[River](https://codeberg.org/river/river) の上で
 ## 3 行でインストール {#quick}
 
 ```sh
-git clone https://github.com/TatsuyaM2667/ame-shell && cd ame-shell
+git clone https://github.com/TatsuyaM2667/SeoritsuOS && cd SeoritsuOS
 sh install.sh          # Chimera Linux・Arch Linux・FreeBSD は依存パッケージまで全自動
 ame-update             # 以後の更新(パッケージ + ame-shell 本体)
 ```

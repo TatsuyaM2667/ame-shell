@@ -19,7 +19,7 @@ const std = @import("std");
 const lrc = @import("ame_lib").lrc;
 
 const NONE_MARK = "#none3";
-const UA = "ame-shell (https://github.com/TatsuyaM2667/ame-shell)";
+const UA = "ame-shell (https://github.com/TatsuyaM2667/SeoritsuOS)";
 
 const Opts = struct {
     artist: []const u8 = "",

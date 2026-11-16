@@ -479,7 +479,7 @@ pub fn buildCurlConfig(out: *std.ArrayList(u8), i: usize, url: []const u8, k: ?[
     }
     if (providers[i].proto == .anthropic) try cfgLine(w, "header", "anthropic-version: 2023-06-01");
     if (std.mem.eql(u8, providers[i].id, "openrouter")) {
-        try cfgLine(w, "header", "HTTP-Referer: https://github.com/TatsuyaM2667/ame-shell");
+        try cfgLine(w, "header", "HTTP-Referer: https://github.com/TatsuyaM2667/SeoritsuOS");
         try cfgLine(w, "header", "X-Title: ame-shell");
     }
     if (body_file) |bf| {

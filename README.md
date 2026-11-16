@@ -1,7 +1,7 @@
 # SeoritsuOS
 
 [River](https://isaacfreund.com/software/river/)(Wayland コンポジタ)の上で動く、アニメーション重視のガラス調デスクトップシェル。
-旧名は ame-shell(雨)です。コマンド名(`ame-shell`・`ame-ctl`・`ame-*` の道具)とリポジトリ名は、入れてある環境を壊さないよう、そのままにしています。
+旧名は ame-shell(雨)です。コマンド名(`ame-shell`・`ame-ctl`・`ame-*` の道具)は、入れてある環境を壊さないよう、そのままにしています。リポジトリは SeoritsuOS に変えました(古い ame-shell の URL は GitHub が転送します)。
 caelestia-shell・end-4・ilyamiro の雰囲気を目指しつつ、Quickshell / QML / Qt / Python / C++ を使わず **Zig・Odin・C・WebAssembly** だけで書いています。
 Chimera Linux(musl + dinit)向け。SDDM から選べるセッションつき。
 
@@ -89,7 +89,7 @@ River 0.3 のセッションでも、シェル部分(ドロワー・壁紙・ラ
 ## インストール
 
 ```sh
-git clone https://github.com/TatsuyaM2667/ame-shell && cd ame-shell
+git clone https://github.com/TatsuyaM2667/SeoritsuOS && cd SeoritsuOS
 sh install.sh            # 全ユーザー用(/usr/local + SDDM のセッション)。root 権限は doas / sudo で自動的に
 sh install.sh --user     # 自分だけ(~/.local)。root 不要。SDDM には出ないので TTY から ame-session --river5 で起動
 sh install.sh --uninstall [--user]
@@ -106,7 +106,7 @@ Chimera のリポジトリには River 0.3 が無いので、`install.sh` が Ri
 1. 一般ユーザー(wheel グループ、doas が使える)でログインし、ソースを取ってくる
    ```sh
    doas apk add git
-   git clone https://github.com/TatsuyaM2667/ame-shell && cd ame-shell
+   git clone https://github.com/TatsuyaM2667/SeoritsuOS && cd SeoritsuOS
    ```
 2. `sh install.sh` を実行する。次のことを順に行います
    - **パッケージ**(`doas apk add`): ビルドに要るもの(clang・llvm-devel・linux-headers・pkgconf・wayland / mesa / libdrm / xkbcommon / freetype / harfbuzz / fontconfig / dbus / linux-pam・openssl3 の -devel)、
@@ -145,8 +145,8 @@ Fedora Workstation に入っている tuned-ppd は、power-profiles-daemon と�
 
 試す・自分用に入れる(NixOS 以外の Nix でも):
 ```sh
-nix build github:TatsuyaM2667/ame-shell -L          # ./result にビルドするだけ
-nix profile install github:TatsuyaM2667/ame-shell   # 自分用に入れる
+nix build github:TatsuyaM2667/SeoritsuOS -L          # ./result にビルドするだけ
+nix profile install github:TatsuyaM2667/SeoritsuOS   # 自分用に入れる
 ame-session --river5                                # TTY から起動
 ```
 
@@ -154,7 +154,7 @@ NixOS(`/etc/nixos/flake.nix`):
 ```nix
 {
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  inputs.ame-shell.url = "github:TatsuyaM2667/ame-shell";
+  inputs.ame-shell.url = "github:TatsuyaM2667/SeoritsuOS";
 
   outputs = { nixpkgs, ame-shell, ... }: {
     nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
@@ -220,7 +220,7 @@ ame-update --no-apps  # ame のアプリ(ame-filemanager・kuraokami・seoritsu)
 ### FreeBSD(14 / 15、amd64)
 
 ```sh
-pkg install -y git && git clone https://github.com/TatsuyaM2667/ame-shell && cd ame-shell
+pkg install -y git && git clone https://github.com/TatsuyaM2667/SeoritsuOS && cd SeoritsuOS
 sh install.sh            # = sh scripts/install-freebsd.sh(完全自動)
 ```
 

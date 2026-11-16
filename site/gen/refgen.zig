@@ -7,7 +7,7 @@
 // 出力は Zig のソース(pub const pages = .{ .{ slug, title, src }, ... })で、site.wasm に埋め込まれる。
 const std = @import("std");
 
-const REPO = "https://github.com/TatsuyaM2667/ame-shell/blob/master/";
+const REPO = "https://github.com/TatsuyaM2667/SeoritsuOS/blob/master/";
 
 const Kind = enum { func, type_, constant };
 

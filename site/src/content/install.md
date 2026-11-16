@@ -3,7 +3,7 @@
 どのディストリでも、入れ方は同じです。
 
 ```sh
-git clone https://github.com/TatsuyaM2667/ame-shell && cd ame-shell
+git clone https://github.com/TatsuyaM2667/SeoritsuOS && cd SeoritsuOS
 sh install.sh
 ```
 
@@ -56,7 +56,7 @@ sh scripts/install-apps.sh --uninstall     # この script が入れたものだ
 
 ```sh
 sudo pacman -S --needed git
-git clone https://github.com/TatsuyaM2667/ame-shell && cd ame-shell
+git clone https://github.com/TatsuyaM2667/SeoritsuOS && cd SeoritsuOS
 sh install.sh
 ```
 
@@ -70,7 +70,7 @@ Arch の odin パッケージは root しか書けない場所(`/usr/lib/odin`)�
 
 ```sh
 sudo dnf install git
-git clone https://github.com/TatsuyaM2667/ame-shell && cd ame-shell
+git clone https://github.com/TatsuyaM2667/SeoritsuOS && cd SeoritsuOS
 sh install.sh
 ```
 
@@ -87,11 +87,11 @@ Fedora 44 のコンテナで、`install.sh` が最初から最後まで警告な
 `/usr` に入れる作りではないので、flake(リポジトリの一番上の `flake.nix`)で入れます。
 
 ```sh
-nix build github:TatsuyaM2667/ame-shell -L          # ./result にビルドするだけ
-nix profile install github:TatsuyaM2667/ame-shell   # 自分用に入れる
+nix build github:TatsuyaM2667/SeoritsuOS -L          # ./result にビルドするだけ
+nix profile install github:TatsuyaM2667/SeoritsuOS   # 自分用に入れる
 ```
 
-NixOS では、モジュール `nixosModules.default` を読み、`programs.ame-shell.enable = true;` にします。ログイン画面も SeoritsuOS にするなら `programs.ame-shell.greeter = true;` も書きます。River 0.5・ロック画面の PAM・PipeWire・NetworkManager・フォントなども一緒に入ります。設定の例は [docs/nixos.md](https://github.com/TatsuyaM2667/ame-shell/blob/master/docs/nixos.md) にあります。
+NixOS では、モジュール `nixosModules.default` を読み、`programs.ame-shell.enable = true;` にします。ログイン画面も SeoritsuOS にするなら `programs.ame-shell.greeter = true;` も書きます。River 0.5・ロック画面の PAM・PipeWire・NetworkManager・フォントなども一緒に入ります。設定の例は [docs/nixos.md](https://github.com/TatsuyaM2667/SeoritsuOS/blob/master/docs/nixos.md) にあります。
 
 - ビルドの中身は install.sh と同じです(Zig 0.13 の公式の配布物 + nixpkgs の Odin で `zig build`)。Zig と、`build.zig.zon` の 2 つの依存は flake の入力にしているので、サンドボックスの中でも取りに行きません。
 - 実行時に読むライブラリ(PAM・libmpv・libpulse)は RUNPATH に入れてあります。
@@ -102,7 +102,7 @@ NixOS では、モジュール `nixosModules.default` を読み、`programs.ame-
 
 ```sh
 pkg install git
-git clone https://github.com/TatsuyaM2667/ame-shell && cd ame-shell
+git clone https://github.com/TatsuyaM2667/SeoritsuOS && cd SeoritsuOS
 sh install.sh        # root で。完全自動
 shutdown -r now
 ```

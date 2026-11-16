@@ -61,7 +61,7 @@
           passthru.providedSessions = [ "ame-shell" ];
           meta = {
             description = "River の Wayland シェル(Zig / Odin / WASM)";
-            homepage = "https://github.com/TatsuyaM2667/ame-shell";
+            homepage = "https://github.com/TatsuyaM2667/SeoritsuOS";
             platforms = systems;
             mainProgram = "ame-shell";
           };

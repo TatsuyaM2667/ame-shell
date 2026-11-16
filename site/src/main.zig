@@ -732,7 +732,7 @@ fn renderDoc(src: []const u8, page: Page) void {
                 const loc = a.next() orelse "";
                 const name = trim(a.rest());
                 const colon = std.mem.lastIndexOfScalar(u8, loc, ':') orelse loc.len;
-                raw("<p class=\"codeloc\"><a href=\"https://github.com/TatsuyaM2667/ame-shell/blob/master/");
+                raw("<p class=\"codeloc\"><a href=\"https://github.com/TatsuyaM2667/SeoritsuOS/blob/master/");
                 esc(loc[0..colon]);
                 if (colon < loc.len) {
                     raw("#L");

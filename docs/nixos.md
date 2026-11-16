@@ -10,7 +10,7 @@ NixOS には `/usr` が無く、`/etc` も設定から作られるので、`inst
 ```nix
 {
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  inputs.ame-shell.url = "github:TatsuyaM2667/ame-shell";
+  inputs.ame-shell.url = "github:TatsuyaM2667/SeoritsuOS";
 
   outputs = { nixpkgs, ame-shell, ... }: {
     nixosConfigurations.<ホスト名> = nixpkgs.lib.nixosSystem {
@@ -42,7 +42,7 @@ NixOS には `/usr` が無く、`/etc` も設定から作られるので、`inst
 ## 自分用に入れる(NixOS 以外の Nix も)
 
 ```sh
-nix profile install github:TatsuyaM2667/ame-shell
+nix profile install github:TatsuyaM2667/SeoritsuOS
 ame-session --river5        # TTY から
 ```
 

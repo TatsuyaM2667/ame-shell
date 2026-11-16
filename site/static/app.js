@@ -738,7 +738,7 @@ async function main() {
     render();
   } catch (e) {
     document.getElementById("main").innerHTML =
-      `<h1>読み込めませんでした</h1><p>${esc(String(e))}</p><p>このサイトは WebAssembly を使います。内容は <a href="https://github.com/TatsuyaM2667/ame-shell">GitHub の README</a> でも読めます。</p>`;
+      `<h1>読み込めませんでした</h1><p>${esc(String(e))}</p><p>このサイトは WebAssembly を使います。内容は <a href="https://github.com/TatsuyaM2667/SeoritsuOS">GitHub の README</a> でも読めます。</p>`;
   }
 }
 main();
