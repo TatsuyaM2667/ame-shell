@@ -27,6 +27,7 @@ test {
     _ = @import("cmd/pam.zig");
     _ = @import("auth_helper.zig");
     _ = @import("desktop/cliphist.zig");
+    _ = @import("desktop/fm1.zig");
     _ = @import("core/events.zig");
 }
 

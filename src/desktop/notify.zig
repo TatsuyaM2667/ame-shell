@@ -241,6 +241,8 @@ pub const Notifs = struct {
         } else {
             self.owner = true;
         }
+        // ブラウザの「フォルダを開く」を ame-filemanager で(fm1.zig)
+        @import("fm1.zig").claim(conn);
         var fd: c_int = -1;
         if (c.dbus_connection_get_unix_fd(conn, &fd) != 0 and fd >= 0) {
             self.dbus_fd = fd;
@@ -265,6 +267,7 @@ pub const Notifs = struct {
             defer c.dbus_message_unref(msg);
             // ファイル選択の画面(xdg-desktop-portal)の返事は同じ接続に届く
             if (@import("portal.zig").handle(self.app, msg)) continue;
+            if (@import("fm1.zig").handle(conn, msg)) continue;
             self.handleMessage(msg);
         }
         c.dbus_connection_flush(conn);
