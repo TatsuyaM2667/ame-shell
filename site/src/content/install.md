@@ -43,11 +43,11 @@ sh install.sh --ghostty     # 端末 ghostty もビルドする(既定は ame �
 
 ```sh
 sh scripts/install-apps.sh                 # ame-shell が決めた版で入れる(名前を並べるとそれだけ)
-sh scripts/install-apps.sh --latest        # 決めた版ではなく最新を入れる
+sh scripts/install-apps.sh --latest        # 決めた版ではなく GitHub の最新を入れる(ame-update はこちら)
 sh scripts/install-apps.sh --uninstall     # この script が入れたものだけ外す
 ```
 
-自分で入れたもの(同じ名前のコマンドが `~/.local/bin` にあり、この script が入れたのでないもの)は上書きしません。どれかが作れなくても、ほかは続けます。
+自分で入れたもの(同じ名前のコマンドが `~/.local/bin` にあり、この script が入れたのでないもの)は上書きしません。ただし `--latest`(ame-update)のときは、ふつうのファイルなら最新に入れ替えます。開発中のフォルダへのリンクには触りません。どれかが作れなくても、ほかは続けます。くわしくは [ame のアプリ](#/apps)。
 
 - どのユーザーが実行してもかまいません。root の権限が必要なところだけ、doas か sudo を使います。どちらも無い人は、自動で `--user` になります。
 - インストールせずに試す: `PATH=$PWD/zig-out/bin:$PATH AME_SESSION_NESTED=1 session/ame-session --river5`(今のセッションの中に窓として開きます)
@@ -63,6 +63,40 @@ sh install.sh
 1. 公式リポジトリから pacman で入れます(River 0.5・Odin・wlroots 0.20 も公式にあります)。パッケージ名は Arch の core / extra のデータベースで確認しています。
 2. sddm・NetworkManager・bluetooth を有効にします。すでに別のログイン画面(gdm など)が有効なら、そのままにします。
 3. Zig だけは 0.13 が必要なので、公式の配布物を `~/.cache/ame-shell` に取ってきます(Arch の zig は新しすぎるため)。
+
+Arch の odin パッケージは root しか書けない場所(`/usr/lib/odin`)にあり、kuraokami のビルドが使う部品(kb_text_shape)をそこに作れません。そのため、自分用の Odin の置き場(`~/.cache/ame-shell/toolchain/odin-root`。中身はリンク)を作って使います。
+
+## Fedora {#fedora}
+
+```sh
+sudo dnf install git
+git clone https://github.com/TatsuyaM2667/ame-shell && cd ame-shell
+sh install.sh
+```
+
+`install.sh` が Fedora(と Fedora 系)を見分けて、`scripts/install-fedora.sh` を使います。
+
+1. 公式リポジトリから dnf で入れます。River 0.5 と wlroots 0.20 も公式にあります(パッケージ名は Fedora 44 で確認しています)。
+2. Odin は Fedora に無いので、clang と llvm-devel でソースからビルドします(数分)。
+3. Fedora Workstation の tuned-ppd は power-profiles-daemon と同じ窓口を持つので、入っていればそのまま使います。
+
+Fedora 44 のコンテナで、`install.sh` が最初から最後まで警告なしで通ることを確かめています。
+
+## NixOS / Nix {#nixos}
+
+`/usr` に入れる作りではないので、flake(リポジトリの一番上の `flake.nix`)で入れます。
+
+```sh
+nix build github:TatsuyaM2667/ame-shell -L          # ./result にビルドするだけ
+nix profile install github:TatsuyaM2667/ame-shell   # 自分用に入れる
+```
+
+NixOS では、モジュール `nixosModules.default` を読み、`programs.ame-shell.enable = true;` にします。ログイン画面も SeoritsuOS にするなら `programs.ame-shell.greeter = true;` も書きます。River 0.5・ロック画面の PAM・PipeWire・NetworkManager・フォントなども一緒に入ります。設定の例は [docs/nixos.md](https://github.com/TatsuyaM2667/ame-shell/blob/master/docs/nixos.md) にあります。
+
+- ビルドの中身は install.sh と同じです(Zig 0.13 の公式の配布物 + nixpkgs の Odin で `zig build`)。Zig と、`build.zig.zon` の 2 つの依存は flake の入力にしているので、サンドボックスの中でも取りに行きません。
+- 実行時に読むライブラリ(PAM・libmpv・libpulse)は RUNPATH に入れてあります。
+- nixos/nix のコンテナで `nix build` が通り、道具が動くことを確かめています。
+- 更新は `nix flake update` のあと `nixos-rebuild switch`(自分用なら `nix profile upgrade ame-shell`)です。`ame-update` は使いません。
 
 ## FreeBSD {#freebsd}
 
@@ -81,6 +115,7 @@ FreeBSD のインストーラは次のことまで行います。
 - **顔認証**: ロック画面の顔認証は Linux と同じように使えます(パスワードの照合は setuid の ame-auth、カメラは webcamd。赤外線カメラが要ります)。ログイン画面での顔認証は greetd のとき(`sh scripts/greeter-setup.sh`)だけで、PAM モジュール `pam_ame_face.so` を OpenPAM に組み込みます(`/etc/pam.d/ame-greetd` と `/usr/local/etc/pam.d/ame-greetd`)。SDDM では使えません。
 - **音質**: PulseAudio のサンプリング周波数の変換を高品質に(`~/.config/pulse/daemon.conf` が無いときだけ)。
 - **ツールチェイン**: Zig 0.13 と Odin をソースからビルドします(FreeBSD のパッケージに無いため)。
+- **ame のアプリ**: ame-filemanager・kuraokami・seoritsu も入れます。Odin は root がビルドしたもの(`/usr/local/ame-toolchain`)なので、kuraokami の部品は自分用の Odin の置き場に作ります。SDL3・freetype・fontconfig は `/usr/local/lib` のものを使います。
 - **タッチパッド**: I2C(ig4・iichid・hmt)と PS/2(psm の Synaptics / Elantech)の設定をします。
 - **Bluetooth**: ファームウェア(Realtek / Intel)・ng_ubt・hcsecd・sdpd・bthidd を設定します。
 - **見た目**: foot と fastfetch の設定、SDDM のテーマ(背景は自分の壁紙)。
@@ -109,7 +144,7 @@ FreeBSD のインストーラは次のことまで行います。
 ## 更新 {#update}
 
 ```sh
-ame-update            # OS のパッケージ(pkg / apk)→ ame-shell(git pull → ビルド → 入れ直し)→ 動いている ame-shell を再起動
+ame-update            # OS のパッケージ(pkg / apk / pacman / dnf)→ ame-shell(git pull → ビルド → 入れ直し)→ ame のアプリを最新に → 動いている ame-shell を再起動
 ame-update --check    # 更新があるかを見るだけ
 ame-update --no-pkg   # ame-shell だけ(--no-self でパッケージだけ)
 ```
@@ -117,6 +152,7 @@ ame-update --no-pkg   # ame-shell だけ(--no-self でパッケージだけ)
 - ランチャーで `>` →「アップデート」からも実行できます。
 - 動いている ame-shell は、**窓とワークスペースをそのまま**新しい版に入れ替わります(`ame-ctl restart`)。
 - ソースに自分の変更があるときは `git pull` をせず、今のソースでビルドします。
+- ame のアプリ(ame-filemanager・kuraokami・seoritsu)は GitHub の最新にします。最新がもう入っていれば作り直しません。`ame-update --no-apps` で、アプリには触りません。
 
 ## うまくいかないとき {#trouble}
 

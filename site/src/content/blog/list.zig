@@ -13,4 +13,5 @@ pub const items = .{
     .{ "blog/2026-11-02-ripple", "ロック画面の波紋と、紙のようにたわむ窓", "2026-11-02", @embedFile("2026-11-02-ripple.md") },
     .{ "blog/2026-11-11-memory", "メモリが返ってこない: libc の mimalloc と、消されない GPU の同期オブジェクト", "2026-11-11", @embedFile("2026-11-11-memory.md") },
     .{ "blog/2026-11-14-kami", "道具に神々の名前を: curl も wf-recorder も swaylock もやめた", "2026-11-14", @embedFile("2026-11-14-kami.md") },
+    .{ "blog/2026-11-17-dwindle", "名前を SeoritsuOS に。窓は波紋で開き、フォーカスはカーソルの下へ", "2026-11-17", @embedFile("2026-11-17-dwindle.md") },
 };

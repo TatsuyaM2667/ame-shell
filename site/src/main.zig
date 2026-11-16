@@ -50,6 +50,7 @@ const base_pages = [_]Page{
     d("", "ホーム", @embedFile("content/home.md")),
     d("animation", "アニメーション", @embedFile("content/animation.md")),
     d("shell", "シェルの機能", @embedFile("content/shell.md")),
+    d("apps", "ame のアプリ", @embedFile("content/apps.md")),
     d("performance", "性能", @embedFile("content/performance.md")),
     d("compare", "ほかの WM と比較", @embedFile("content/compare.md")),
     d("install", "インストール", @embedFile("content/install.md")),

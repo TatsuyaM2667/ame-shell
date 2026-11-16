@@ -5,19 +5,20 @@
 | キー | 動作 |
 |---|---|
 | Super(単独で押して離す)/ Super+D | ランチャー |
-| Super+Return / Super+T | 端末(foot) |
+| Super+Return / Super+T | 端末(kuraokami。無ければ ghostty、foot) |
 | Super+A / Super+N / Super+U | ダッシュボード / 通知センター / ユーティリティ |
 | Super+C | AI チャット(右から生えるパネル) |
 | Super+Escape | セッション(ロック・ログアウト・再起動・電源オフ。危険な操作は 2 回押し) |
 | Super+L | ロック |
 | Super+Shift+W | 壁紙ピッカー |
 | Super+Q / Super+F / Super+Space | 閉じる / 全画面 / 浮かせる |
-| Super+J・K / Super+Shift+J・K | フォーカスの移動 / 窓の入れ替え |
-| Super+Ctrl+H・L | 左右の比率 |
+| Super+J・K / Super+Shift+J・K | フォーカスの移動 / 窓の入れ替え(並び順) |
+| Super+矢印 / Super+Shift+矢印 | その向きの窓へフォーカス / その向きの窓と入れ替え(Hyprland の movefocus・movewindow) |
+| Super+Ctrl+H・L / Super+Ctrl+J | フォーカス中の窓のいる分け目の比率 / 分け目の向きを逆に(左右 ⇔ 上下) |
 | Super+1〜9 / Super+Shift+1〜9 / Super+Alt+1〜9 | ワークスペースの切り替え / 窓を移動 / 窓を移動して自分も移る |
 | Super+Ctrl+1〜9 | ワークスペースの表示を足す |
 | Super+P / Super+Shift+P | スクラッチパッド |
-| Super+ドラッグ(左 / 右)/ Super+中クリック | 移動 / 大きさの変更 / 浮かせる |
+| Super+ドラッグ(左 / 右)/ Super+中クリック | 移動 / 大きさの変更(タイルの窓はタイルのまま、近い辺の分け目を動かす) / 浮かせる |
 | Super+Alt+ドラッグ | タイルのまま動かす(重ねたタイルと入れ替え・別の画面へ) |
 | Print / Shift+Print | 範囲 / 全画面のスクリーンショット(`~/Pictures/Screenshots` とクリップボード) |
 | 音量・明るさ・メディアキー | OSD つき |
@@ -128,6 +129,8 @@ ame-shell と一緒に入る、端末からも使える道具です(詳しくは
 | `AME_VIDEO_BACKEND=ffmpeg` | 動画の壁紙を libmpv ではなく ffmpeg で再生する |
 | `AME_OUTPUT_SCALE` | 画面の拡大率(`1.5` や `eDP-1 1.5`、`off` で自動設定なし) |
 | `AME_FASTFETCH=0` | 端末を開いたときの fastfetch を出さない |
+| `AME_OPEN_RIPPLE=0` | アプリを開くときの水の波紋をやめる(中心から広がるふつうの開き方) |
+| `AME_WOBBLE=0` | 浮いた窓をつかんだときの、紙のようにたわむ動きをやめる |
 | `AME_OS_ID` | バーのロゴを決める OS の ID を上書き(試験用) |
 | `AME_RIVER5` | River 0.5 の場所 |
 | `AME_SOURCE` | `ame-update` が使うソースの場所 |
