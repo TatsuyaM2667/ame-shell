@@ -120,7 +120,8 @@ fn loadUsers() void {
 
 fn loadSessions() void {
     st.n_sessions = 0;
-    for ([_][]const u8{ "/usr/local/share/wayland-sessions", "/usr/share/wayland-sessions" }) |d| {
+    // NixOS は /usr が無く、システムのパッケージの共有ファイルは /run/current-system/sw/share
+    for ([_][]const u8{ "/usr/local/share/wayland-sessions", "/usr/share/wayland-sessions", "/run/current-system/sw/share/wayland-sessions" }) |d| {
         var dir = std.fs.cwd().openDir(d, .{ .iterate = true }) catch continue;
         defer dir.close();
         var it = dir.iterate();

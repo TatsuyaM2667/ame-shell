@@ -10,6 +10,7 @@ pub const weather = @import("weather.zig");
 pub const aap = @import("aap.zig");
 pub const secretstore = @import("secretstore.zig");
 pub const paths = @import("paths.zig");
+pub const pixels = @import("pixels.zig");
 
 test {
     _ = lrc;
@@ -22,4 +23,5 @@ test {
     _ = aap;
     _ = secretstore;
     _ = paths;
+    _ = pixels;
 }

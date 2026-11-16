@@ -64,9 +64,9 @@ pub fn prepare() Prepared {
         "swaylock"
     else
         return .{ .err = "PAM サービス ame-shell が未インストールです(install-session.sh を実行してください)" };
-    // pam_unix はパスワード照合に setuid の unix_chkpwd を使う
+    // pam_unix はパスワード照合に setuid の unix_chkpwd を使う(NixOS は /run/wrappers/bin の setuid の包み)
     var found = false;
-    for ([_][*:0]const u8{ "/usr/bin/unix_chkpwd", "/usr/sbin/unix_chkpwd", "/sbin/unix_chkpwd" }) |p| {
+    for ([_][*:0]const u8{ "/usr/bin/unix_chkpwd", "/usr/sbin/unix_chkpwd", "/sbin/unix_chkpwd", "/run/wrappers/bin/unix_chkpwd" }) |p| {
         const st = std.posix.fstatatZ(std.posix.AT.FDCWD, p, 0) catch continue;
         if (st.mode & std.posix.S.ISUID != 0) found = true;
     }

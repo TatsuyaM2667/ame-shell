@@ -12,6 +12,7 @@ const anim = @import("../gfx/anim.zig");
 const Color = anim.Color;
 const Spring = anim.Spring;
 const gfx = @import("../gfx/gfx.zig");
+const pixels = @import("ame_lib").pixels;
 const theme = @import("../gfx/theme.zig");
 const appmod = @import("../core/app.zig");
 const App = appmod.App;
@@ -367,6 +368,10 @@ pub const Wallpaper = struct {
             return;
         };
         defer c.stbi_image_free(px);
+        // 画面より 2 倍以上大きい画像は半分ずつ縮めてから(見た目は同じで、テクスチャのメモリが 1/4 ずつ減る)
+        const sz = self.out.logicalSize();
+        const sc: c_int = @max(self.out.scale, 1);
+        for (0..pixels.halvings(w, h, @as(c_int, @intCast(sz[0])) * sc, @as(c_int, @intCast(sz[1])) * sc)) |_| pixels.halveInPlace(px, &w, &h);
         self.app.gpu.makeCurrent(self.surf.egl_surf);
         self.img = .{ .tex = gfx.uploadImage(px, w, h), .w = @floatFromInt(w), .h = @floatFromInt(h) };
         // 壁紙の色から配色を作る(アクセント・ガラス・文字色が壁紙に合わせて滑らかに変わる)

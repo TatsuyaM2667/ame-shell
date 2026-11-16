@@ -1,0 +1,91 @@
+{
+  "nodes": {
+    "ame-kagami": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1793767432,
+        "narHash": "sha256-wjVQWvnMctXy13vAb4IRg1spQh5doQi7nxlhtDfTGT8=",
+        "owner": "TatsuyaM2667",
+        "repo": "ame-kagami",
+        "rev": "bcef91268096a48b0c64707248db08d745679c19",
+        "type": "github"
+      },
+      "original": {
+        "owner": "TatsuyaM2667",
+        "repo": "ame-kagami",
+        "rev": "bcef91268096a48b0c64707248db08d745679c19",
+        "type": "github"
+      }
+    },
+    "ame-senju": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1793767396,
+        "narHash": "sha256-aov0vUt2xlNTrxOjAsCuXunXGMo4tBZzwoqFSSu+kDI=",
+        "owner": "TatsuyaM2667",
+        "repo": "ame-senju",
+        "rev": "cc31453eee6c24b7a99dec670f06334b4f47d111",
+        "type": "github"
+      },
+      "original": {
+        "owner": "TatsuyaM2667",
+        "repo": "ame-senju",
+        "rev": "cc31453eee6c24b7a99dec670f06334b4f47d111",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1794537146,
+        "narHash": "sha256-Wpz/7x/YWnDIBu7yj6ixe8j6fIMsidd9Y+o1PqPF3iM=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "d5cc6833999746cffdfe0598f7bc801a57b887a9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "ame-kagami": "ame-kagami",
+        "ame-senju": "ame-senju",
+        "nixpkgs": "nixpkgs",
+        "zig-aarch64-linux": "zig-aarch64-linux",
+        "zig-x86_64-linux": "zig-x86_64-linux"
+      }
+    },
+    "zig-aarch64-linux": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1717728681,
+        "narHash": "sha256-sCRd9ZzmbzS9X/7fszuMF28NH8wVhgbRAwKeUaaGpVg=",
+        "type": "tarball",
+        "url": "https://ziglang.org/download/0.13.0/zig-linux-aarch64-0.13.0.tar.xz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://ziglang.org/download/0.13.0/zig-linux-aarch64-0.13.0.tar.xz"
+      }
+    },
+    "zig-x86_64-linux": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1717728680,
+        "narHash": "sha256-QguwBFbDQDc6ZAHLX3iNKgQ4VTKG3NsOJuXfaMSUmwU=",
+        "type": "tarball",
+        "url": "https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

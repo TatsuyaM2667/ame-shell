@@ -10,7 +10,7 @@
 #   ame-update --debug     デバッグ情報つきでビルド(--debug で入れた場合の更新はこちら)
 #   ame-update --yes       確認しない
 #
-# 対応: FreeBSD(pkg)と Chimera Linux(apk)。ほかのディストリはパッケージの更新だけ飛ばす。
+# 対応: FreeBSD(pkg)・Chimera Linux(apk)・Arch 系(pacman)・Fedora 系(dnf)。ほかのディストリはパッケージの更新だけ飛ばす。
 # root が必要な作業は doas → sudo → su の順に使える方で行う(パスワードを聞かれる)。
 
 set -u
@@ -48,6 +48,10 @@ confirm() {
 OS=$(uname -s)
 OS_ID=""
 [ -f /etc/os-release ] && OS_ID=$(. /etc/os-release 2>/dev/null; echo "${ID:-}")
+if [ "$OS_ID" = nixos ]; then
+    echo "NixOS では flake で更新してください: nix flake update して nix profile upgrade ame-shell(システムに入れたなら nixos-rebuild switch)" >&2
+    exit 1
+fi
 
 # ---- root で実行する(doas → sudo → su) ----
 as_root() {
@@ -91,9 +95,9 @@ if [ "$DO_PKG" = 1 ]; then
         elif confirm "パッケージを更新しますか?"; then
             as_root pkg upgrade -y || info "pkg upgrade に失敗しました(続けます)"
         fi
-        # 後から使うようになったもの(fastfetch: 端末を開いたときの表示、wlr-randr: 画面の拡大率、wf-recorder: 録画、mpv・ffmpeg: 動画の壁紙)
+        # 後から使うようになったもの(fastfetch: 端末を開いたときの表示、wlr-randr: 画面の拡大率、mpv: 動画の壁紙、ffmpeg: 録画(ame-rec)と動画の壁紙)
         missing=""
-        for p in fastfetch wlr-randr wf-recorder mpv ffmpeg; do pkg info -e "$p" || missing="$missing $p"; done
+        for p in fastfetch wlr-randr mpv ffmpeg; do pkg info -e "$p" || missing="$missing $p"; done
         if [ -n "$missing" ] && [ "$CHECK" = 0 ]; then
             info "追加のパッケージ:$missing"
             as_root pkg install -y $missing || info "pkg install に失敗しました(続けます)"
@@ -104,6 +108,18 @@ if [ "$DO_PKG" = 1 ]; then
             apk upgrade --simulate 2>/dev/null | sed 's/^/    /' || true
         elif confirm "パッケージを更新しますか?"; then
             as_root apk upgrade || info "apk upgrade に失敗しました(続けます)"
+        fi
+    elif command -v pacman >/dev/null 2>&1; then
+        if [ "$CHECK" = 1 ]; then
+            command -v checkupdates >/dev/null 2>&1 && { checkupdates 2>/dev/null | sed 's/^/    /' || info "パッケージは最新です"; }
+        elif confirm "パッケージを更新しますか?"; then
+            as_root pacman -Syu || info "pacman -Syu に失敗しました(続けます)"
+        fi
+    elif command -v dnf >/dev/null 2>&1; then
+        if [ "$CHECK" = 1 ]; then
+            dnf -q check-upgrade 2>/dev/null | sed 's/^/    /' || true
+        elif confirm "パッケージを更新しますか?"; then
+            as_root dnf upgrade || info "dnf upgrade に失敗しました(続けます)"
         fi
     else
         info "このディストリのパッケージ更新には対応していません(手動で更新してください)"

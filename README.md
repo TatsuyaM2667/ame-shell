@@ -92,7 +92,7 @@ sh install.sh --user     # 自分だけ(~/.local)。root 不要。SDDM には出
 sh install.sh --uninstall [--user]
 ```
 
-`install.sh` が依存パッケージ(Chimera Linux は apk、Arch 系は pacman で自動。他のディストリは足りないものを表示)、Zig 0.13、Odin、River(無ければ River 0.5 をソースから)、ame-shell のビルドとインストールまで行います。
+`install.sh` が依存パッケージ(Chimera Linux は apk、Arch 系は pacman、Fedora 系は dnf で自動。他のディストリは足りないものを表示。NixOS は flake)、Zig 0.13、Odin、River(無ければ River 0.5 をソースから)、ame-shell のビルドとインストールまで行います。
 どのユーザーが実行しても構いません。doas / sudo が使えない人は自動で `--user` になります。全ユーザー用では、自分でビルドした River 0.5(`~/.local/opt/river-0.5`)も `/usr/local/opt` にコピーされ、他のアカウントからも River 0.5 のセッションが使えます。
 ファイルマネージャ・端末・コードエディタは ame のアプリ(ame-filemanager・kuraokami・seoritsu)を GitHub から取ってきてビルドし、`~/.local` に入れます(下の「ame のアプリ」)。
 
@@ -130,6 +130,17 @@ doas apk add greetd greetd-dinit ffmpeg mpv-libs libpulse sdl3 libarchive-progs 
 ### Arch Linux
 `sh install.sh` が Arch(と EndeavourOS / Manjaro など Arch 系)を見つけると `scripts/install-arch.sh` を使います。River 0.5・Odin・wlroots 0.20 も公式リポジトリにあるので、pacman で入れて(AUR は使いません)、sddm・NetworkManager・bluetooth を有効にし(ほかのログイン画面が有効ならそのまま)、ame-shell をビルドしてインストールします。Zig だけは 0.13 が必要なので公式の配布物を `~/.cache` に取ってきます。
 Bluetooth のイヤホンの音には `pipewire-audio`、バーのアイコンには `ttf-nerd-fonts-symbols` が要ります(どちらもインストーラが入れます)。PipeWire のユーザーサービスは `systemctl --user` で確かめます。
+
+### Fedora
+`sh install.sh` が Fedora(と Fedora 系)を見つけると `scripts/install-fedora.sh` を使います。River 0.5 と wlroots 0.20 は公式リポジトリにあるので、dnf で入れます。そのあと NetworkManager と bluetooth を有効にし、ame-shell をビルドしてインストールします。
+Odin は Fedora に無いので、clang と llvm-devel でソースからビルドします(数分)。Zig 0.13 は公式の配布物を `~/.cache` に取ってきます。
+Fedora Workstation に入っている tuned-ppd は、power-profiles-daemon と同じ窓口を持っています。入っていればそれをそのまま使います。
+
+### NixOS / Nix
+`/usr` に入れる作りではないので、flake(`flake.nix`)で入れます。NixOS ではモジュールを読み、`programs.ame-shell.enable = true;` にします。ログイン画面も ame-shell にするなら `programs.ame-shell.greeter = true;` も書きます。くわしくは [docs/nixos.md](docs/nixos.md) にあります。
+```sh
+nix profile install github:TatsuyaM2667/ame-shell   # 自分用(NixOS 以外の Nix でも)
+```
 
 ### 画面の拡大率・端末
 - **拡大率は自動**(River 0.5 のセッション、`wlr-randr` を使用): 画素の細かさを作者の環境(14 インチ 1920x1200、拡大率 1)と比べて 0.25 刻みで決めます。ふつうの画面は 1 のまま、14 インチ 2880x1800 なら 1.5、13 インチ 4K なら 2。

@@ -20,7 +20,7 @@ USER_MODE=0
 for a in "$@"; do
     case "$a" in
         --user) USER_MODE=1; FWD="$FWD --user" ;;
-        --yes|-y|--debug|--no-river|--mozc|--cleanup) FWD="$FWD $a" ;;
+        --yes|-y|--debug|--no-river|--mozc|--cleanup|--no-apps) FWD="$FWD $a" ;;
         -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
         *) die "不明なオプション: $a" ;;
     esac
@@ -97,4 +97,4 @@ fi
 
 say "3/3 ame-shell のビルドとインストール"
 # shellcheck disable=SC2086
-AME_FROM_ARCH=1 exec sh "$REPO/install.sh" --no-deps $FWD
+AME_FROM_DISTRO=1 exec sh "$REPO/install.sh" --no-deps $FWD

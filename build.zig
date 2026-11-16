@@ -345,7 +345,9 @@ pub fn build(b: *std.Build) void {
     // 生成器がリンクできない。その OS の上でビルドすれば作られる)
     const cross_libc = b.libc_file != null and target.result.os.tag != b.graph.host.result.os.tag;
     if (!cross_libc) {
-        const cursorgen = b.addExecutable(.{ .name = "cursorgen", .root_source_file = b.path("tools/cursorgen.zig"), .target = b.graph.host, .optimize = .ReleaseFast });
+        // Linux では Zig 同梱の musl で静的に(手元の glibc の版を見ない。Nix のサンドボックスには /usr/bin/env が無く、版を誤る)
+        const gen_target = if (b.graph.host.result.os.tag == .linux) b.resolveTargetQuery(.{ .abi = .musl }) else b.graph.host;
+        const cursorgen = b.addExecutable(.{ .name = "cursorgen", .root_source_file = b.path("tools/cursorgen.zig"), .target = gen_target, .optimize = .ReleaseFast });
         cursorgen.linkLibC();
         cursorgen.addIncludePath(b.path("third_party"));
         cursorgen.addCSourceFile(.{ .file = b.path("third_party/nanosvg_impl.c"), .flags = &.{ "-O2", "-fno-sanitize=undefined" } });

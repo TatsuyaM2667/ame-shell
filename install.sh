@@ -74,14 +74,22 @@ if [ "$UNINSTALL" = 1 ]; then
     exec sh "$REPO/session/install-session.sh" --uninstall
 fi
 
-# ---- Arch 系(Arch / EndeavourOS / Manjaro など)は専用スクリプトで pacman から依存を入れる ----
+# ---- NixOS: /usr に入れる作りではないので、flake(flake.nix)で入れる ----
+if grep -qE '^ID="?nixos"?$' /etc/os-release 2>/dev/null; then
+    die "NixOS では install.sh ではなく flake を使ってください(docs/nixos.md):
+  nix profile install .   # 自分用。ロック画面とログイン画面は configuration.nix で nixosModules.default を読む"
+fi
+
+# ---- Arch 系・Fedora 系は専用スクリプトで公式のパッケージから依存を入れる ----
 # (そのスクリプトが最後に install.sh --no-deps を呼び戻す)
-if [ "$NO_DEPS" = 0 ] && [ -z "${AME_FROM_ARCH:-}" ] && command -v pacman >/dev/null 2>&1 &&
-    { grep -qE '^ID="?arch"?$' /etc/os-release 2>/dev/null || grep -qE '^ID_LIKE=.*arch' /etc/os-release 2>/dev/null; }; then
+os_is() { grep -qE "^ID=\"?$1\"?\$|^ID_LIKE=.*$1" /etc/os-release 2>/dev/null; }
+if [ "$NO_DEPS" = 0 ] && [ -z "${AME_FROM_DISTRO:-}" ]; then
     fwd=""
     [ "$USER_MODE" = 1 ] && fwd="--user"
     # shellcheck disable=SC2086  # FWD は空白区切りのオプション
-    exec sh "$REPO/scripts/install-arch.sh" $fwd $FWD
+    if command -v pacman >/dev/null 2>&1 && os_is arch; then exec sh "$REPO/scripts/install-arch.sh" $fwd $FWD; fi
+    # shellcheck disable=SC2086
+    if command -v dnf >/dev/null 2>&1 && os_is fedora; then exec sh "$REPO/scripts/install-fedora.sh" $fwd $FWD; fi
 fi
 
 # ---- root 権限で実行する手段(root なら不要、無ければ doas / sudo、どれも無ければ不可) ----

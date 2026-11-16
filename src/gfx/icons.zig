@@ -255,7 +255,7 @@ fn isBlank(px: [*]const u8, n: usize) bool {
 pub fn quickFind(name: []const u8, buf: []u8) ?[:0]const u8 {
     const cands = [_][]const u8{ "scalable/apps", "128x128/apps", "64x64/apps", "256x256/apps", "48x48/apps" };
     const exts = [_][]const u8{ "svg", "png", "png", "png", "png" };
-    for ([_][]const u8{ "/usr/share", "/usr/local/share" }) |root| {
+    for ([_][]const u8{ "/usr/share", "/usr/local/share", "/run/current-system/sw/share" }) |root| {
         for (cands, exts) |d, e| {
             const p = std.fmt.bufPrintZ(buf, "{s}/icons/hicolor/{s}/{s}.{s}", .{ root, d, name, e }) catch continue;
             if (c.access(p.ptr, c.R_OK) == 0) return p;
