@@ -138,9 +138,38 @@ Fedora Workstation に入っている tuned-ppd は、power-profiles-daemon と�
 
 ### NixOS / Nix
 `/usr` に入れる作りではないので、flake(`flake.nix`)で入れます。NixOS ではモジュールを読み、`programs.ame-shell.enable = true;` にします。ログイン画面も ame-shell にするなら `programs.ame-shell.greeter = true;` も書きます。くわしくは [docs/nixos.md](docs/nixos.md) にあります。
+リポジトリの一番上の [`flake.nix`](flake.nix) が、パッケージ(`packages.<system>.default`)と NixOS のモジュール(`nixosModules.default`)を出します。使う nixpkgs と Zig 0.13 の版は `flake.lock` で決まっています。
+
+試す・自分用に入れる(NixOS 以外の Nix でも):
 ```sh
-nix profile install github:TatsuyaM2667/ame-shell   # 自分用(NixOS 以外の Nix でも)
+nix build github:TatsuyaM2667/ame-shell -L          # ./result にビルドするだけ
+nix profile install github:TatsuyaM2667/ame-shell   # 自分用に入れる
+ame-session --river5                                # TTY から起動
 ```
+
+NixOS(`/etc/nixos/flake.nix`):
+```nix
+{
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.ame-shell.url = "github:TatsuyaM2667/ame-shell";
+
+  outputs = { nixpkgs, ame-shell, ... }: {
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        ./configuration.nix
+        ame-shell.nixosModules.default
+        {
+          programs.ame-shell.enable = true;   # ame-shell・River・PAM(ロック画面)・PipeWire・NetworkManager など
+          programs.ame-shell.greeter = true;  # ログイン画面も ame-shell(greetd)に
+        }
+      ];
+    };
+  };
+}
+```
+`sudo nixos-rebuild switch --flake /etc/nixos#myhost` で入ります。更新は `nix flake update ame-shell` してから、同じ `nixos-rebuild` をもう一度実行します(`ame-update` は NixOS では使いません)。
+自分用に入れただけではロック画面の PAM が作られないので、NixOS では `security.pam.services.ame-shell = {};` を書いてください。
 
 ### 画面の拡大率・端末
 - **拡大率は自動**(River 0.5 のセッション、`wlr-randr` を使用): 画素の細かさを作者の環境(14 インチ 1920x1200、拡大率 1)と比べて 0.25 刻みで決めます。ふつうの画面は 1 のまま、14 インチ 2880x1800 なら 1.5、13 インチ 4K なら 2。
